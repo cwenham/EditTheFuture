@@ -296,6 +296,8 @@ Type or say "what if rates drop to 3% next June?" and get a structured event pre
 
 ## 9. User interface
 
+The detailed UI design (visual language, layouts, input, interactions, accessibility) is in [UI.md](UI.md), with mockups on the design canvas linked there. This section is the summary.
+
 ### 9.1 The Mac panel
 
 - An `NSPanel` that doesn't steal focus, floats above normal windows, and joins all Spaces including full-screen ones (`.canJoinAllSpaces` and `.fullScreenAuxiliary`).
@@ -499,6 +501,9 @@ In suggested order:
 ## 19. Code map
 
 ```
+docs/
+  DESIGN.md          this document
+  UI.md              UI design and mockup index
 Package.swift
 Sources/
   FutureEngine/      time grids, events, variables, TimelineModel, Scenario (coordinator), goal seek
