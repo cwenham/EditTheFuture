@@ -521,9 +521,11 @@ In suggested order:
 ## 19. Code map
 
 ```
+CLAUDE.md            briefing loaded by Claude Code sessions
 docs/
   DESIGN.md          this document
   UI.md              UI design and mockup index
+  HANDOFF.md         where the work stands, for the next session
 Package.swift
 Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), goal seek
