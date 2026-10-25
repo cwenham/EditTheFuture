@@ -301,8 +301,8 @@ The detailed UI design (visual language, layouts, input, interactions, accessibi
 ### 9.1 The Mac panel
 
 - An `NSPanel` that doesn't steal focus, floats above normal windows, and joins all Spaces including full-screen ones (`.canJoinAllSpaces` and `.fullScreenAuxiliary`).
-- Translucent material background with an opacity control. The graph dominates the window.
-- **Click-through mode** (`ignoresMouseEvents`) lets it sit over your work like a heads-up display until summoned.
+- Translucent material background with an opacity control. The graph dominates the window and grows with it.
+- Moves only by dragging its top bar. There's no click-through mode: it was dropped as unnecessary, since the panel hides with Esc or the hot-key.
 
 ### 9.2 Summon, dismiss and peek
 

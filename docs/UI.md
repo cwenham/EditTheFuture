@@ -8,8 +8,8 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 |---|---|
 | Mac panel (interactive) | The floating panel over another app: slot chips, focused graph with bands, readings, events, now line, drift pill, lanes, command bar |
 | Drag the future | Target handle, proposed path, ranked fixes |
-| Add an event | Popover at the cursor, natural-language field answered by the paired iPhone, manual form, live preview |
-| Glance | Click-through HUD pinned over a spreadsheet, hardware wheel toast |
+| Add an event | Earlier popover design, since replaced by the docked add-event pane (section 5.3) |
+| Glance | Compact HUD pinned over a spreadsheet, hardware wheel toast (the mockup still labels it click-through, which has since been dropped) |
 | Slot inspector | Formula editor with a same-step loop error and quick fix, links view with the loop highlighted |
 | Menu bar item | Values now and at a pinned date, quick actions, controller and iPhone status |
 | Settings | Controllers and paired devices |
@@ -80,12 +80,14 @@ The default color comes from the slot's position and matches the hardware LED fo
 **Window:**
 - An `NSPanel` (non-activating, floating level, `.canJoinAllSpaces`, `.fullScreenAuxiliary`), hosting SwiftUI.
 - Material background with the opacity from section 2.1. Corner radius 14.
-- Default size 1180×760. Resizable; the frame is remembered per display.
+- Default size 1400×820, minimum 1100×600. Resizable; the frame is remembered per display. The focused graph takes all the height left after the axis, events strip and lanes, so making the window taller makes the graph taller.
+- Moves only by dragging the top bar. Drags on the timeline are kept for timeline gestures (drag the future, moving events).
+- No click-through mode: the panel always takes clicks while it's visible, and hides with Esc or the hot-key.
 
 **Header:**
 - Scenario menu.
 - Eight slot chips: number, color and name. Empty slots are dashed with a "+".
-- Copy snapshot, a click-through toggle, an opacity slider, and Hide.
+- Copy snapshot, an opacity slider, and Hide.
 
 **Focus area:**
 - Slot name and model summary ("Market model · monthly · median with bands").
@@ -95,7 +97,9 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Now line:** labelled "Now · Oct 2026". When the latest readings leave the projected band, a drift pill sits to its left.
 
-**Events strip:** one row under the time axis for the focused slot.
+**Events strip:** one row under the time axis for the focused slot. Its label reads "click to pick a date".
+
+**Add-event pane:** always visible, docked on the left or right of the timeline (section 5.3). Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered.
 
 **Lanes:** one per other slot in the bank. Each lane has:
 - the slot number, color bar and name
@@ -118,21 +122,26 @@ Clicking a lane's name focuses that slot.
 |---|---|
 | Move the pointer over the graph or lanes | Cursor follows (scrub) |
 | Click | Pins the cursor; Esc unpins |
-| Two-finger horizontal scroll, mouse wheel | Scroll time |
-| Pinch, ⌘-scroll | Zoom time (semantic zoom: days → months → years → decades) |
+| Mouse with two wheels: horizontal wheel / vertical wheel | Scroll time / zoom time (wheel up zooms in) |
+| Mouse with one wheel: wheel / Shift + wheel | Scroll time / zoom time |
+| Trackpad or Magic Mouse: swipe / pinch, Shift or ⌘ + swipe | Scroll time / zoom time |
 | ⌥-scroll | Zoom the value axis (auto-fit is the default; ⌥0 resets) |
 | ← / → | Move the cursor one step; ⇧ moves one year |
 | T | Jump to now |
 | 1–8 | Focus a slot |
 | S / M | Solo or mute the focused slot |
 | [ / ] | Previous or next bank |
-| E, double-click | Add an event at the cursor |
+| Click the graph or events strip | Pick that date for the add-event pane and put the keyboard in its amount field |
+| Click a lane's graph | The same, and switch the pane (and focus) to that lane's slot |
+| E | Pick the cursor's date for the add-event pane |
 | Drag the projection | Drag the future (5.2) |
 | ⇧-drag the projection | Sketch a target curve |
 | ⌘C / ⇧⌘C | Copy snapshot / copy data |
 | ⌘K | Command bar |
 | ⌘I / ⌘L | Slot inspector / links view |
-| Esc | Cancel the current gesture, otherwise hide the panel |
+| Esc | Cancel the current gesture, then leave the field being edited, then hide the panel |
+
+**Mouse wheels:** macOS doesn't report how many wheels a mouse has, so the app watches for one. The first wheel event with a horizontal movement and no Shift held can only come from a horizontal wheel. From then on the vertical wheel zooms, and the app says so in the status line. (macOS turns Shift + vertical wheel into horizontal movement, so those events don't count.) The finding is remembered, and the menu bar item has a "Mouse Has a Horizontal Wheel" toggle to override it. Zooming centres on the pointer.
 
 ### 4.2 Global hot-keys
 
@@ -142,12 +151,11 @@ All of these are configurable. Defaults include Control because sandboxed apps o
 |---|---|
 | ⌃⌥Space, tap | Toggle the panel |
 | ⌃⌥Space, hold for more than 250 ms | Peek: shown while held, hidden on release |
-| ⌃⌥T | Toggle click-through |
 | ⌃⌥C | Copy snapshot without showing the panel |
-| ⌃⌥E | Add an event at now |
+| ⌃⌥E | Show the panel with the add-event pane's date at now and the keyboard in its amount field |
 
 **Peek:**
-- The panel appears within one frame (no slide animation) in click-through mode, at the user's peek opacity.
+- The panel appears within one frame (no slide animation), without taking keyboard focus from the app you're in.
 - Releasing the key hides it.
 - While peeking, the hardware wheel scrubs the cursor.
 - The hardware peek button behaves the same way.
@@ -176,15 +184,21 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 ### 5.3 Adding an event
 
-- **Where:** E or double-click opens a popover at the cursor.
-- **Describe it:** the natural-language field comes first. Under it is a summary of what was understood, with ✓, and which device answered ("via iPhone 17"). With no provider available, the field is hidden and the form stands alone.
-- **The form:** a kind control (Deposit, Withdraw, Rate, Shock, Custom), then amount, first date, repeats and until.
-- **Preview:** a dashed line on the graph, and the effect at a chosen horizon ("Effect by Jan 2040: +$X").
-- **Confirm:** ↩ adds the event; Esc cancels.
+- **The pane:** always visible and docked beside the timeline, so you can scroll as far as you like into the future and watch a draft's effect play out. It never scrolls with the graph.
+  - Docks on the left or right. Drag its title bar to the other side (drop zones light up), or press its arrow button. The side is remembered.
+  - Follows the focused slot. Switching slots keeps the amount and date when the new slot handles the same kind of event.
+- **When:** defaults to now. Clicking the graph or events strip picks that date; clicking a lane picks the date and switches to that lane's slot. "Now" puts it back. The date picker also shows and edits the time.
+- **The form:**
+  - A kind control offering only what the slot's model handles (Deposit, Withdraw, Overpay…), plus Set parameter when the model has parameters.
+  - Amount (or parameter and new value), and repeats.
+- **Preview:** as soon as the draft is complete, a dashed line shows the new future on the graph. The pane shows the effect at the cursor and at the right edge of the view; both update as you move the pointer and scroll. The preview is computed by trying the event and taking it out again, and is computed one screen ahead so scrolling stays smooth.
+- **Confirm:** ↩ in the amount field or Add event adds it (undoable), then clears the amount and puts the date back to now. Clear empties the form. Mistakes get a message under the form ("Enter an amount, e.g. 500 or 1.2k").
+- **Other ways in:** E picks the cursor's date; ⌃⌥E from any app shows the panel with the date at now; the command bar takes quick adds (`+500 monthly from 2027-03`).
+- **Describe it:** a natural-language field will come first once a provider is available (DESIGN.md, section 7), showing what was understood and which device answered ("via iPhone 17"). Not in M1.
 
 ### 5.4 Editing and moving events
 
-- Clicking a marker opens the same popover, with Delete. Deleting asks for confirmation (DESIGN.md, section 13).
+- Clicking a marker loads it into the add-event pane, with Delete. Deleting asks for confirmation (DESIGN.md, section 13).
 - Dragging a marker sideways moves it in time, snapping to step boundaries; hold ⌥ to move freely.
 - Undo and redo cover every change.
 
@@ -209,9 +223,9 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 ### 5.8 Glance HUD
 
-- A compact card pinned to a screen corner, in click-through mode.
+- A compact card pinned to a screen corner. It doesn't take keyboard focus.
 - Shows chosen slots at now and at a pinned date, each with a sparkline.
-- ⌃⌥T makes it interactive. Holding ⌃⌥Space peeks the full panel.
+- Clicking it opens the full panel. Holding ⌃⌥Space peeks the full panel.
 
 ### 5.9 Copy snapshot
 

@@ -1,0 +1,256 @@
+import Foundation
+import FutureEngine
+
+/// The event being set up in the add-event pane (docs/UI.md, 5.3).
+public struct EventDraft: Equatable, Sendable {
+    public enum Kind: Hashable, Sendable {
+        /// One of the slot's own event kinds, e.g. "deposit".
+        case event(String)
+        /// A `set` event that changes a parameter.
+        case setParameter
+    }
+
+    public enum Repeat: String, CaseIterable, Identifiable, Sendable {
+        case never, weekly, fortnightly, monthly, quarterly, yearly
+
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .never: return "Never"
+            case .weekly: return "Every week"
+            case .fortnightly: return "Every 2 weeks"
+            case .monthly: return "Every month"
+            case .quarterly: return "Every quarter"
+            case .yearly: return "Every year"
+            }
+        }
+
+        public var rate: StepRate? {
+            switch self {
+            case .never: return nil
+            case .weekly: return .weekly
+            case .fortnightly: return .weeks(2)
+            case .monthly: return .monthly
+            case .quarterly: return .quarters(1)
+            case .yearly: return .yearly
+            }
+        }
+    }
+
+    public var slotIndex: Int
+    public var date: Date
+    public var kind: Kind
+    public var amountText = ""
+    public var parameter = ""
+    public var valueText = ""
+    public var repeats = Repeat.never
+
+    /// "deposit" → "Deposit", "overpay" → "Overpay".
+    public static func title(forKind kind: String) -> String {
+        kind.prefix(1).uppercased() + kind.dropFirst()
+    }
+
+    /// What to add to the scenario, or why the draft isn't ready.
+    func build() -> Result<Built, DraftProblem> {
+        switch kind {
+        case .event(let name):
+            guard let amount = CommandBarParser.parseAmount(amountText.trimmingCharacters(in: .whitespaces)), amount > 0 else {
+                return .failure(amountText.isEmpty ? .missingAmount : .badAmount(amountText))
+            }
+            if let rate = repeats.rate {
+                return .success(.rule(RecurringEvent(kind: name, values: ["amount": amount], first: date, every: rate)))
+            }
+            return .success(.event(Event(time: date, kind: name, values: ["amount": amount])))
+        case .setParameter:
+            guard !parameter.isEmpty else { return .failure(.missingParameter) }
+            guard let value = CommandBarParser.parseAmount(valueText.trimmingCharacters(in: .whitespaces)) else {
+                return .failure(valueText.isEmpty ? .missingValue : .badAmount(valueText))
+            }
+            return .success(.event(Event.set([parameter: value], at: date)))
+        }
+    }
+
+    enum Built {
+        case event(Event)
+        case rule(RecurringEvent)
+    }
+
+    enum DraftProblem: Error, Equatable {
+        case missingAmount, missingValue, missingParameter
+        case badAmount(String)
+
+        var message: String {
+            switch self {
+            case .missingAmount: return "Enter an amount, e.g. 500 or 1.2k"
+            case .missingValue: return "Enter a value, e.g. 4% or 650"
+            case .missingParameter: return "Choose a parameter"
+            case .badAmount(let text): return "“\(text)” isn't a number. Use 500, $1,200, 1.5k or 4%"
+            }
+        }
+    }
+}
+
+extension ScenarioStore {
+    /// A fresh draft for a slot: its first event kind (or Set parameter) and its first parameter's value.
+    func makeDraft(slotIndex: Int, date: Date) -> EventDraft {
+        let slot = slots[slotIndex]
+        var draft = EventDraft(slotIndex: slotIndex, date: date,
+                               kind: slot.eventKinds.first.map(EventDraft.Kind.event) ?? .setParameter)
+        if let parameter = slot.parameters.first {
+            draft.parameter = parameter
+            draft.valueText = currentValueText(of: parameter, in: slot, at: date)
+        }
+        return draft
+    }
+
+    /// Points the draft at the focused slot, keeping the amount, date and repeat where they still make sense.
+    func retargetDraft() {
+        guard eventDraft.slotIndex != focusedIndex else { return }
+        let slot = slots[focusedIndex]
+        var draft = eventDraft
+        draft.slotIndex = focusedIndex
+        if case .event(let kind) = draft.kind, !slot.eventKinds.contains(kind) {
+            draft.kind = slot.eventKinds.first.map(EventDraft.Kind.event) ?? .setParameter
+        }
+        if draft.kind == .setParameter, slot.parameters.isEmpty, let first = slot.eventKinds.first {
+            draft.kind = .event(first)
+        }
+        if !slot.parameters.contains(draft.parameter) {
+            draft.parameter = slot.parameters.first ?? ""
+            draft.valueText = draft.parameter.isEmpty ? "" : currentValueText(of: draft.parameter, in: slot, at: draft.date)
+        }
+        draftError = nil
+        eventDraft = draft
+    }
+
+    /// Whether the draft's date is still the default (now) rather than a date picked on the graph.
+    public var eventDateIsNow: Bool { eventDraft.date == now }
+
+    /// Sets the draft's date from a click on the graph, and its slot when a lane was clicked.
+    public func pickEventDate(_ date: Date, slotIndex: Int? = nil) {
+        if let slotIndex { focus(index: slotIndex) }
+        eventDraft.date = Calendar.current.startOfDay(for: max(start, date))
+    }
+
+    /// Picks a date and puts the keyboard in the pane's amount field.
+    public func beginEvent(at date: Date, slotIndex: Int? = nil) {
+        pickEventDate(date, slotIndex: slotIndex)
+        eventFieldFocusRequest += 1
+    }
+
+    /// Puts the draft's date back to now.
+    public func resetEventDate() {
+        eventDraft.date = now
+    }
+
+    /// Empties the amount, resets the value to the parameter's current one, and goes back to now.
+    public func clearEvent() {
+        var draft = eventDraft
+        draft.amountText = ""
+        draft.date = now
+        if !draft.parameter.isEmpty {
+            draft.valueText = currentValueText(of: draft.parameter, in: slots[draft.slotIndex], at: now)
+        }
+        draftError = nil
+        eventDraft = draft
+    }
+
+    /// Adds the drafted event and clears the pane for the next one. Returns false and sets
+    /// `draftError` when the draft isn't complete.
+    @discardableResult
+    public func commitEvent() -> Bool {
+        let draft = eventDraft
+        switch draft.build() {
+        case .failure(let problem):
+            draftError = problem.message
+            return false
+        case .success(let built):
+            let slot = slots[draft.slotIndex]
+            clearEvent()
+            switch built {
+            case .event(let event):
+                add(event, toSlotAt: draft.slotIndex)
+                say("Added \(Self.label(for: event)) on \(DateText.monthYear(event.time)) to \(slot.title)")
+            case .rule(let rule):
+                add(rule, toSlotAt: draft.slotIndex)
+                let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
+                say("Added \(EventDraft.title(forKind: rule.kind).lowercased()) of \(amount) \(Self.describe(rule.every)) from \(DateText.monthYear(rule.first)) to \(slot.title)")
+            }
+            return true
+        }
+    }
+
+    /// The parameter's current value at `date`, as text for the value field (e.g. "0.045" or "400").
+    func currentValueText(of parameter: String, in slot: SlotInfo, at date: Date) -> String {
+        guard let value = try? scenario.value(parameter, of: slot.id, at: date) else { return "" }
+        return String(format: "%g", value)
+    }
+
+    /// Recomputes the dashed preview by trying the draft and taking it out again. It looks one
+    /// screen past the right edge, so scrolling only recomputes when it goes further than that.
+    func updateDraftPreview() {
+        guard case .success(let built) = eventDraft.build() else {
+            draftPreview = []
+            previewHorizon = .distantPast
+            return
+        }
+        draftError = nil
+        let slot = slots[eventDraft.slotIndex]
+        let margin: TimeInterval = 62 * 86_400
+        let horizon = frame.end.addingTimeInterval(frame.span)
+
+        switch built {
+        case .event(let event): scenario.add(event, to: slot.id)
+        case .rule(let rule): scenario.add(rule, to: slot.id)
+        }
+        let samples = (try? scenario.series(slot.variable, of: slot.id,
+                                            from: eventDraft.date.addingTimeInterval(-margin),
+                                            through: horizon.addingTimeInterval(margin))) ?? []
+        switch built {
+        case .event(let event): scenario.removeEvent(id: event.id, from: slot.id)
+        case .rule(let rule): scenario.removeRecurring(id: rule.id, from: slot.id)
+        }
+        draftPreview = samples
+        previewHorizon = horizon
+    }
+
+    /// Extends the preview when the view has scrolled past what was computed.
+    func extendPreviewIfNeeded() {
+        guard !draftPreview.isEmpty, frame.end > previewHorizon else { return }
+        updateDraftPreview()
+    }
+
+    /// The draft's effect at the cursor and at the right edge, or nil until the draft is complete.
+    func eventPreview() -> EventPreviewState? {
+        guard !draftPreview.isEmpty else { return nil }
+        let slot = slots[eventDraft.slotIndex]
+        func effect(at date: Date) -> String {
+            guard date >= start, let before = try? scenario.value(slot.variable, of: slot.id, at: date),
+                  let after = Self.held(draftPreview, at: date), date >= eventDraft.date else {
+                return "No change yet"
+            }
+            let difference = after - before
+            if abs(difference) < 0.005 { return "No change" }
+            let sign = difference > 0 ? "+" : "−"
+            return sign + slot.format.full(abs(difference)).replacingOccurrences(of: "−", with: "")
+        }
+        return EventPreviewState(cursorDate: DateText.monthYear(cursor), atCursor: effect(at: cursor),
+                                 edgeDate: DateText.monthYear(frame.end), atEdge: effect(at: frame.end))
+    }
+
+    /// The last sample at or before `date`.
+    static func held(_ samples: [Sample], at date: Date) -> Double? {
+        var low = 0, high = samples.count - 1, found: Double?
+        while low <= high {
+            let mid = (low + high) / 2
+            if samples[mid].time <= date {
+                found = samples[mid].value
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return found
+    }
+}

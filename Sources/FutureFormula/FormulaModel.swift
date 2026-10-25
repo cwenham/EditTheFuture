@@ -28,6 +28,19 @@ public struct FormulaModel: TimelineModel {
     public let descriptor: ModelDescriptor
     private let program: CompiledProgram
 
+    /// Kinds of this slot's own events that the formula handles with `on kind:`, in order.
+    /// `set` events are always handled (they change parameters) and aren't listed.
+    public var handledEventKinds: [String] {
+        var kinds: [String] = []
+        for handler in program.handlers where handler.origin == nil && !kinds.contains(handler.kind) {
+            kinds.append(handler.kind)
+        }
+        return kinds
+    }
+
+    /// Parameter names in declaration order.
+    public var parameterNames: [String] { program.params.map(\.name) }
+
     public init(_ source: String, name: String = "Formula") throws {
         self.source = source
         let program = try Analyzer.compile(Parser.parse(source))

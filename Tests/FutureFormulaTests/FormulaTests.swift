@@ -74,6 +74,13 @@ struct FormulaTests {
         #expect(descriptor.subscriptions == [EventSubscription(slot: "Building", kind: "OverCapacity", timing: .previousStep)])
     }
 
+    @Test("The model lists the event kinds it handles and its parameters")
+    func handledKinds() throws {
+        let model = try FormulaModel(savingsSource + "\non withdraw: balance -= event.amount\non Other.Alarm: balance = 0")
+        #expect(model.handledEventKinds == ["bonus", "withdraw"])
+        #expect(model.parameterNames == ["rate", "deposit"])
+    }
+
     // MARK: Calculations
 
     @Test("Monthly compounding with deposits matches the closed form")
