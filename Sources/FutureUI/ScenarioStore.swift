@@ -175,14 +175,16 @@ public final class ScenarioStore {
     /// Focuses by number ("3") or name ("savings", "Index fund").
     @discardableResult
     public func focus(named text: String) -> Bool {
-        if let number = Int(text), slots.indices.contains(number - 1) {
-            focus(index: number - 1)
-            return true
-        }
-        let wanted = text.lowercased().replacingOccurrences(of: " ", with: "")
-        guard let index = slots.firstIndex(where: { $0.name.lowercased() == wanted }) else { return false }
+        guard let index = slotIndex(named: text) else { return false }
         focus(index: index)
         return true
+    }
+
+    /// A slot by number ("3") or name ("savings", "Index fund", "indexfund").
+    func slotIndex(named text: String) -> Int? {
+        if let number = Int(text), slots.indices.contains(number - 1) { return number - 1 }
+        let wanted = text.lowercased().replacingOccurrences(of: " ", with: "")
+        return slots.firstIndex(where: { $0.name.lowercased() == wanted })
     }
 
     public func setCursor(_ date: Date) {
@@ -311,6 +313,7 @@ public final class ScenarioStore {
         case mutate(ScenarioEngine.Mutation)
         case fetch(ScenarioEngine.FetchRequest)
         case preview(ScenarioEngine.PreviewRequest)
+        case find(ScenarioEngine.FindRequest)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
         var isPreview: Bool { if case .preview = self { return true } else { return false } }
@@ -332,7 +335,7 @@ public final class ScenarioStore {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll(where: \.isPreview)
-        case .mutate: break
+        case .mutate, .find: break
         }
         engineQueue.append(operation)
         guard !isDraining else { return }
@@ -346,6 +349,7 @@ public final class ScenarioStore {
             case .mutate(let mutation): await engine.apply(mutation)
             case .fetch(let request): receive(await engine.fetch(request))
             case .preview(let request): receive(await engine.preview(request))
+            case .find(let request): receive(await engine.find(request))
             }
         }
         isDraining = false
@@ -429,6 +433,9 @@ public final class ScenarioStore {
         case .moveCursor(let date):
             show(date)
             say("Cursor at " + DateText.monthYear(cursor))
+        case .findValue(let name, let value, let format):
+            guard let index = slotForValue(named: name, format: format, value: value) else { return true }
+            findValue(value, inSlotAt: index)
         case .focus(let text):
             guard focus(named: text) else { throw CommandBarError.notUnderstood("focus " + text) }
             say("Focused " + focused.title)
@@ -461,6 +468,80 @@ public final class ScenarioStore {
             return false
         }
         return true
+    }
+
+    // MARK: Finding values
+
+    /// How far ahead `goto` looks for a value before giving up.
+    static let findHorizon: TimeInterval = 10_000 * 365.2425 * 86_400
+
+    /// The slot a `goto` value refers to: the named one, else the focused slot if it's in the value's
+    /// unit, else the only slot in that unit. Explains the problem and returns nil otherwise.
+    func slotForValue(named name: String?, format: ValueFormat?, value: Double) -> Int? {
+        func unit(_ format: ValueFormat) -> String {
+            switch format {
+            case .currency: return "dollars"
+            case .temperature: return "°C"
+            case .number: return "plain numbers"
+            }
+        }
+        if let name {
+            guard let index = slotIndex(named: name) else {
+                say("There's no slot called “\(name)”. Slots: \(slots.map(\.title).joined(separator: ", ")).", isError: true)
+                return nil
+            }
+            let slot = slots[index]
+            if let format, format != slot.format {
+                say("\(slot.title) is in \(unit(slot.format)), not \(unit(format)).", isError: true)
+                return nil
+            }
+            return index
+        }
+        guard let format else { return focusedIndex }
+        if focused.format == format { return focusedIndex }
+        let matches = slots.indices.filter { slots[$0].format == format }
+        if matches.count == 1 { return matches[0] }
+        if matches.isEmpty {
+            say("No slot is in \(unit(format)).", isError: true)
+        } else {
+            let names = matches.map { slots[$0].title }
+            say("Which slot? \(names.dropLast().joined(separator: ", ")) and \(names.last!) are in \(unit(format)). "
+                + "Try goto \(names[0].lowercased()) \(format.axis(value)), or focus one first.", isError: true)
+        }
+        return nil
+    }
+
+    /// Focuses the slot and moves the cursor to where its line first reaches `value`, looking ahead
+    /// from now. The engine searches in the background, after any edits already queued.
+    public func findValue(_ value: Double, inSlotAt index: Int) {
+        guard slots.indices.contains(index) else { return }
+        focus(index: index)
+        let from = max(now, start)
+        say("Looking for \(slots[index].format.full(value)) in \(slots[index].title)…")
+        enqueue(.find(ScenarioEngine.FindRequest(slot: index, target: value, from: from,
+                                                 limit: from.addingTimeInterval(Self.findHorizon))))
+    }
+
+    private func receive(_ result: ScenarioEngine.FindResult) {
+        let slot = slots[result.request.slot]
+        let target = slot.format.full(result.request.target)
+        guard let startValue = result.startValue else {
+            say("\(slot.title) has no value to start from yet.", isError: true)
+            return
+        }
+        let verb = startValue < result.request.target ? "reaches" : "falls to"
+        guard let found = result.found else {
+            let verbNow = startValue < result.request.target ? "reach" : "fall to"
+            say("\(slot.title) doesn't \(verbNow) \(target) in the next 10,000 years.", isError: true)
+            return
+        }
+        if found.time == result.request.from {
+            show(found.time)
+            say("\(slot.title) is at \(target) now.")
+            return
+        }
+        show(found.time)
+        say("\(slot.title) \(verb) \(target) in \(DateText.monthYear(found.time)).")
     }
 
     public func say(_ text: String, isError: Bool = false) {
@@ -496,7 +577,7 @@ public final class ScenarioStore {
         func samples(_ index: Int) -> [Sample] {
             guard let series = computed?.series[index], !series.isEmpty else { return [] }
             let low = Self.firstIndex(in: series, atOrAfter: from)
-            let high = Self.firstIndex(in: series, atOrAfter: through.addingTimeInterval(1))
+            let high = Self.firstIndex(in: series, after: through)
             return low < high ? Array(series[low..<high]) : []
         }
         /// The visible values' range. Values that overflowed (infinite or NaN) can't be placed on an
@@ -591,8 +672,19 @@ public final class ScenarioStore {
 
     /// The last sample at or before `date`.
     static func held(_ samples: [Sample], at date: Date) -> Double? {
-        let index = firstIndex(in: samples, atOrAfter: date.addingTimeInterval(1e-6)) - 1
+        let index = firstIndex(in: samples, after: date) - 1
         return index >= 0 ? samples[index].value : nil
+    }
+
+    /// The first sample after `date` (binary search). Compares dates directly: nudging `date` by a
+    /// microsecond instead stops working past about 2150, where a Date can't hold that difference.
+    static func firstIndex(in samples: [Sample], after date: Date) -> Int {
+        var low = 0, high = samples.count
+        while low < high {
+            let mid = (low + high) / 2
+            if samples[mid].time <= date { low = mid + 1 } else { high = mid }
+        }
+        return low
     }
 
     /// The first sample at or after `date` (binary search).

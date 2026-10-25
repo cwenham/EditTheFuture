@@ -65,6 +65,24 @@ actor ScenarioEngine {
         let through: Date
     }
 
+    struct FindRequest: Sendable {
+        let slot: Int
+        let target: Double
+        /// Where the search starts (now), and how far it goes before giving up.
+        let from: Date
+        let limit: Date
+    }
+
+    struct FindResult: Sendable {
+        let request: FindRequest
+        /// The slot's value at `from`. Below the target, the search looks for the line rising to it;
+        /// above, falling to it.
+        let startValue: Double?
+        /// The first computed point from `from` on where the line reaches the target, or nil if it
+        /// doesn't before `limit`.
+        let found: Sample?
+    }
+
     /// The newest fetch generation the store has asked for. Read without hopping onto the actor,
     /// so a fetch that's running can see it has been superseded.
     final class Generation: @unchecked Sendable {
@@ -151,6 +169,32 @@ actor ScenarioEngine {
                            series: series, generated: generated,
                            computedThrough: ids.compactMap { scenario.computedThrough($0) }.min(),
                            parameters: parameters, parameterDate: request.parameterDate)
+    }
+
+    /// How much of the line a search reads at a time.
+    static let findChunk: TimeInterval = 50 * 365.2425 * 86_400
+
+    /// Finds where a slot's line first reaches a value, computing ahead only as far as needed (and
+    /// only that slot and what it reads from).
+    func find(_ request: FindRequest) -> FindResult {
+        let id = ids[request.slot], variable = variables[request.slot]
+        guard let startValue = try? scenario.value(variable, of: id, at: request.from), !startValue.isNaN else {
+            return FindResult(request: request, startValue: nil, found: nil)
+        }
+        if startValue == request.target {
+            return FindResult(request: request, startValue: startValue, found: Sample(time: request.from, value: startValue))
+        }
+        let rising = startValue < request.target
+        var from = request.from
+        while from < request.limit {
+            let through = min(request.limit, from.addingTimeInterval(Self.findChunk))
+            guard let samples = try? scenario.series(variable, of: id, from: from, through: through) else { break }
+            if let hit = samples.first(where: { rising ? $0.value >= request.target : $0.value <= request.target }) {
+                return FindResult(request: request, startValue: startValue, found: hit)
+            }
+            from = through
+        }
+        return FindResult(request: request, startValue: startValue, found: nil)
     }
 
     /// The draft slot's line with the draft change applied: tries the change, reads the line, then takes it out again.

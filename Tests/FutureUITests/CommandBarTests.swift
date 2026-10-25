@@ -52,7 +52,7 @@ struct CommandBarTests {
     @Test("Mistakes get helpful errors")
     func errors() {
         #expect(throws: CommandBarError.empty) { try CommandBarParser.parse("   ") }
-        #expect(throws: CommandBarError.badDate("next tuesday")) { try CommandBarParser.parse("goto next tuesday") }
+        #expect(throws: CommandBarError.badGoto("next tuesday")) { try CommandBarParser.parse("goto next tuesday") }
         #expect(throws: CommandBarError.badAmount("lots")) { try CommandBarParser.parse("+lots") }
         #expect(throws: CommandBarError.notUnderstood("make it rain")) { try CommandBarParser.parse("make it rain") }
     }
@@ -85,6 +85,43 @@ struct PeekGestureTests {
         #expect(gesture.press(at: t0, panelVisible: false) == .beginPeek)
         #expect(gesture.press(at: t0.addingTimeInterval(0.05), panelVisible: true) == .nothing)
         #expect(gesture.release(at: t0.addingTimeInterval(0.5)) == .hide)
+    }
+}
+
+@Suite("Goto a value")
+struct GotoValueTests {
+    func parse(_ text: String) throws -> CommandBarAction { try CommandBarParser.parse(text) }
+
+    @Test("A unit says which kind of slot to look in")
+    func units() throws {
+        #expect(try parse("goto 100°C") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("goto 100 °C") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("go to 25c") == .findValue(slot: nil, value: 25, format: .temperature))
+        #expect(try parse("goto -5 degrees") == .findValue(slot: nil, value: -5, format: .temperature))
+        #expect(try parse("goto 212°F") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("goto 50 fahrenheit") == .findValue(slot: nil, value: 10, format: .temperature))
+        #expect(try parse("goto $1M") == .findValue(slot: nil, value: 1_000_000, format: .currency))
+        #expect(try parse("goto $1,250,000") == .findValue(slot: nil, value: 1_250_000, format: .currency))
+        #expect(try parse("goto 2.5bn dollars") == .findValue(slot: nil, value: 2.5e9, format: .currency))
+        #expect(try parse("show −$6k") == .findValue(slot: nil, value: -6_000, format: .currency))
+    }
+
+    @Test("A slot name before the value picks the slot, with or without a unit")
+    func slots() throws {
+        #expect(try parse("goto climate 100°C") == .findValue(slot: "climate", value: 100, format: .temperature))
+        #expect(try parse("goto Mortgage $0") == .findValue(slot: "Mortgage", value: 0, format: .currency))
+        #expect(try parse("goto Index fund 1.5m") == .findValue(slot: "Index fund", value: 1_500_000, format: nil))
+        #expect(try parse("goto savings 50000") == .findValue(slot: "savings", value: 50_000, format: nil))
+        #expect(try parse("goto 3 $250k") == .findValue(slot: "3", value: 250_000, format: .currency))
+    }
+
+    @Test("Dates still win, and a bare number that isn't a date needs a unit or slot")
+    func datesAndErrors() throws {
+        #expect(try parse("goto 2035") == .moveCursor(utc(2035, 1)))
+        #expect(try parse("goto jun 2035") == .moveCursor(utc(2035, 6)))
+        for text in ["50000", "$", "°C", "lots", "$1e400", "inf", "nan°C", "savings"] {
+            #expect(throws: CommandBarError.badGoto(text)) { try parse("goto " + text) }
+        }
     }
 }
 

@@ -340,7 +340,7 @@ The detailed UI design (visual language, layouts, input, interactions, accessibi
 
 ### 9.4 Command bar
 
-Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040". Natural-language input goes through section 7's providers.
+Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040", "goto 100°C", "goto mortgage $0". `goto` with a value finds where a slot's line first reaches it (UI.md, 5.1). Natural-language input goes through section 7's providers.
 
 ### 9.5 iPad and iPhone
 

@@ -6,6 +6,9 @@ import FutureCommands
 public enum CommandBarAction: Equatable, Sendable {
     case jumpToNow
     case moveCursor(Date)
+    /// Move the cursor to where a slot's line first reaches `value`. `slot` nil means the slot that
+    /// `format` (the value's unit) points to; a value without a unit always names its slot.
+    case findValue(slot: String?, value: Double, format: ValueFormat?)
     /// A slot by name or by its number (1...8).
     case focus(String)
     /// `kind` is "deposit" for `+amount` and "withdraw" for `-amount`. `at` nil means the cursor.
@@ -22,11 +25,13 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
     case notUnderstood(String)
     case badDate(String)
     case badAmount(String)
+    case badGoto(String)
 
     public var description: String {
         switch self {
         case .empty: return "Type a command, e.g. +500 monthly from 2027-03"
-        case .notUnderstood(let text): return "I didn't understand “\(text)”. Try +500 monthly, set rate 4% from 2027-06, goto 2035 or now."
+        case .notUnderstood(let text): return "I didn't understand “\(text)”. Try +500 monthly, set rate 4% from 2027-06, goto 2035, goto 25°C or now."
+        case .badGoto(let text): return "“\(text)” isn't a date, or a value with its unit or slot. Try goto 2035, goto Jun 2035, goto $1M, goto 25°C or goto savings 50000."
         case .badDate(let text): return "“\(text)” isn't a date I know. Use 2035, 2035-06, 2035-06-15 or Jun 2035."
         case .badAmount(let text): return "“\(text)” isn't an amount. Use 500, $1,200 or 1.5k."
         }
@@ -37,6 +42,7 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
 ///
 /// - `now`, `today`
 /// - `goto 2035`, `go to Jun 2035`, `show 2035-06-15`
+/// - `goto 100°C`, `goto climate 212°F`, `goto mortgage $0`, `goto savings 1.5m`
 /// - `focus savings`, `3`
 /// - `+500`, `+500 monthly from 2027-03`, `-6,000 on Aug 2028`, `+1.2k every year`
 /// - `set rate 4% from 2027-06`, `set monthly 650`
@@ -66,10 +72,22 @@ public enum CommandBarParser {
         }
 
         if ["goto", "show"].contains(words.first) || (words.first == "go" && words.dropFirst().first == "to") {
-            words.removeFirst(words.first == "go" ? 2 : 1)
-            let dateText = words.joined(separator: " ")
-            guard let date = parseDate(dateText) else { throw CommandBarError.badDate(dateText) }
-            return .moveCursor(date)
+            let skip = words.first == "go" ? 2 : 1
+            words.removeFirst(skip)
+            let originalWords = Array(text.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst(skip))
+            let rest = words.joined(separator: " ")
+            // A date wins, so `goto 2035` stays a year. A value needs a unit (`goto $1M`), or a slot
+            // name before it (`goto savings 50000`).
+            if let date = parseDate(rest) { return .moveCursor(date) }
+            if let (value, format) = parseValue(rest), let format {
+                return .findValue(slot: nil, value: value, format: format)
+            }
+            for split in 1..<max(words.count, 1) {
+                if let (value, format) = parseValue(words[split...].joined(separator: " ")) {
+                    return .findValue(slot: originalWords[..<split].joined(separator: " "), value: value, format: format)
+                }
+            }
+            throw CommandBarError.badGoto(originalWords.joined(separator: " "))
         }
 
         if words.first == "set", words.count >= 3 {
@@ -131,6 +149,56 @@ public enum CommandBarParser {
         else if text.hasSuffix("m") { multiplier = 1_000_000; text.removeLast() }
         guard let value = Double(text), value.isFinite else { return nil }
         return value * multiplier
+    }
+
+    /// A value with an optional unit: `$1.5m`, `-6,000 dollars`, `25°C`, `25 c`, `77°F` (converted to
+    /// °C), `1.2k`, `4%`. The format is the unit's (currency or temperature), or nil for a bare number.
+    static func parseValue(_ text: String) -> (value: Double, format: ValueFormat?)? {
+        // Only the number has digits: a space may separate it from its unit ("25 °C", "2.5bn dollars"),
+        // but not from another number ("3 $250k" is slot 3, then a value).
+        let tokens = text.lowercased().split(whereSeparator: \.isWhitespace)
+        guard tokens.filter({ $0.contains(where: \.isNumber) }).count == 1 else { return nil }
+        var text = tokens.joined()
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: "−", with: "-")
+        var format: ValueFormat?
+        var fahrenheit = false
+        // Longest first, so "degreesf" isn't read as "f" after "degrees".
+        let temperatureUnits: [(String, Bool)] = [
+            ("degreesfahrenheit", true), ("degreescelsius", false), ("fahrenheit", true), ("celsius", false),
+            ("degreesf", true), ("degreesc", false), ("degrees", false), ("degf", true), ("degc", false),
+            ("deg", false), ("°f", true), ("°c", false), ("℉", true), ("℃", false), ("°", false), ("f", true), ("c", false),
+        ]
+        for (unit, isFahrenheit) in temperatureUnits where text.hasSuffix(unit) {
+            text.removeLast(unit.count)
+            format = .temperature
+            fahrenheit = isFahrenheit
+            break
+        }
+        var multiplier = 1.0
+        if format == nil {
+            for unit in ["dollars", "dollar", "usd"] where text.hasSuffix(unit) {
+                text.removeLast(unit.count)
+                format = .currency
+                break
+            }
+            if text.contains("$") {
+                text = text.replacingOccurrences(of: "$", with: "")
+                format = .currency
+            }
+            let multipliers: [(String, Double)] = [("bn", 1e9), ("tn", 1e12), ("k", 1e3), ("m", 1e6), ("b", 1e9), ("t", 1e12), ("%", 0.01)]
+            for (suffix, value) in multipliers where text.hasSuffix(suffix) {
+                text.removeLast(suffix.count)
+                multiplier = value
+                break
+            }
+        }
+        // Digits, a point, a sign and an exponent only: Double() also reads words like "inf" and "nan".
+        guard text.contains(where: \.isNumber), text.allSatisfy({ $0.isNumber || ".-+e".contains($0) }),
+              let number = Double(text), number.isFinite else { return nil }
+        let value = fahrenheit ? (number - 32) * 5 / 9 : number * multiplier
+        guard value.isFinite else { return nil }
+        return (value, format)
     }
 
     static let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]

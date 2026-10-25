@@ -87,7 +87,7 @@ struct PlotCanvas: View {
 
     /// The line through the samples inside the frame (plus one either side so it reaches the edges),
     /// thinned to at most four points per pixel column.
-    static func path(for samples: [Sample], frame: TimeFrame, size: CGSize,
+    nonisolated static func path(for samples: [Sample], frame: TimeFrame, size: CGSize,
                      x: (Date) -> CGFloat, y: (Double) -> CGFloat) -> Path {
         var path = Path()
         guard !samples.isEmpty else { return path }
@@ -150,7 +150,7 @@ struct PlotCanvas: View {
         return path
     }
 
-    static func firstIndex(in samples: [Sample], atOrAfter date: Date) -> Int {
+    nonisolated static func firstIndex(in samples: [Sample], atOrAfter date: Date) -> Int {
         var low = 0, high = samples.count
         while low < high {
             let mid = (low + high) / 2

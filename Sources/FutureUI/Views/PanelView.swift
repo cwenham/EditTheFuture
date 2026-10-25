@@ -145,6 +145,8 @@ struct PanelHeader: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 2) {
+                NowButton { store.jumpToNow() }
+                    .padding(.trailing, 6)
                 IconButton(systemName: "doc.on.doc", label: "Copy snapshot (Command-C)", action: actions.copySnapshot)
                 HStack(spacing: 6) {
                     Text("Opacity").font(.system(size: 12)).foregroundStyle(Theme.secondary)
@@ -220,6 +222,27 @@ struct EmptySlotChip: View {
         .frame(height: 30)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
         .accessibilityLabel("Slot \(key) is empty")
+    }
+}
+
+/// Puts the cursor on now and scrolls back to it if it's out of view.
+struct NowButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
+                Text("Now").font(.system(size: 13, weight: .medium))
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.chipBorder))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Jump to now")
+        .help("Jump to now  T")
     }
 }
 

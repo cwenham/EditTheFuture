@@ -87,7 +87,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 **Header:**
 - Scenario menu.
 - Eight slot chips: number, color and name. Empty slots are dashed with a "+".
-- Copy snapshot, an opacity slider, and Hide.
+- Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider, and Hide.
 
 **Focus area:**
 - Slot name and model summary ("Market model · monthly · median with bands").
@@ -127,7 +127,7 @@ Clicking a lane's name focuses that slot.
 | Trackpad or Magic Mouse: swipe / pinch, Shift or ⌘ + swipe | Scroll time / zoom time |
 | ⌥-scroll | Zoom the value axis (auto-fit is the default; ⌥0 resets) |
 | ← / → | Move the cursor one step; ⇧ moves one year |
-| T | Jump to now |
+| T, or the Now button | Jump to now |
 | 1–8 | Focus a slot |
 | S / M | Solo or mute the focused slot |
 | [ / ] | Previous or next bank |
@@ -172,6 +172,12 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 ### 5.1 Scrubbing and the cursor
 
 - Scrubbing is free; computation follows lazily. If the cursor moves past what's computed, the readout shows a small spinner and the lanes fill in as results arrive.
+- **Go to a date or a value:** the command bar's `goto` moves the cursor.
+  - **Dates:** `goto 2035`, `goto Jun 2035`.
+  - **Values:** `goto 100°C`, `goto mortgage $0`. The cursor lands where the line first reaches the value, looking ahead from now, rising or falling depending on where it starts. The slot is focused, and the footer says when ("Climate reaches 100.0 °C in Jul 4699").
+  - **Which slot:** the unit picks it: the focused slot if it's in that unit, otherwise the only slot that is. If several are, it asks for a name (`goto savings $1M`). A bare number needs a slot name, since `goto 2035` means the year.
+  - **Units:** dollars (`$1.5m`, `2bn dollars`), °C (`25°C`, `25 c`, `25 degrees`) and °F, converted to °C.
+  - **Limits:** the search runs on the engine's thread and gives up after 10,000 years.
 - On iPhone, scrubbing gives a light haptic tick at each year.
 
 ### 5.2 Drag the future

@@ -280,6 +280,78 @@ struct ScenarioStoreTests {
         #expect(store.cursorState().focusValue == before)
     }
 
+    @Test("goto finds where a line reaches a value, computing as far ahead as it takes")
+    func gotoValue() async throws {
+        let store = try await makeStore()
+        store.commandText = "goto 100°C"
+        #expect(store.runCommand() == nil)
+        #expect(store.focused.title == "Climate")  // the only slot in °C
+        await store.waitUntilIdle()
+        #expect(store.messageIsError == false)
+        #expect(store.message?.hasPrefix("Climate reaches 100.0 °C in ") == true)
+        // July and August average 19.7 °C, plus 0.03 °C a year since 2022: 100 °C comes in July 4699.
+        #expect(DateText.monthYear(store.cursor) == "Jul 4699")
+        #expect(store.frame.contains(store.cursor))
+        let reading = try #require(store.cursorState().focusValue)
+        #expect(reading >= 100 && reading < 101)
+    }
+
+    @Test("Readouts land on the step at the cursor, even thousands of years out")
+    func heldFarAhead() {
+        // Far from 2001 a Date can't hold a microsecond's difference; lookups must not rely on one.
+        let june = utc(4699, 6), july = utc(4699, 7), august = utc(4699, 8)
+        let samples = [Sample(time: june, value: 1), Sample(time: july, value: 2), Sample(time: august, value: 3)]
+        #expect(ScenarioStore.held(samples, at: july) == 2)
+        #expect(ScenarioStore.held(samples, at: july.addingTimeInterval(-60)) == 1)
+        #expect(ScenarioStore.held(samples, at: august.addingTimeInterval(86_400)) == 3)
+        #expect(ScenarioStore.held(samples, at: june.addingTimeInterval(-60)) == nil)
+    }
+
+    @Test("goto follows a falling line too, and respects edits made just before")
+    func gotoFalling() async throws {
+        let store = try await makeStore()
+        store.commandText = "goto mortgage $0"
+        store.runCommand()
+        await store.waitUntilIdle()
+        #expect(store.focused.title == "Mortgage")
+        #expect(store.message?.hasPrefix("Mortgage falls to $0 in ") == true)
+        let paidOff = store.cursor
+        #expect(try #require(store.cursorState().focusValue) <= 0)
+
+        // An overpayment queued just before the search is counted: the mortgage ends sooner.
+        store.add(Event(time: utc(2027, 1), kind: "overpay", values: ["amount": 50_000]), toSlotAt: 2)
+        store.commandText = "goto $0"  // Mortgage is focused and in dollars
+        store.runCommand()
+        await store.waitUntilIdle()
+        #expect(store.cursor < paidOff)
+    }
+
+    @Test("goto explains a slot it can't pick, a wrong unit, and a value never reached")
+    func gotoProblems() async throws {
+        let store = try await makeStore()
+        store.focus(named: "climate")
+        store.commandText = "goto $1M"
+        store.runCommand()
+        #expect(store.messageIsError)
+        #expect(store.message?.hasPrefix("Which slot? Savings, Index fund, Mortgage and Energy bill are in dollars.") == true)
+
+        store.commandText = "goto climate $5"
+        store.runCommand()
+        #expect(store.message == "Climate is in °C, not dollars.")
+
+        store.commandText = "goto weather 5°C"
+        store.runCommand()
+        #expect(store.message?.hasPrefix("There's no slot called “weather”.") == true)
+
+        let cursor = store.cursor
+        store.commandText = "goto savings $1"
+        store.runCommand()
+        await store.waitUntilIdle()
+        #expect(store.message == "Savings doesn't fall to $1 in the next 10,000 years.")
+        #expect(store.messageIsError)
+        #expect(store.cursor == cursor)
+    }
+
     @Test("Setting an unknown parameter explains what exists")
     func unknownParameter() async throws {
         let store = try await makeStore()
