@@ -30,7 +30,6 @@ public struct PanelView: View {
     }
 
     public var body: some View {
-        let state = store.panelState()
         let side = PaneSide(rawValue: paneSideName) ?? .right
         VStack(spacing: 0) {
             PanelHeader(store: store, actions: actions)
@@ -38,9 +37,9 @@ public struct PanelView: View {
 
             GeometryReader { area in
                 HStack(alignment: .top, spacing: Self.paneGap) {
-                    if side == .left { pane(state: state, side: side, areaWidth: area.size.width) }
-                    timeline(state: state)
-                    if side == .right { pane(state: state, side: side, areaWidth: area.size.width) }
+                    if side == .left { pane(side: side, areaWidth: area.size.width) }
+                    TimelineArea(store: store)
+                    if side == .right { pane(side: side, areaWidth: area.size.width) }
                 }
                 .overlay {
                     if let location = paneDragLocation {
@@ -53,7 +52,7 @@ public struct PanelView: View {
             .padding(.top, 14)
             .padding(.bottom, 12)
 
-            PanelFooter(store: store, state: state, commandFocused: $commandFocused)
+            PanelFooter(store: store, commandFocused: $commandFocused)
         }
         .foregroundStyle(Theme.text)
         .background(Theme.panel.opacity(store.opacity))
@@ -61,34 +60,9 @@ public struct PanelView: View {
         .onChange(of: store.commandBarFocusRequest) { commandFocused = true }
     }
 
-    private func timeline(state: PanelState) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            FocusTitle(focus: state.focus)
-            GeometryReader { geometry in
-                let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
-                let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height, laneCount: state.lanes.count)
-                TimelineRows(state: state, plotWidth: plotWidth, focusHeight: focusHeight, interactions: TimelineInteractions(
-                    focusLane: { store.focus(index: $0) },
-                    pickDate: { store.beginEvent(at: state.frame.date(atFraction: $0)) },
-                    pickDateOnLane: { index, fraction in
-                        store.beginEvent(at: state.frame.date(atFraction: fraction), slotIndex: index)
-                    }))
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        guard case .active(let location) = phase else { return }
-                        let x = location.x - TimelineLayout.plotLeading
-                        if x >= 0 && x <= plotWidth {
-                            store.setCursor(fraction: Double(x / plotWidth))
-                        }
-                    }
-            }
-        }
-    }
-
-    private func pane(state: PanelState, side: PaneSide, areaWidth: CGFloat) -> some View {
+    private func pane(side: PaneSide, areaWidth: CGFloat) -> some View {
         AddEventPane(
             store: store,
-            preview: state.eventPreview,
             side: side,
             onMoveToOtherSide: {
                 withAnimation(.snappy) { paneSideName = side.other.rawValue }
@@ -108,6 +82,38 @@ public struct PanelView: View {
             .offset(paneOffset)
             .shadow(color: .black.opacity(paneDragLocation == nil ? 0 : 0.5), radius: 24, y: 12)
             .zIndex(1)
+    }
+}
+
+/// The focus title, timeline rows and hover handling. It reads only the timeline state, so
+/// moving the pointer doesn't redraw it; the cursor views inside read the cursor themselves.
+struct TimelineArea: View {
+    let store: ScenarioStore
+
+    var body: some View {
+        let timeline = store.timelineState()
+        VStack(alignment: .leading, spacing: 8) {
+            FocusTitle(focus: timeline.focus)
+            GeometryReader { geometry in
+                let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
+                let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height, laneCount: timeline.lanes.count)
+                TimelineRows(timeline: timeline, cursor: .live(store), plotWidth: plotWidth, focusHeight: focusHeight,
+                             interactions: TimelineInteractions(
+                                focusLane: { store.focus(index: $0) },
+                                pickDate: { store.beginEvent(at: timeline.frame.date(atFraction: $0)) },
+                                pickDateOnLane: { index, fraction in
+                                    store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
+                                }))
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        guard case .active(let location) = phase else { return }
+                        let x = location.x - TimelineLayout.plotLeading
+                        if x >= 0 && x <= plotWidth {
+                            store.setCursor(fraction: Double(x / plotWidth))
+                        }
+                    }
+            }
+        }
     }
 }
 
@@ -251,7 +257,6 @@ struct FocusTitle: View {
 
 struct PanelFooter: View {
     @Bindable var store: ScenarioStore
-    let state: PanelState
     var commandFocused: FocusState<Bool>.Binding
 
     var body: some View {
@@ -276,7 +281,7 @@ struct PanelFooter: View {
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline))
 
-            Text(store.message ?? state.status)
+            Text(store.message ?? store.statusText())
                 .font(.system(size: 12))
                 .foregroundStyle(store.messageIsError ? Theme.error : Theme.secondary)
                 .lineLimit(1)

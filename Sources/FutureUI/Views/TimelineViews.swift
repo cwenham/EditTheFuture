@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import FutureEngine
 
 /// Click handlers for the timeline. Fractions are 0...1 across the plot width.
@@ -11,10 +10,25 @@ struct TimelineInteractions {
     var pickDateOnLane: (Int, Double) -> Void
 }
 
-/// The focused graph, time axis, events strip and lanes, laid out in aligned columns.
-/// Used by the live panel (with interactions) and by the clipboard snapshot (without).
+/// Where cursor-dependent views get their values: the live store (so only they redraw when the
+/// pointer moves) or a fixed snapshot (for the clipboard image).
+enum CursorSource {
+    case live(ScenarioStore)
+    case fixed(CursorState)
+
+    @MainActor var state: CursorState {
+        switch self {
+        case .live(let store): return store.cursorState()
+        case .fixed(let state): return state
+        }
+    }
+}
+
+/// The focused graph, time axis, events strip and lanes, laid out in aligned columns, with the
+/// cursor drawn on top by its own small views.
 struct TimelineRows: View {
-    let state: PanelState
+    let timeline: TimelineState
+    let cursor: CursorSource
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
@@ -22,22 +36,22 @@ struct TimelineRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: TimelineLayout.gap) {
-                YAxisLabels(ticks: state.focus.yTicks, domain: state.focus.yDomain, format: state.focus.format)
+                YAxisLabels(ticks: timeline.focus.yTicks, domain: timeline.focus.yDomain, format: timeline.focus.format)
                     .frame(width: TimelineLayout.labelWidth, height: focusHeight)
-                FocusChart(state: state)
+                FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
-                    .overlay(alignment: .topLeading) { NowLabel(state: state, width: plotWidth) }
+                    .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
                         interactions?.pickDate(Double(location.x / plotWidth))
                     }
-                Readout(focus: state.focus)
+                Readout(cursor: cursor)
                     .frame(width: TimelineLayout.valueWidth, alignment: .topLeading)
             }
 
             HStack(spacing: TimelineLayout.gap) {
                 Color.clear.frame(width: TimelineLayout.labelWidth)
-                TimeAxis(state: state)
+                TimeAxis(timeline: timeline)
                     .frame(width: plotWidth, height: TimelineLayout.axisHeight)
                 Color.clear.frame(width: TimelineLayout.valueWidth)
             }
@@ -52,7 +66,8 @@ struct TimelineRows: View {
                 .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
                 .padding(.trailing, 8)
                 .padding(.top, 2)
-                EventsStrip(markers: state.focus.events, frame: state.frame, color: state.focus.color, draftDate: state.focus.draftDate)
+                EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: timeline.focus.color,
+                            draftDate: timeline.focus.draftDate)
                     .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
@@ -65,11 +80,16 @@ struct TimelineRows: View {
             Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
 
             VStack(spacing: TimelineLayout.laneSpacing) {
-                ForEach(state.lanes) { lane in
-                    LaneRow(lane: lane, state: state, plotWidth: plotWidth, interactions: interactions)
+                ForEach(timeline.lanes) { lane in
+                    LaneRow(lane: lane, timeline: timeline, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
                 }
             }
             .padding(.top, 8)
+        }
+        .overlay(alignment: .topLeading) {
+            CursorOverlay(cursor: cursor, frame: timeline.frame, plotWidth: plotWidth, focusHeight: focusHeight,
+                          focusDomain: timeline.focus.yDomain, focusColor: timeline.focus.color)
+                .allowsHitTesting(false)
         }
     }
 }
@@ -80,137 +100,140 @@ struct YAxisLabels: View {
     let format: ValueFormat
 
     var body: some View {
-        GeometryReader { geometry in
-            ForEach(ticks, id: \.self) { tick in
-                let span = domain.upperBound - domain.lowerBound
-                let y = geometry.size.height * (1 - (tick - domain.lowerBound) / (span == 0 ? 1 : span))
-                Text(format.axis(tick))
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.secondary)
-                    .frame(width: geometry.size.width - 8, alignment: .trailing)
-                    .position(x: (geometry.size.width - 8) / 2, y: y)
+        Canvas { context, size in
+            let span = domain.upperBound - domain.lowerBound
+            for tick in ticks {
+                let y = size.height * (1 - (tick - domain.lowerBound) / (span == 0 ? 1 : span))
+                let label = context.resolve(Text(format.axis(tick)).font(.system(size: 11)).monospacedDigit()
+                    .foregroundStyle(Theme.secondary))
+                // Keep the top and bottom labels inside the canvas instead of half-clipped.
+                let clampedY = min(max(y, 7), size.height - 7)
+                context.draw(label, at: CGPoint(x: size.width - 8, y: clampedY), anchor: .trailing)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Values from \(format.axis(domain.lowerBound)) to \(format.axis(domain.upperBound))")
     }
 }
 
 struct FocusChart: View {
-    let state: PanelState
+    let timeline: TimelineState
 
     var body: some View {
-        let focus = state.focus
-        Chart {
-            if state.now < state.frame.end {
-                RectangleMark(xStart: .value("From", max(state.now, state.frame.start)), xEnd: .value("To", state.frame.end),
-                              yStart: .value("Low", focus.yDomain.lowerBound), yEnd: .value("High", focus.yDomain.upperBound))
-                    .foregroundStyle(Theme.futureTint)
-            }
-            ForEach(focus.yTicks, id: \.self) { tick in
-                RuleMark(y: .value("Grid", tick))
-                    .foregroundStyle(Theme.grid)
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-            }
-            ForEach(focus.samples, id: \.time) { sample in
-                LineMark(x: .value("Date", sample.time), y: .value(focus.name, sample.value), series: .value("Line", "model"))
-                    .foregroundStyle(focus.color)
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineJoin: .round))
-            }
-            ForEach(focus.preview, id: \.time) { sample in
-                LineMark(x: .value("Date", sample.time), y: .value(focus.name, sample.value), series: .value("Line", "preview"))
-                    .foregroundStyle(Theme.proposal)
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineJoin: .round, dash: [6, 5]))
-            }
-            if let draftDate = focus.draftDate {
-                RuleMark(x: .value("New event", draftDate))
-                    .foregroundStyle(Theme.proposal)
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            }
-            RuleMark(x: .value("Now", state.now))
-                .foregroundStyle(Theme.nowLine)
-                .lineStyle(StrokeStyle(lineWidth: 1))
-            RuleMark(x: .value("Cursor", state.cursor))
-                .foregroundStyle(Theme.cursorLine)
-                .lineStyle(StrokeStyle(lineWidth: 1))
-            if let value = focus.cursorValue {
-                PointMark(x: .value("Cursor", state.cursor), y: .value(focus.name, value))
-                    .foregroundStyle(focus.color)
-                    .symbolSize(55)
-            }
+        let focus = timeline.focus
+        var series = [PlotSeries(samples: focus.samples, color: focus.color, lineWidth: 2)]
+        if !focus.preview.isEmpty {
+            series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
         }
-        .chartXScale(domain: state.frame.start...state.frame.end)
-        .chartYScale(domain: focus.yDomain)
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .clipped()
-        .accessibilityLabel("\(focus.name) from \(DateText.monthYear(state.frame.start)) to \(DateText.monthYear(state.frame.end))")
-        .accessibilityValue("\(focus.readoutValue) at \(focus.readoutDate)")
-        .accessibilityHint("Click to pick this date for a new event")
+        var rules = [PlotRule(date: timeline.now, color: Theme.nowLine)]
+        if let draftDate = focus.draftDate {
+            rules.append(PlotRule(date: draftDate, color: Theme.proposal, dash: [3, 3]))
+        }
+        return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
+                          series: series, rules: rules)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(focus.name) from \(DateText.monthYear(timeline.frame.start)) to \(DateText.monthYear(timeline.frame.end))")
+            .accessibilityHint("Click to pick this date for a new event")
     }
 }
 
-struct NowLabel: View {
-    let state: PanelState
-    let width: CGFloat
+/// The cursor line through every plot, the dot on the focused line and the date flag on the axis.
+/// It's the only part of the timeline that redraws when the pointer moves. It uses plain shape
+/// views rather than a Canvas: moving a 1-point line is a cheap layer move, while a full-height
+/// Canvas had to be redrawn pixel by pixel on every pointer move.
+struct CursorOverlay: View {
+    let cursor: CursorSource
+    let frame: TimeFrame
+    let plotWidth: CGFloat
+    let focusHeight: CGFloat
+    let focusDomain: ClosedRange<Double>
+    let focusColor: Color
 
     var body: some View {
-        if state.frame.contains(state.now) {
-            Text(state.nowText)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.text)
-                .fixedSize()
-                .offset(x: state.frame.x(state.now, width: width) + 6, y: 4)
-                .allowsHitTesting(false)
-        }
-    }
-}
-
-struct Readout: View {
-    let focus: FocusedSlotState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(focus.readoutDate)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.secondary)
-            Text(focus.readoutValue)
-                .font(.system(size: 22, weight: .semibold))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(focus.readoutNote)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.secondary)
-        }
-        .padding(.top, 4)
-    }
-}
-
-struct TimeAxis: View {
-    let state: PanelState
-
-    var body: some View {
+        let state = cursor.state
+        let x = TimelineLayout.plotLeading + frame.x(state.date, width: plotWidth)
         GeometryReader { geometry in
-            ForEach(state.yearTicks) { tick in
-                Text(tick.label)
-                    .font(.system(size: 11))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize()
-                    .position(x: state.frame.x(tick.date, width: geometry.size.width), y: 11)
-            }
-            if state.frame.contains(state.cursor) {
-                Text(DateText.monthYear(state.cursor))
+            if frame.contains(state.date) {
+                Rectangle()
+                    .fill(Theme.cursorLine)
+                    .frame(width: 1, height: geometry.size.height)
+                    .offset(x: x - 0.5)
+                if let value = state.focusValue, let y = dotY(value) {
+                    Circle()
+                        .fill(focusColor)
+                        .frame(width: 8, height: 8)
+                        .offset(x: x - 4, y: y - 4)
+                }
+                Text(state.readoutDate)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color(hex: "#14161B"))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Theme.text, in: RoundedRectangle(cornerRadius: 4))
                     .fixedSize()
-                    .position(x: state.frame.x(state.cursor, width: geometry.size.width), y: 11)
+                    .position(x: x, y: focusHeight + TimelineLayout.axisHeight / 2)
             }
         }
+    }
+
+    private func dotY(_ value: Double) -> CGFloat? {
+        let span = focusDomain.upperBound - focusDomain.lowerBound
+        let y = focusHeight * (1 - CGFloat((value - focusDomain.lowerBound) / (span == 0 ? 1 : span)))
+        return y >= 0 && y <= focusHeight ? y : nil
+    }
+}
+
+struct NowLabel: View {
+    let timeline: TimelineState
+    let width: CGFloat
+
+    var body: some View {
+        if timeline.frame.contains(timeline.now) {
+            Text(timeline.nowText)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.text)
+                .fixedSize()
+                .offset(x: timeline.frame.x(timeline.now, width: width) + 6, y: 4)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+struct Readout: View {
+    let cursor: CursorSource
+
+    var body: some View {
+        let state = cursor.state
+        VStack(alignment: .leading, spacing: 2) {
+            Text(state.readoutDate)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+            Text(state.readoutValue)
+                .font(.system(size: 22, weight: .semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(state.readoutNote)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+        }
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct TimeAxis: View {
+    let timeline: TimelineState
+
+    var body: some View {
+        Canvas { context, size in
+            for tick in timeline.yearTicks {
+                let label = context.resolve(Text(tick.label).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary))
+                context.draw(label, at: CGPoint(x: timeline.frame.x(tick.date, width: size.width), y: size.height / 2))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Years " + timeline.yearTicks.map(\.label).joined(separator: ", "))
     }
 }
 
@@ -220,68 +243,58 @@ struct EventsStrip: View {
     let color: Color
     var draftDate: Date?
 
+    /// Drawn in one Canvas instead of a few views per marker, which kept SwiftUI busy on every scroll.
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            ForEach(markers) { marker in
+        Canvas { context, size in
+            let width = size.width
+            context.clip(to: Path(CGRect(origin: .zero, size: size)))
+            for marker in markers {
                 let x = frame.x(marker.date, width: width)
                 switch marker.kind {
                 case .recurring:
                     let startX = max(0, x)
                     let endX = min(width, frame.x(marker.endDate ?? frame.end, width: width))
-                    if endX > startX {
-                        Rectangle()
-                            .fill(color.opacity(0.45))
-                            .frame(width: endX - startX, height: 2)
-                            .position(x: (startX + endX) / 2, y: 26)
-                        Text(marker.label)
-                            .font(.system(size: 11))
-                            .fixedSize()
-                            .offset(x: startX, y: 4)
-                    }
+                    guard endX > startX else { continue }
+                    context.fill(Path(CGRect(x: startX, y: 25, width: endX - startX, height: 2)), with: .color(color.opacity(0.45)))
+                    let label = context.resolve(Text(marker.label).font(.system(size: 11)).foregroundStyle(Theme.text))
+                    context.draw(label, at: CGPoint(x: startX, y: 10), anchor: .leading)
                 case .oneOff:
-                    if x >= 0 && x <= width {
-                        Rectangle()
-                            .fill(color)
-                            .frame(width: 9, height: 9)
-                            .rotationEffect(.degrees(45))
-                            .position(x: x, y: 25)
-                        Text(marker.label)
-                            .font(.system(size: 11))
-                            .fixedSize()
-                            .position(x: x, y: 10)
-                    }
+                    guard x >= 0 && x <= width else { continue }
+                    context.fill(Self.diamond(at: CGPoint(x: x, y: 25), size: 9), with: .color(color))
+                    let label = context.resolve(Text(marker.label).font(.system(size: 11)).foregroundStyle(Theme.text))
+                    context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
                 case .generated:
-                    if x >= 0 && x <= width {
-                        Circle()
-                            .stroke(color, lineWidth: 1.5)
-                            .frame(width: 8, height: 8)
-                            .position(x: x, y: 25)
-                        Text(marker.label)
-                            .font(.system(size: 11).italic())
-                            .foregroundStyle(Theme.secondary)
-                            .fixedSize()
-                            .position(x: x, y: 10)
-                    }
+                    guard x >= 0 && x <= width else { continue }
+                    context.stroke(Path(ellipseIn: CGRect(x: x - 4, y: 21, width: 8, height: 8)), with: .color(color), lineWidth: 1.5)
+                    let label = context.resolve(Text(marker.label).font(.system(size: 11).italic()).foregroundStyle(Theme.secondary))
+                    context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
                 }
             }
             if let draftDate, frame.contains(draftDate) {
-                Rectangle()
-                    .stroke(Theme.proposal, style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
-                    .frame(width: 10, height: 10)
-                    .rotationEffect(.degrees(45))
-                    .position(x: frame.x(draftDate, width: width), y: 25)
+                context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: 25), size: 10),
+                               with: .color(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
             }
         }
-        .clipped()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Events")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Events: " + markers.map(\.label).joined(separator: ", "))
+    }
+
+    static func diamond(at center: CGPoint, size: CGFloat) -> Path {
+        let half = size * 0.7
+        var path = Path()
+        path.move(to: CGPoint(x: center.x, y: center.y - half))
+        path.addLine(to: CGPoint(x: center.x + half, y: center.y))
+        path.addLine(to: CGPoint(x: center.x, y: center.y + half))
+        path.addLine(to: CGPoint(x: center.x - half, y: center.y))
+        path.closeSubpath()
+        return path
     }
 }
 
 struct LaneRow: View {
     let lane: LaneState
-    let state: PanelState
+    let timeline: TimelineState
+    let cursor: CursorSource
     let plotWidth: CGFloat
     var interactions: TimelineInteractions?
 
@@ -311,49 +324,34 @@ struct LaneRow: View {
             .frame(width: TimelineLayout.labelWidth)
             .accessibilityLabel("Focus \(lane.name)")
 
-            LaneChart(lane: lane, state: state)
+            PlotCanvas(frame: timeline.frame, domain: lane.yDomain, now: timeline.now,
+                       series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
+                       rules: [PlotRule(date: timeline.now, color: Theme.nowLine)])
                 .frame(width: plotWidth, height: 36)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 1, coordinateSpace: .local) { location in
                     interactions?.pickDateOnLane(lane.id, Double(location.x / plotWidth))
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(lane.name)
+                .accessibilityHint("Click to pick this date for a new event in \(lane.name)")
 
-            Text(lane.valueText)
-                .font(.system(size: 13))
-                .monospacedDigit()
-                .lineLimit(1)
+            LaneValue(cursor: cursor, slotIndex: lane.id)
                 .frame(width: TimelineLayout.valueWidth, alignment: .trailing)
         }
         .frame(height: TimelineLayout.laneRowHeight)
     }
 }
 
-struct LaneChart: View {
-    let lane: LaneState
-    let state: PanelState
+/// A lane's value at the cursor; redraws on its own when the pointer moves.
+struct LaneValue: View {
+    let cursor: CursorSource
+    let slotIndex: Int
 
     var body: some View {
-        Chart {
-            if state.now < state.frame.end {
-                RectangleMark(xStart: .value("From", max(state.now, state.frame.start)), xEnd: .value("To", state.frame.end),
-                              yStart: .value("Low", lane.yDomain.lowerBound), yEnd: .value("High", lane.yDomain.upperBound))
-                    .foregroundStyle(Theme.futureTint)
-            }
-            ForEach(lane.samples, id: \.time) { sample in
-                LineMark(x: .value("Date", sample.time), y: .value(lane.name, sample.value))
-                    .foregroundStyle(lane.color)
-                    .lineStyle(StrokeStyle(lineWidth: 1.6))
-            }
-            RuleMark(x: .value("Now", state.now)).foregroundStyle(Theme.nowLine).lineStyle(StrokeStyle(lineWidth: 1))
-            RuleMark(x: .value("Cursor", state.cursor)).foregroundStyle(Theme.cursorLine).lineStyle(StrokeStyle(lineWidth: 1))
-        }
-        .chartXScale(domain: state.frame.start...state.frame.end)
-        .chartYScale(domain: lane.yDomain)
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .clipped()
-        .accessibilityLabel("\(lane.name): \(lane.valueText) at \(DateText.monthYear(state.cursor))")
-        .accessibilityHint("Click to pick this date for a new event in \(lane.name)")
+        Text(cursor.state.laneValues[slotIndex] ?? "—")
+            .font(.system(size: 13))
+            .monospacedDigit()
+            .lineLimit(1)
     }
 }

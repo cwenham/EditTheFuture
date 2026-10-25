@@ -21,7 +21,7 @@ public struct SnapshotView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondary)
             }
-            TimelineRows(state: state, plotWidth: plotWidth)
+            TimelineRows(timeline: state.timeline, cursor: .fixed(state.cursor), plotWidth: plotWidth)
             Text("Edit The Future · \(state.nowText)")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondary)

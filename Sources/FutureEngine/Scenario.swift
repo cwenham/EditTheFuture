@@ -48,6 +48,11 @@ public struct EventRoute: Hashable, Sendable, Codable {
 public struct Sample: Hashable, Sendable {
     public let time: Date
     public let value: Double
+
+    public init(time: Date, value: Double) {
+        self.time = time
+        self.value = value
+    }
 }
 
 /// A set of model slots sharing one start date, with their events and connections.
@@ -66,21 +71,36 @@ public final class Scenario {
     public let seed: UInt64
     public let checkpointInterval: Int
 
-    private struct Slot {
+    /// A slot's bookkeeping. A class, so that slots in different groups can be computed on
+    /// different threads without writing to a shared array (see `ensureAll(through:)`).
+    private final class Slot {
         let name: String
         let runner: any AnySlotRunner
-        var authored: [Event] = []
-        var recurring: [RecurringEvent] = []
-        var readings: [Reading] = []
+        var authored: [Event]
+        var recurring: [RecurringEvent]
+        var readings: [Reading]
         /// Events this slot generated, in time order.
         var generated: [Event] = []
+        /// Set while the slot is computing a step, to catch same-step loops.
+        var isStepping = false
+
+        init(name: String, runner: any AnySlotRunner, authored: [Event] = [], recurring: [RecurringEvent] = [],
+             readings: [Reading] = []) {
+            self.name = name
+            self.runner = runner
+            self.authored = authored
+            self.recurring = recurring
+            self.readings = readings
+        }
     }
 
     private var slots: [Slot] = []
+    /// Groups of slots joined by connections or event routes. Groups never read each other,
+    /// so they can be computed in parallel.
+    private var groups: [[SlotID]] = []
     private var explicitConnections: [Connection] = []
     private var explicitRoutes: [EventRoute] = []
     private var isPrepared = false
-    private var stepping: Set<SlotID> = []
 
     /// All connections, including ones resolved from by-name references. Current after `validate()`.
     public private(set) var connections: [Connection] = []
@@ -210,7 +230,8 @@ public final class Scenario {
         try ensure(slot, through: date)
         let runner = slots[slot.rawValue].runner
         let index = runner.lastComputedIndex(atOrBefore: date)!
-        return runner.history[index][variable] ?? .nan
+        guard let column = runner.column(of: variable) else { return .nan }
+        return runner.value(at: index, column: column)
     }
 
     /// The variable at every communication point from `from` through `through`.
@@ -221,10 +242,13 @@ public final class Scenario {
         guard let high = runner.lastComputedIndex(atOrBefore: through) else { return [] }
         var low = runner.lastComputedIndex(atOrBefore: from) ?? 0
         if runner.times[low] < from { low += 1 }
-        guard low <= high else { return [] }
-        return (low...high).compactMap { index in
-            runner.history[index][variable].map { Sample(time: runner.times[index], value: $0) }
+        guard low <= high, let column = runner.column(of: variable) else { return [] }
+        var samples: [Sample] = []
+        samples.reserveCapacity(high - low + 1)
+        for index in low...high {
+            samples.append(Sample(time: runner.times[index], value: runner.value(at: index, column: column)))
         }
+        return samples
     }
 
     /// Time of the last point computed so far, or nil if nothing is computed.
@@ -344,6 +368,8 @@ public final class Scenario {
         try checkForSameStepLoops(resolvedConnections, resolvedRoutes)
         connections = resolvedConnections
         eventRoutes = resolvedRoutes
+        groups = Self.groups(slotCount: slots.count,
+                             links: resolvedConnections.map { ($0.from, $0.to) } + resolvedRoutes.map { ($0.from, $0.to) })
         isPrepared = true
     }
 
@@ -376,6 +402,63 @@ public final class Scenario {
         }
     }
 
+    /// Computes every slot through `date`, running independent groups of slots on separate cores.
+    ///
+    /// Slots in different groups share nothing that changes while computing: each group writes
+    /// only to its own slots' objects, and the scenario's wiring is fixed during the call. So the
+    /// groups run concurrently, and the call returns when all of them are done.
+    public func ensureAll(through date: Date) throws {
+        try prepareIfNeeded()
+        guard date >= start else { return }
+        let pending = groups.filter { group in
+            group.contains { id in
+                let runner = slots[id.rawValue].runner
+                return runner.grid.point(runner.computedCount) <= date
+            }
+        }
+        if pending.count <= 1 {
+            for group in pending {
+                for id in group { try advance(id, through: date) }
+            }
+            return
+        }
+        let scenario = UncheckedSendable(self)
+        let failures = FailureCollector()
+        DispatchQueue.concurrentPerform(iterations: pending.count) { index in
+            do {
+                for id in pending[index] { try scenario.value.advance(id, through: date) }
+            } catch {
+                failures.record(error)
+            }
+        }
+        if let error = failures.first { throw error }
+    }
+
+    /// Splits slots into groups joined by links (union-find).
+    static func groups(slotCount: Int, links: [(SlotID, SlotID)]) -> [[SlotID]] {
+        var parent = Array(0..<slotCount)
+        func root(_ node: Int) -> Int {
+            var node = node
+            while parent[node] != node {
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            }
+            return node
+        }
+        for (a, b) in links {
+            let ra = root(a.rawValue), rb = root(b.rawValue)
+            if ra != rb { parent[ra] = rb }
+        }
+        var byRoot: [Int: [SlotID]] = [:]
+        var order: [Int] = []
+        for node in 0..<slotCount {
+            let r = root(node)
+            if byRoot[r] == nil { order.append(r) }
+            byRoot[r, default: []].append(SlotID(rawValue: node))
+        }
+        return order.map { byRoot[$0]! }
+    }
+
     private func advance(_ slot: SlotID, through date: Date) throws {
         guard date >= start else { return }
         let runner = slots[slot.rawValue].runner
@@ -385,12 +468,15 @@ public final class Scenario {
     }
 
     private func computeNext(_ id: SlotID) throws {
+        // Read the slot's fields in place: copying the whole Slot each step retains and releases
+        // all of its arrays, which showed up in profiles.
+        let slotName = slots[id.rawValue].name
         let slot = slots[id.rawValue]
-        guard !stepping.contains(id) else { throw EngineError.reentrantStep(slot: slot.name) }
-        stepping.insert(id)
-        defer { stepping.remove(id) }
+        guard !slot.isStepping else { throw EngineError.reentrantStep(slot: slotName) }
+        slot.isStepping = true
+        defer { slot.isStepping = false }
 
-        let runner = slot.runner
+        let runner = slots[id.rawValue].runner
         let index = runner.computedCount
         let window = StepWindow.forStep(index, on: runner.grid)
 
@@ -405,15 +491,19 @@ public final class Scenario {
         var events: [Event] = []
         var readings: [Reading] = []
         if index > 0 {
-            events += slot.authored.filter { window.contains($0.time) }
-            for rule in slot.recurring {
+            for event in slots[id.rawValue].authored where window.contains(event.time) {
+                events.append(event)
+            }
+            for rule in slots[id.rawValue].recurring {
                 events += rule.occurrences(in: window, calendar: calendar)
             }
             for route in eventRoutes where route.to == id {
                 events += try deliveredEvents(route, index: index, grid: runner.grid)
             }
-            events.sort(by: Event.stepOrder)
-            readings = slot.readings.filter { window.contains($0.time) }
+            if events.count > 1 { events.sort(by: Event.stepOrder) }
+            for reading in slots[id.rawValue].readings where window.contains(reading.time) {
+                readings.append(reading)
+            }
         }
 
         let slotSeed = seed(for: id)
@@ -427,14 +517,14 @@ public final class Scenario {
                 let generated = try runner.computeStep(context)
                 let stamped = generated.enumerated().map { offset, event in
                     Event(id: UUID.deterministic(slotSeed ^ UInt64(index), UInt64(offset)), time: window.upper,
-                          kind: event.kind, values: event.values, source: .generated(slot: slot.name))
+                          kind: event.kind, values: event.values, source: .generated(slot: slotName))
                 }
                 slots[id.rawValue].generated.append(contentsOf: stamped)
             }
         } catch let error as EngineError {
             throw error
         } catch {
-            throw EngineError.modelFailed(slot: slot.name, message: String(describing: error))
+            throw EngineError.modelFailed(slot: slotName, message: String(describing: error))
         }
     }
 
@@ -455,12 +545,10 @@ public final class Scenario {
 
     private func sample(_ slot: SlotID, variable: String, resampling: Resampling, window: StepWindow) throws -> Double {
         let runner = slots[slot.rawValue].runner
-        func value(at index: Int) throws -> Double {
-            guard let value = runner.history[index][variable] else {
-                throw EngineError.unknownVariable(slot: name(of: slot), variable: variable)
-            }
-            return value
+        guard let column = runner.column(of: variable) else {
+            throw EngineError.unknownVariable(slot: name(of: slot), variable: variable)
         }
+        func value(at index: Int) throws -> Double { runner.value(at: index, column: column) }
         func held() throws -> Double {
             guard let index = runner.lastComputedIndex(atOrBefore: window.upper) else {
                 preconditionFailure("producer not computed through \(window.upper)")
@@ -492,6 +580,45 @@ public final class Scenario {
             window = StepWindow.forStep(index - 1, on: grid)
         }
         try advance(route.from, through: window.upper)
-        return slots[route.from.rawValue].generated.filter { $0.kind == route.kind && window.contains($0.time) }
+        // Generated events are kept in time order, so find the window by binary search.
+        let generated = slots[route.from.rawValue].generated
+        var low = 0, high = generated.count
+        while low < high {
+            let mid = (low + high) / 2
+            if generated[mid].time < window.lower { low = mid + 1 } else { high = mid }
+        }
+        var delivered: [Event] = []
+        var index = low
+        while index < generated.count, generated[index].time <= window.upper {
+            let event = generated[index]
+            if event.kind == route.kind && window.contains(event.time) { delivered.append(event) }
+            index += 1
+        }
+        return delivered
+    }
+}
+
+/// Lets a value cross into `DispatchQueue.concurrentPerform`. Only used where each task touches
+/// disjoint state, as explained at the call site.
+private struct UncheckedSendable<Value>: @unchecked Sendable {
+    let value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+/// Collects the first error thrown by parallel tasks.
+private final class FailureCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var error: Error?
+
+    func record(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        if self.error == nil { self.error = error }
+    }
+
+    var first: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return error
     }
 }

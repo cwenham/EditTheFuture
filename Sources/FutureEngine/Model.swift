@@ -194,6 +194,17 @@ public protocol TimelineModel: Sendable {
 
     /// Current values of readable variables (outputs and parameters), by name.
     func values(of state: State) -> [String: Double]
+
+    /// The same values in `descriptor.readable` order. The engine stores history this way, which is
+    /// much faster than a dictionary per step. The default builds it from `values(of:)`.
+    func readableValues(of state: State) -> [Double]
+}
+
+extension TimelineModel {
+    public func readableValues(of state: State) -> [Double] {
+        let values = values(of: state)
+        return descriptor.readable.map { values[$0.name] ?? .nan }
+    }
 }
 
 /// A small, fast random generator (SplitMix64) seeded per slot and step.

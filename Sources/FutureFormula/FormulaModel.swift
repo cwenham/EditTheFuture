@@ -14,9 +14,10 @@ import FutureEngine
 /// Each step: `set` events update parameters, differential equations are integrated,
 /// definitions are evaluated in dependency order, `on` handlers run, then `when` triggers fire.
 public struct FormulaModel: TimelineModel {
+    /// Parameter and variable values by position (see `Executable`), so steps use arrays, not dictionaries.
     public struct State: Sendable {
-        var params: [String: Double]
-        var values: [String: Double]
+        var parameters: [Double]
+        var values: [Double]
         /// Whether each `when` condition was true at the previous point (triggers fire on rising edges).
         var triggerStates: [Bool]
     }
@@ -27,6 +28,7 @@ public struct FormulaModel: TimelineModel {
     public let source: String
     public let descriptor: ModelDescriptor
     private let program: CompiledProgram
+    private let executable: Executable
 
     /// Kinds of this slot's own events that the formula handles with `on kind:`, in order.
     /// `set` events are always handled (they change parameters) and aren't listed.
@@ -45,6 +47,7 @@ public struct FormulaModel: TimelineModel {
         self.source = source
         let program = try Analyzer.compile(Parser.parse(source))
         self.program = program
+        self.executable = program.makeExecutable()
 
         var variables = program.params.map { Variable(name: $0.name, causality: .parameter) }
         variables += program.variableNames.map { Variable(name: $0, causality: .output) }
@@ -66,73 +69,80 @@ public struct FormulaModel: TimelineModel {
     }
 
     public func start(_ context: StepContext) throws -> State {
-        var evaluator = Evaluator(params: [:], current: [:], previous: [:], inputs: context.inputs,
+        let zeros = [Double](repeating: 0, count: executable.variableCount)
+        var evaluator = Evaluator(parameters: [Double](repeating: 0, count: executable.parameterCount),
+                                  current: zeros, previous: zeros, inputs: inputs(from: context),
                                   builtins: builtins(for: context), random: context.makeRandom())
-        for param in program.params {
-            evaluator.params[param.name] = try evaluator.evaluate(param.expr)
+        for parameter in executable.parameters {
+            evaluator.parameters[parameter.index] = try evaluator.evaluate(parameter.expr)
         }
-        for initial in program.inits {
-            evaluator.current[initial.name] = try evaluator.evaluate(initial.expr)
+        for initial in executable.inits {
+            evaluator.current[initial.index] = try evaluator.evaluate(initial.expr)
         }
         // At the start, x[t-1] means the starting value (or 0).
         evaluator.previous = evaluator.current
-        for definition in program.definitionOrder where evaluator.current[definition.name] == nil {
-            evaluator.current[definition.name] = try evaluator.evaluate(definition.expr)
+        for definition in executable.definitions where !executable.variableHasInit[definition.index] {
+            evaluator.current[definition.index] = try evaluator.evaluate(definition.expr)
         }
-        return State(params: evaluator.params, values: evaluator.current,
-                     triggerStates: Array(repeating: false, count: program.triggers.count))
+        return State(parameters: evaluator.parameters, values: evaluator.current,
+                     triggerStates: Array(repeating: false, count: executable.triggers.count))
     }
 
     public func doStep(_ state: inout State, _ context: StepContext) throws -> [GeneratedEvent] {
-        var evaluator = Evaluator(params: state.params, current: state.values, previous: state.values,
-                                  inputs: context.inputs, builtins: builtins(for: context), random: context.makeRandom())
+        var evaluator = Evaluator(parameters: state.parameters, current: state.values, previous: state.values,
+                                  inputs: inputs(from: context), builtins: builtins(for: context),
+                                  random: context.makeRandom())
 
         // 1. Parameter changes.
         for event in context.events where event.kind == Event.setKind && event.originSlot == nil {
-            for (name, value) in event.values where evaluator.params[name] != nil {
-                evaluator.params[name] = value
+            for (name, value) in event.values {
+                if let index = executable.parameterIndex[name] { evaluator.parameters[index] = value }
             }
         }
 
         // 2. Differential equations (RK4).
-        if !program.odes.isEmpty {
+        if !executable.odes.isEmpty {
             try integrate(&evaluator, over: stepLength(context))
         }
 
         // 3. Definitions.
-        for definition in program.definitionOrder {
-            evaluator.current[definition.name] = try evaluator.evaluate(definition.expr)
+        for definition in executable.definitions {
+            evaluator.current[definition.index] = try evaluator.evaluate(definition.expr)
         }
 
         // 4. Event handlers.
-        for event in context.events where !(event.kind == Event.setKind && event.originSlot == nil) {
-            for handler in program.handlers where handler.kind == event.kind && handler.origin == event.originSlot {
-                evaluator.event = event
-                for action in handler.actions {
-                    let value = try evaluator.evaluate(action.expr)
-                    let isParameter = evaluator.params[action.target] != nil
-                    let old = (isParameter ? evaluator.params[action.target] : evaluator.current[action.target]) ?? 0
-                    let new: Double
-                    switch action.op {
-                    case .set: new = value
-                    case .add: new = old + value
-                    case .subtract: new = old - value
-                    case .multiply: new = old * value
-                    case .divide: new = old / value
+        if !context.events.isEmpty {
+            for event in context.events where !(event.kind == Event.setKind && event.originSlot == nil) {
+                for handler in executable.handlers where handler.kind == event.kind && handler.origin == event.originSlot {
+                    evaluator.event = event
+                    for action in handler.actions {
+                        let value = try evaluator.evaluate(action.expr)
+                        let old: Double
+                        switch action.target {
+                        case .variable(let index): old = evaluator.current[index]
+                        case .parameter(let index): old = evaluator.parameters[index]
+                        }
+                        let new: Double
+                        switch action.op {
+                        case .set: new = value
+                        case .add: new = old + value
+                        case .subtract: new = old - value
+                        case .multiply: new = old * value
+                        case .divide: new = old / value
+                        }
+                        switch action.target {
+                        case .variable(let index): evaluator.current[index] = new
+                        case .parameter(let index): evaluator.parameters[index] = new
+                        }
                     }
-                    if isParameter {
-                        evaluator.params[action.target] = new
-                    } else {
-                        evaluator.current[action.target] = new
-                    }
+                    evaluator.event = nil
                 }
-                evaluator.event = nil
             }
         }
 
         // 5. Triggers fire when their condition turns true.
         var generated: [GeneratedEvent] = []
-        for (index, trigger) in program.triggers.enumerated() {
+        for (index, trigger) in executable.triggers.enumerated() {
             let isTrue = try evaluator.evaluate(trigger.condition) != 0
             if isTrue && !state.triggerStates[index] {
                 generated.append(GeneratedEvent(kind: trigger.kind))
@@ -140,60 +150,96 @@ public struct FormulaModel: TimelineModel {
             state.triggerStates[index] = isTrue
         }
 
-        state.params = evaluator.params
+        state.parameters = evaluator.parameters
         state.values = evaluator.current
         return generated
     }
 
     public func values(of state: State) -> [String: Double] {
-        state.params.merging(state.values) { _, variable in variable }
+        var values: [String: Double] = [:]
+        for (name, index) in executable.parameterIndex { values[name] = state.parameters[index] }
+        for (index, name) in program.variableNames.enumerated() { values[name] = state.values[index] }
+        return values
+    }
+
+    /// Parameters then variables: the same order as `descriptor.readable`.
+    public func readableValues(of state: State) -> [Double] {
+        state.parameters + state.values
     }
 
     // MARK: Helpers
+
+    private func inputs(from context: StepContext) -> [Double] {
+        executable.inputNames.map { context.inputs[$0] ?? 0 }
+    }
 
     /// Length of the step in the program's time unit (the step's own unit unless `timeunit` says otherwise).
     private func stepLength(_ context: StepContext) -> Double {
         context.to.timeIntervalSince(context.from) / program.timeUnit.approximateSeconds
     }
 
+    /// RK4 over the step. Stage values of the ODE variables are written into `current`; every
+    /// other variable still holds the previous step's value while derivatives are evaluated.
     private func integrate(_ evaluator: inout Evaluator, over length: Double) throws {
-        let odes = program.odes
-        var y = odes.map { evaluator.current[$0.name] ?? 0 }
+        let odes = executable.odes
+        var y = odes.map { evaluator.current[$0.index] }
         let h = length / Double(Self.odeSubsteps)
+        func derivatives(at values: [Double]) throws -> [Double] {
+            for (ode, value) in zip(odes, values) { evaluator.current[ode.index] = value }
+            var result: [Double] = []
+            result.reserveCapacity(odes.count)
+            for ode in odes { result.append(try evaluator.evaluate(ode.expr)) }
+            return result
+        }
         func offset(_ y: [Double], _ k: [Double], _ factor: Double) -> [Double] {
             zip(y, k).map { $0 + factor * $1 }
         }
         for _ in 0..<Self.odeSubsteps {
-            let k1 = try evaluator.derivatives(odes, at: y)
-            let k2 = try evaluator.derivatives(odes, at: offset(y, k1, h / 2))
-            let k3 = try evaluator.derivatives(odes, at: offset(y, k2, h / 2))
-            let k4 = try evaluator.derivatives(odes, at: offset(y, k3, h))
+            let k1 = try derivatives(at: y)
+            let k2 = try derivatives(at: offset(y, k1, h / 2))
+            let k3 = try derivatives(at: offset(y, k2, h / 2))
+            let k4 = try derivatives(at: offset(y, k3, h))
             for i in y.indices {
                 y[i] += h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
             }
         }
-        evaluator.stage = [:]
-        for (ode, value) in zip(odes, y) { evaluator.current[ode.name] = value }
+        for (ode, value) in zip(odes, y) { evaluator.current[ode.index] = value }
     }
 
-    private func builtins(for context: StepContext) -> [String: Double] {
+    /// Values of the built-ins this formula uses (and only those) at the end of the step, by `Builtin` position.
+    private func builtins(for context: StepContext) -> [Double] {
+        var values = [Double](repeating: 0, count: Builtin.allCases.count)
+        let used = executable.usedBuiltins
+        guard !used.isEmpty else { return values }
+        if used.contains(.pi) { values[Builtin.pi.index] = Double.pi }
+        if used.contains(.step) { values[Builtin.step.index] = Double(context.index) }
+        if used.contains(.days) { values[Builtin.days.index] = context.to.timeIntervalSince(context.scenarioStart) / 86_400 }
+        if used.contains(.dt) { values[Builtin.dt.index] = context.index == 0 ? 0 : stepLength(context) }
+        guard used.contains(.year) || used.contains(.month) || used.contains(.day) || used.contains(.dayOfYear) else {
+            return values
+        }
+
         let time = context.to
-        let calendar = context.calendar
-        let parts = calendar.dateComponents([.year, .month, .day], from: time)
-        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: time) ?? 1
-        let daysInYear = calendar.range(of: .day, in: .year, for: time)?.count ?? 365
-        let startOfDay = calendar.startOfDay(for: time)
-        let fractionOfDay = time.timeIntervalSince(startOfDay) / 86_400
-        let year = Double(parts.year ?? 0) + (Double(dayOfYear - 1) + fractionOfDay) / Double(daysInYear)
-        return [
-            "pi": Double.pi,
-            "step": Double(context.index),
-            "year": year,
-            "month": Double(parts.month ?? 1),
-            "day": Double(parts.day ?? 1),
-            "dayOfYear": Double(dayOfYear),
-            "days": time.timeIntervalSince(context.scenarioStart) / 86_400,
-            "dt": context.index == 0 ? 0 : stepLength(context),
-        ]
+        let year: Int, month: Int, day: Int, dayOfYear: Int, daysInYear: Int
+        let fractionOfDay: Double
+        if context.calendar.isUTCGregorian {
+            let civil = CivilDate(time)
+            (year, month, day) = (civil.year, civil.month, civil.day)
+            dayOfYear = civil.dayOfYear
+            daysInYear = civil.daysInYear
+            fractionOfDay = civil.secondsIntoDay / 86_400
+        } else {
+            let calendar = context.calendar
+            let parts = calendar.dateComponents([.year, .month, .day], from: time)
+            (year, month, day) = (parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
+            dayOfYear = calendar.ordinality(of: .day, in: .year, for: time) ?? 1
+            daysInYear = calendar.range(of: .day, in: .year, for: time)?.count ?? 365
+            fractionOfDay = time.timeIntervalSince(calendar.startOfDay(for: time)) / 86_400
+        }
+        values[Builtin.year.index] = Double(year) + (Double(dayOfYear - 1) + fractionOfDay) / Double(daysInYear)
+        values[Builtin.month.index] = Double(month)
+        values[Builtin.day.index] = Double(day)
+        values[Builtin.dayOfYear.index] = Double(dayOfYear)
+        return values
     }
 }

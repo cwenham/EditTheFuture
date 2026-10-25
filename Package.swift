@@ -17,6 +17,8 @@ let package = Package(
         .target(name: "FutureCommands"),
         .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureCommands"]),
         .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine"]),
+        // Performance benchmarks: swift run -c release etf-bench
+        .executableTarget(name: "etf-bench", dependencies: ["FutureUI", "FutureFormula", "FutureEngine"]),
         .testTarget(name: "FutureEngineTests", dependencies: ["FutureEngine"]),
         .testTarget(name: "FutureFormulaTests", dependencies: ["FutureFormula", "FutureEngine"]),
         .testTarget(name: "FutureCommandsTests", dependencies: ["FutureCommands"]),

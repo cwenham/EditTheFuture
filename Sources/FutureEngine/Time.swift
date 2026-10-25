@@ -79,16 +79,31 @@ public struct TimeGrid: Hashable, Sendable {
     public let start: Date
     public let rate: StepRate
     public let calendar: Calendar
+    /// The start as a UTC calendar day, when `CivilDate` arithmetic can replace `Calendar`.
+    private let civilStart: CivilDate?
 
     public init(start: Date, rate: StepRate, calendar: Calendar = .utcGregorian) {
         self.start = start
         self.rate = rate
         self.calendar = calendar
+        self.civilStart = calendar.isUTCGregorian ? CivilDate(start) : nil
     }
 
     public func point(_ index: Int) -> Date {
         if index == 0 { return start }
         let step = rate.calendarStep
+        if let civilStart {
+            let amount = step.count * index
+            switch step.component {
+            case .second: return start.addingTimeInterval(Double(amount))
+            case .minute: return start.addingTimeInterval(Double(amount) * 60)
+            case .hour: return start.addingTimeInterval(Double(amount) * 3_600)
+            case .day: return start.addingTimeInterval(Double(amount) * 86_400)
+            case .month: return civilStart.addingMonths(amount)
+            case .year: return civilStart.addingMonths(amount * 12)
+            default: break
+            }
+        }
         return calendar.date(byAdding: step.component, value: step.count * index, to: start)!
     }
 

@@ -1,0 +1,149 @@
+import SwiftUI
+import FutureEngine
+
+/// One line on a plot.
+struct PlotSeries {
+    var samples: [Sample]
+    var color: Color
+    var lineWidth: CGFloat
+    var dash: [CGFloat] = []
+}
+
+/// A vertical line at a date (now, the cursor, a new event's date).
+struct PlotRule {
+    var date: Date
+    var color: Color
+    var lineWidth: CGFloat = 1
+    var dash: [CGFloat] = []
+}
+
+/// A dot on a line (the cursor's value).
+struct PlotMarker {
+    var date: Date
+    var value: Double
+    var color: Color
+    var diameter: CGFloat = 8
+}
+
+/// Draws lines over a time frame with a single `Canvas` pass.
+///
+/// This replaced Swift Charts, which built one mark per data point and spent most of each
+/// frame in generic view-graph work: a few thousand marks took 40–100 ms per frame. A path
+/// per line takes well under a millisecond. Points that would land in the same pixel column
+/// are reduced to that column's first, lowest, highest and last values, so even a daily model
+/// over a century draws only a few thousand points.
+struct PlotCanvas: View {
+    let frame: TimeFrame
+    let domain: ClosedRange<Double>
+    let now: Date
+    var gridValues: [Double] = []
+    let series: [PlotSeries]
+    var rules: [PlotRule] = []
+    var marker: PlotMarker?
+
+    var body: some View {
+        Canvas { context, size in
+            let span = domain.upperBound - domain.lowerBound
+            let x = { (date: Date) in frame.x(date, width: size.width) }
+            let y = { (value: Double) in size.height * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span))) }
+            context.clip(to: Path(CGRect(origin: .zero, size: size)))
+
+            if now < frame.end {
+                let start = max(0, x(now))
+                context.fill(Path(CGRect(x: start, y: 0, width: size.width - start, height: size.height)), with: .color(Theme.futureTint))
+            }
+            if !gridValues.isEmpty {
+                var grid = Path()
+                for value in gridValues {
+                    let lineY = y(value)
+                    grid.move(to: CGPoint(x: 0, y: lineY))
+                    grid.addLine(to: CGPoint(x: size.width, y: lineY))
+                }
+                context.stroke(grid, with: .color(Theme.grid), lineWidth: 1)
+            }
+            for line in series {
+                let path = Self.path(for: line.samples, frame: frame, size: size, x: x, y: y)
+                context.stroke(path, with: .color(line.color),
+                               style: StrokeStyle(lineWidth: line.lineWidth, lineCap: .round, lineJoin: .round, dash: line.dash))
+            }
+            for rule in rules where frame.contains(rule.date) {
+                var path = Path()
+                let ruleX = x(rule.date)
+                path.move(to: CGPoint(x: ruleX, y: 0))
+                path.addLine(to: CGPoint(x: ruleX, y: size.height))
+                context.stroke(path, with: .color(rule.color), style: StrokeStyle(lineWidth: rule.lineWidth, dash: rule.dash))
+            }
+            if let marker, frame.contains(marker.date) {
+                let center = CGPoint(x: x(marker.date), y: y(marker.value))
+                let d = marker.diameter
+                context.fill(Path(ellipseIn: CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)), with: .color(marker.color))
+            }
+        }
+    }
+
+    /// The line through the samples inside the frame (plus one either side so it reaches the edges),
+    /// thinned to at most four points per pixel column.
+    static func path(for samples: [Sample], frame: TimeFrame, size: CGSize,
+                     x: (Date) -> CGFloat, y: (Double) -> CGFloat) -> Path {
+        var path = Path()
+        guard !samples.isEmpty else { return path }
+        var low = firstIndex(in: samples, atOrAfter: frame.start)
+        if low > 0 { low -= 1 }
+        var high = firstIndex(in: samples, atOrAfter: frame.end)
+        if high >= samples.count { high = samples.count - 1 }
+        guard low <= high else { return path }
+
+        let count = high - low + 1
+        if count <= Int(size.width) * 2 {
+            path.move(to: CGPoint(x: x(samples[low].time), y: y(samples[low].value)))
+            if high > low {
+                for index in (low + 1)...high {
+                    path.addLine(to: CGPoint(x: x(samples[index].time), y: y(samples[index].value)))
+                }
+            }
+            return path
+        }
+
+        // Min/max per pixel column, keeping the order the extremes occurred in.
+        var column = Int.min
+        var first = 0.0, last = 0.0, minimum = 0.0, maximum = 0.0
+        var minIndex = 0, maxIndex = 0
+        var started = false
+        func flush() {
+            guard column != Int.min else { return }
+            let columnX = CGFloat(column)
+            let points = minIndex <= maxIndex ? [first, minimum, maximum, last] : [first, maximum, minimum, last]
+            for value in points {
+                let point = CGPoint(x: columnX, y: y(value))
+                if started { path.addLine(to: point) } else { path.move(to: point); started = true }
+            }
+        }
+        for index in low...high {
+            let sample = samples[index]
+            let sampleColumn = Int(x(sample.time).rounded(.down))
+            if sampleColumn != column {
+                flush()
+                column = sampleColumn
+                first = sample.value
+                minimum = sample.value
+                maximum = sample.value
+                minIndex = index
+                maxIndex = index
+            }
+            if sample.value < minimum { minimum = sample.value; minIndex = index }
+            if sample.value > maximum { maximum = sample.value; maxIndex = index }
+            last = sample.value
+        }
+        flush()
+        return path
+    }
+
+    static func firstIndex(in samples: [Sample], atOrAfter date: Date) -> Int {
+        var low = 0, high = samples.count
+        while low < high {
+            let mid = (low + high) / 2
+            if samples[mid].time < date { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+}

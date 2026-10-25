@@ -11,7 +11,6 @@ public enum PaneSide: String, Sendable {
 /// can be scrolled freely to watch the draft's effect play out.
 struct AddEventPane: View {
     @Bindable var store: ScenarioStore
-    let preview: EventPreviewState?
     let side: PaneSide
     var onMoveToOtherSide: () -> Void
     var onDragChanged: (DragGesture.Value) -> Void
@@ -89,7 +88,7 @@ struct AddEventPane: View {
                     .foregroundStyle(Theme.secondary)
             }
 
-            effectBox
+            EffectBox(store: store, isSetParameter: isSetParameter)
 
             if let error = store.draftError {
                 Text(error).font(.system(size: 12)).foregroundStyle(Theme.error)
@@ -153,37 +152,6 @@ struct AddEventPane: View {
         #endif
     }
 
-    private var effectBox: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Effect").font(.system(size: 11)).foregroundStyle(Theme.secondary)
-            if let preview {
-                effectRow("At cursor · \(preview.cursorDate)", preview.atCursor)
-                effectRow("At right edge · \(preview.edgeDate)", preview.atEdge)
-                Text("Scroll the timeline to watch it play out")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondary)
-            } else {
-                Text(isSetParameter ? "Enter a value to see its effect over time" : "Enter an amount to see its effect over time")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.secondary)
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.proposal.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func effectRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(Theme.proposal)
-        }
-    }
-
     private struct KindOption {
         let kind: EventDraft.Kind
         let title: String
@@ -201,6 +169,44 @@ struct AddEventPane: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The draft's effect at the cursor and at the right edge. It's the only part of the pane that
+/// follows the pointer, so it reads the store on its own.
+struct EffectBox: View {
+    let store: ScenarioStore
+    let isSetParameter: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Effect").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            if let preview = store.eventPreview() {
+                row("At cursor · \(preview.cursorDate)", preview.atCursor)
+                row("At right edge · \(preview.edgeDate)", preview.atEdge)
+                Text("Scroll the timeline to watch it play out")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondary)
+            } else {
+                Text(isSetParameter ? "Enter a value to see its effect over time" : "Enter an amount to see its effect over time")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.proposal.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Theme.proposal)
+        }
     }
 }
 

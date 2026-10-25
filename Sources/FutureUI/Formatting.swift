@@ -1,4 +1,5 @@
 import Foundation
+import FutureEngine
 
 /// How a slot's values are shown.
 public enum ValueFormat: String, Sendable, Codable, Hashable {
@@ -36,12 +37,19 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
         }
     }
 
+    /// "41223" → "41,223". Written out by hand: creating a NumberFormatter per label was a
+    /// measurable part of each frame.
     static func grouped(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        formatter.locale = Locale(identifier: "en_US")
-        return formatter.string(from: NSNumber(value: value)) ?? String(Int(value))
+        guard value.isFinite, abs(value) < 9e15 else { return String(value) }
+        let integer = Int(value.rounded())
+        let digits = String(abs(integer))
+        var result = ""
+        result.reserveCapacity(digits.count + digits.count / 3 + 1)
+        for (offset, digit) in digits.enumerated() {
+            if offset > 0 && (digits.count - offset) % 3 == 0 { result.append(",") }
+            result.append(digit)
+        }
+        return integer < 0 ? "-" + result : result
     }
 
     static func trimmed(_ value: Double) -> String {
@@ -82,33 +90,31 @@ enum DateText {
         return calendar
     }()
 
+    static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    /// "Mar 2031" in UTC. Built directly: a DateFormatter per call cost tens of microseconds,
+    /// and labels are drawn many times per frame.
     static func monthYear(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.dateFormat = "MMM yyyy"
-        return formatter.string(from: date)
+        let civil = CivilDate(date)
+        return monthNames[civil.month - 1] + " " + String(civil.year)
     }
 
+    /// "2031-03-15" in UTC.
     static func iso(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        let civil = CivilDate(date)
+        return String(format: "%04d-%02d-%02d", civil.year, civil.month, civil.day)
     }
 
     static func year(_ date: Date) -> Int {
-        calendar.component(.year, from: date)
+        CivilDate(date).year
     }
 
     static func startOfYear(_ year: Int) -> Date {
-        calendar.date(from: DateComponents(year: year, month: 1, day: 1))!
+        CivilDate.date(year: year, month: 1, day: 1)
     }
 
     static func startOfMonth(_ date: Date) -> Date {
-        calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+        let civil = CivilDate(date)
+        return CivilDate.date(year: civil.year, month: civil.month, day: 1)
     }
 }

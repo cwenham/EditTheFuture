@@ -90,15 +90,25 @@ Models declare capabilities so the engine can take shortcuts:
 
 ### 4.7 Drawing large ranges
 
-Always simulate at the model's own step. To draw, downsample to the screen: keep the min and max per pixel column, the way audio editors draw waveforms. Cache downsampled tiles per zoom level, the way map tiles work. Zooming out to centuries then never draws millions of points.
+Always simulate at the model's own step. To draw, downsample to the screen: keep the min and max per pixel column, the way audio editors draw waveforms. This is implemented in `PlotCanvas`. Not done yet: caching downsampled tiles per zoom level, the way map tiles work, so zooming out to centuries never even reads millions of points.
 
-### 4.8 Concurrency plan
+### 4.8 Performance and concurrency
 
-The scaffold's `Scenario` is synchronous and single-threaded, which makes it easy to test. The app will wrap it like this:
+**Engine speed.** About 4 µs per formula step on the 2017 iMac Pro, down from 14 µs. The changes:
 
-- One actor owns each scenario. Queries for the visible range run as cancellable tasks: scrolling away cancels them, and the scroll direction drives prefetching.
-- Unlinked slots compute in parallel. Linked slots run as a pipeline: an upstream slot can work ahead while downstream slots catch up.
-- Remote and WebAssembly models run off the main actor. The coordinator batches steps to them (5.6).
+- **`CivilDate`:** step grids and formula built-ins use integer date arithmetic in UTC instead of `Calendar`. `Calendar` cost several microseconds per call and was 45% of step time. It's still used for non-UTC calendars, and tests check the two agree.
+- **Fewer built-ins:** formulas compute only the built-ins they reference.
+- **Compiled formulas:** names are resolved to array positions at compile time (`Executable`), so evaluating a step hashes no strings and allocates no dictionaries.
+- **Flat history:** slot history is one array of numbers with a column per readable variable, instead of a dictionary per step.
+- **Event delivery:** generated events are found by binary search, and slot bookkeeping isn't copied each step.
+
+**Across cores.** Slots split into groups joined by connections or event routes. Groups never read each other, so `Scenario.ensureAll(through:)` computes them concurrently with `DispatchQueue.concurrentPerform`. Each slot is its own object, so a group only writes to its own slots. Eight independent slots compute about 4× faster on the 8-core Xeon. The store calls `ensureAll` before drawing, so zooming out, or edits that recompute a lot, use every core.
+
+**Not done yet:**
+
+- **Computing off the main thread:** the main thread still waits for the engine. With today's speeds, routine scrolling computes a few dozen steps (well under a millisecond), so this only matters for big bursts and for ensembles. The plan: an actor owns the scenario, the visible range is requested as a cancellable task, the view shows the last computed values until new ones arrive, and the scroll direction drives prefetching.
+- **Pipelining inside a group:** an upstream slot works ahead while downstream slots catch up.
+- **Remote and WebAssembly models** run off the main actor, with the coordinator batching steps to them (5.6).
 
 ## 5. Multiple models (co-simulation)
 
@@ -468,12 +478,12 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 | Milestone | Contents |
 |---|---|
 | M0 (this scaffold) | Engine package: time grids, events, checkpoints, coordinator with connections, event routes and same-step loop checks, goal seek, formula language, command vocabulary, URL scheme, MIDI decoding and profile, tests |
-| M1 | Mac app shell: floating panel, hot-key, peek, Swift Charts lanes, command bar, multi-format clipboard, URL scheme handling, menu bar item |
+| M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
 | M3 | Drag the future UI; readings import; drift alerts |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
-| Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service; Metal renderer if Swift Charts falls short |
+| Later | Ensembles and fan charts; computing off the main thread; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
 
 ## 17. Open questions
 
@@ -506,13 +516,19 @@ docs/
   UI.md              UI design and mockup index
 Package.swift
 Sources/
-  FutureEngine/      time grids, events, variables, TimelineModel, Scenario (coordinator), goal seek
-  FutureFormula/     formula language: lexer, parser, analysis, evaluator, FormulaModel
+  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), goal seek
+  FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
+  FutureUI/          ScenarioStore, panel views, Canvas plots, add-event pane, command bar, snapshots, scroll mapping
+  EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
+  etf-bench/         performance benchmarks (swift run -c release etf-bench)
 Tests/
-  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes
+  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
   FutureFormulaTests/   parsing, savings maths, ODEs, coupled scenarios, goal seek, determinism
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
+  FutureUITests/        store, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
+scripts/
+  build-app.sh       builds .build/EditTheFuture.app
 ```
 
 Run the tests with `swift test`.

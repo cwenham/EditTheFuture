@@ -6,8 +6,11 @@ protocol AnySlotRunner: AnyObject {
     var grid: TimeGrid { get }
     /// Time of each computed communication point, by index.
     var times: [Date] { get }
-    /// Readable values at each computed communication point, by index.
-    var history: [[String: Double]] { get }
+
+    /// Column of a readable variable in the history, or nil if the model has no such variable.
+    func column(of variable: String) -> Int?
+    /// The value of a column at a computed point.
+    func value(at index: Int, column: Int) -> Double
 
     func computeStart(_ context: StepContext) throws
     func computeStep(_ context: StepContext) throws -> [GeneratedEvent]
@@ -51,37 +54,53 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
     let checkpointInterval: Int
 
     private(set) var times: [Date] = []
-    private(set) var history: [[String: Double]] = []
+    /// Readable values, one row per computed point and one column per readable variable.
+    private var values: [Double] = []
+    private let columns: [String: Int]
+    private let width: Int
     private var current: Model.State?
     private var checkpoints: [(index: Int, state: Model.State)] = []
 
     init(model: Model, grid: TimeGrid, checkpointInterval: Int) {
         self.model = model
-        self.descriptor = model.descriptor
+        let descriptor = model.descriptor
+        self.descriptor = descriptor
         self.grid = grid
         self.checkpointInterval = max(1, checkpointInterval)
+        let readable = descriptor.readable
+        self.columns = Dictionary(uniqueKeysWithValues: readable.enumerated().map { ($0.element.name, $0.offset) })
+        self.width = readable.count
     }
+
+    func column(of variable: String) -> Int? { columns[variable] }
+
+    func value(at index: Int, column: Int) -> Double { values[index * width + column] }
 
     func computeStart(_ context: StepContext) throws {
         precondition(times.isEmpty, "start computed twice")
         let state = try model.start(context)
         current = state
         checkpoints = [(0, state)]
-        times.append(context.to)
-        history.append(model.values(of: state))
+        record(state, at: context.to)
     }
 
     func computeStep(_ context: StepContext) throws -> [GeneratedEvent] {
         precondition(context.index == times.count, "steps must be computed in order")
         guard var state = current else { preconditionFailure("step computed before start") }
         let generated = try model.doStep(&state, context)
-        current = state
-        times.append(context.to)
-        history.append(model.values(of: state))
+        record(state, at: context.to)
         if context.index % checkpointInterval == 0 {
             checkpoints.append((context.index, state))
         }
+        current = state
         return generated
+    }
+
+    private func record(_ state: Model.State, at time: Date) {
+        times.append(time)
+        let row = model.readableValues(of: state)
+        precondition(row.count == width, "\(descriptor.name) returned \(row.count) values for \(width) readable variables")
+        values.append(contentsOf: row)
     }
 
     func truncate(from date: Date) -> Date? {
@@ -89,7 +108,7 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         guard firstInvalid < times.count else { return times.last }
         guard firstInvalid > 0 else {
             times = []
-            history = []
+            values = []
             current = nil
             checkpoints = []
             return nil
@@ -98,7 +117,7 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         let checkpoint = checkpoints[checkpoints.count - 1]
         current = checkpoint.state
         times.removeSubrange((checkpoint.index + 1)...)
-        history.removeSubrange((checkpoint.index + 1)...)
+        values.removeSubrange(((checkpoint.index + 1) * width)...)
         return times.last
     }
 }

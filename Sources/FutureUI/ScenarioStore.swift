@@ -5,7 +5,7 @@ import FutureEngine
 import FutureFormula
 
 /// The app's state for one scenario: the engine, what's focused, the cursor, the visible range,
-/// the command bar and undo. All UI reads go through `panelState()`.
+/// the command bar and undo. Views read `timelineState()`, `cursorState()` and `statusText()` separately.
 @MainActor
 @Observable
 public final class ScenarioStore {
@@ -164,7 +164,9 @@ public final class ScenarioStore {
     public func pan(by fraction: Double) {
         let shift = frame.span * fraction
         let newStart = max(start, frame.start.addingTimeInterval(shift))
-        frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
+        let newFrame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
+        guard newFrame != frame else { return }  // at the start already: don't redraw for nothing
+        frame = newFrame
         extendPreviewIfNeeded()
     }
 
@@ -322,62 +324,90 @@ public final class ScenarioStore {
     }
 
     // MARK: State for drawing
+    //
+    // Views read these separately so that SwiftUI only redraws what changed: moving the pointer
+    // touches `cursor` alone, which only the cursor views read.
 
-    public func panelState() -> PanelState {
+    /// Everything the timeline draws that doesn't depend on the cursor.
+    public func timelineState() -> TimelineState {
         _ = revision
         let margin: TimeInterval = 62 * 86_400
         let from = frame.start.addingTimeInterval(-margin)
         let through = frame.end.addingTimeInterval(margin)
 
+        // Compute any missing range for all slots at once, with independent groups on separate cores.
+        try? scenario.ensureAll(through: through)
         func samples(_ slot: SlotInfo) -> [Sample] {
             (try? scenario.series(slot.variable, of: slot.id, from: from, through: through)) ?? []
         }
-        func value(_ slot: SlotInfo, at date: Date) -> Double? {
-            guard date >= start else { return nil }
-            return try? scenario.value(slot.variable, of: slot.id, at: date)
-        }
-        func visible(_ list: [Sample]) -> [Double] {
-            list.filter { frame.contains($0.time) }.map(\.value)
+        func range(_ list: [Sample]) -> (low: Double, high: Double)? {
+            var low = Double.infinity, high = -Double.infinity
+            for sample in list where frame.contains(sample.time) {
+                low = min(low, sample.value)
+                high = max(high, sample.value)
+            }
+            return low <= high ? (low, high) : nil
         }
 
         let focusSlot = focused
         let focusSamples = samples(focusSlot)
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
         let preview = draftOnFocus == nil ? [] : draftPreview
-        let shown = visible(focusSamples) + visible(preview)
-        let (domain, ticks) = niceTicks(low: shown.min() ?? 0, high: shown.max() ?? 1, includeZero: focusSlot.format == .currency)
-        let cursorValue = value(focusSlot, at: cursor)
+        let lineRange = range(focusSamples), previewRange = range(preview)
+        let low = min(lineRange?.low ?? 0, previewRange?.low ?? .infinity)
+        let high = max(lineRange?.high ?? 1, previewRange?.high ?? -.infinity)
+        let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: draftOnFocus?.date,
-            yDomain: domain, yTicks: ticks,
-            cursorValue: cursorValue,
-            readoutDate: DateText.monthYear(cursor),
-            readoutValue: cursorValue.map(focusSlot.format.full) ?? "—",
-            readoutNote: cursor > now ? "Projection" : "Model",
-            events: markers(for: focusSlot))
+            yDomain: domain, yTicks: ticks, events: markers(for: focusSlot))
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(slot)
-            let values = visible(list)
-            let low = values.min() ?? 0, high = values.max() ?? 1
-            let pad = max((high - low) * 0.12, abs(high) * 0.01, 1e-9)
+            let bounds = range(list) ?? (0, 1)
+            let pad = max((bounds.high - bounds.low) * 0.12, abs(bounds.high) * 0.01, 1e-9)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
-                             yDomain: (low - pad)...(high + pad),
-                             valueText: value(slot, at: cursor).map(slot.format.full) ?? "—",
-                             reads: slot.reads)
+                             yDomain: (bounds.low - pad)...(bounds.high + pad), reads: slot.reads)
         }
 
+        return TimelineState(scenarioName: name, frame: frame, now: now, focus: focus, lanes: lanes,
+                             yearTicks: TimelineState.yearTicks(for: frame))
+    }
+
+    /// The readout and lane values at the cursor.
+    public func cursorState() -> CursorState {
+        _ = revision
+        func value(_ slot: SlotInfo) -> Double? {
+            guard cursor >= start else { return nil }
+            return try? scenario.value(slot.variable, of: slot.id, at: cursor)
+        }
+        let focusSlot = focused
+        let focusValue = value(focusSlot)
+        var laneValues: [Int: String] = [:]
+        for (index, slot) in slots.enumerated() where index != focusedIndex {
+            laneValues[index] = value(slot).map(slot.format.full) ?? "—"
+        }
+        return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
+                           readoutValue: focusValue.map(focusSlot.format.full) ?? "—",
+                           readoutNote: cursor > now ? "Projection" : "Model",
+                           focusValue: focusValue, laneValues: laneValues)
+    }
+
+    /// "Computed through Dec 2045 · 5 of 8 slots · 1 link".
+    public func statusText() -> String {
+        _ = revision
+        _ = frame
         let computed = slots.compactMap { scenario.computedThrough($0.id) }.min()
-        let status = [
+        return [
             computed.map { "Computed through " + DateText.monthYear($0) },
             "\(slots.count) of \(Scenario.bankSize) slots",
             "\(linkCount) link\(linkCount == 1 ? "" : "s")",
         ].compactMap { $0 }.joined(separator: " · ")
+    }
 
-        return PanelState(scenarioName: name, frame: frame, now: now, cursor: cursor, focus: focus, lanes: lanes,
-                          yearTicks: PanelState.yearTicks(for: frame), status: status,
-                          eventPreview: eventPreview())
+    /// The whole panel at once, for clipboard snapshots and tests.
+    public func panelState() -> PanelState {
+        PanelState(timeline: timelineState(), cursor: cursorState(), status: statusText(), eventPreview: eventPreview())
     }
 
     private func markers(for slot: SlotInfo) -> [EventMarker] {

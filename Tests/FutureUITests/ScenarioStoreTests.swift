@@ -74,19 +74,19 @@ struct ScenarioStoreTests {
         let store = try makeStore()
         let date = utc(2035, 1)
         store.show(date)
-        let before = try #require(store.panelState().focus.cursorValue)
+        let before = try #require(store.panelState().cursor.focusValue)
 
         store.commandText = "+500 monthly from 2027-01"
         #expect(store.runCommand() == nil)
         #expect(store.commandText.isEmpty)
         #expect(store.message?.contains("every month") == true)
-        let after = try #require(store.panelState().focus.cursorValue)
+        let after = try #require(store.panelState().cursor.focusValue)
         #expect(after > before + 500 * 96)
 
         store.undo()
-        #expect(store.panelState().focus.cursorValue == before)
+        #expect(store.panelState().cursor.focusValue == before)
         store.redo()
-        #expect(store.panelState().focus.cursorValue == after)
+        #expect(store.panelState().cursor.focusValue == after)
     }
 
     @Test("The add-event pane starts at now, on the focused slot, with what that slot can handle")
@@ -135,7 +135,7 @@ struct ScenarioStoreTests {
     func commitDeposit() throws {
         let store = try makeStore()
         store.show(utc(2035, 1))
-        let before = try #require(store.panelState().focus.cursorValue)
+        let before = try #require(store.panelState().cursor.focusValue)
 
         store.pickEventDate(utc(2030, 1, 15))
         store.eventDraft.amountText = "$1,000"
@@ -147,12 +147,12 @@ struct ScenarioStoreTests {
         #expect(store.eventDraft.amountText.isEmpty)
         #expect(store.eventDateIsNow)
         #expect(store.panelState().eventPreview == nil)
-        let after = try #require(store.panelState().focus.cursorValue)
+        let after = try #require(store.panelState().cursor.focusValue)
         #expect(after > before + 1000)
         #expect(store.panelState().focus.events.contains { $0.label == "+$1,000" })
 
         store.undo()
-        #expect(store.panelState().focus.cursorValue == before)
+        #expect(store.panelState().cursor.focusValue == before)
     }
 
     @Test("The preview keeps up when scrolling far into the future")
@@ -173,13 +173,13 @@ struct ScenarioStoreTests {
     func commitRecurringAndParameter() throws {
         let store = try makeStore()
         store.show(utc(2040, 1))
-        let before = try #require(store.panelState().focus.cursorValue)
+        let before = try #require(store.panelState().cursor.focusValue)
 
         store.pickEventDate(utc(2030, 1, 1))
         store.eventDraft.amountText = "200"
         store.eventDraft.repeats = .monthly
         #expect(store.commitEvent())
-        let withDeposits = try #require(store.panelState().focus.cursorValue)
+        let withDeposits = try #require(store.panelState().cursor.focusValue)
         #expect(withDeposits > before + 200 * 119)
 
         store.pickEventDate(utc(2030, 1, 1))
@@ -187,14 +187,14 @@ struct ScenarioStoreTests {
         store.eventDraft.parameter = "rate"
         store.eventDraft.valueText = "6%"
         #expect(store.commitEvent())
-        #expect(try #require(store.panelState().focus.cursorValue) > withDeposits)
+        #expect(try #require(store.panelState().cursor.focusValue) > withDeposits)
     }
 
     @Test("The pane explains what's missing, and clearing leaves the scenario alone")
     func draftErrorsAndClear() throws {
         let store = try makeStore()
         store.show(utc(2035, 1))
-        let before = try #require(store.panelState().focus.cursorValue)
+        let before = try #require(store.panelState().cursor.focusValue)
 
         store.pickEventDate(utc(2030, 1, 1))
         #expect(!store.commitEvent())
@@ -207,7 +207,7 @@ struct ScenarioStoreTests {
         store.clearEvent()
         #expect(store.eventDraft.amountText.isEmpty)
         #expect(store.eventDateIsNow)
-        #expect(store.panelState().focus.cursorValue == before)
+        #expect(store.panelState().cursor.focusValue == before)
     }
 
     @Test("Setting an unknown parameter explains what exists")

@@ -14,6 +14,8 @@ struct CompiledProgram: Sendable {
     /// Local variables in declaration order.
     let variableNames: [String]
     let isStochastic: Bool
+    /// Built-ins the formula refers to, so the model only computes those each step.
+    let usedBuiltins: Set<String>
 }
 
 enum Analyzer {
@@ -83,10 +85,12 @@ enum Analyzer {
         let variables = Set(variableNames)
 
         // References in every expression.
+        var usedBuiltins: Set<String> = []
         func check(_ expr: Expr, line: Int, scope: Scope) throws {
             try expr.visit { node in
                 switch node {
                 case .name(let name, let lagged):
+                    if builtins.contains(name) { usedBuiltins.insert(name) }
                     if lagged {
                         guard variables.contains(name) else {
                             throw FormulaError.invalid(line: line, message: "Only variables have a previous value; \(name)[t-1] isn't allowed.")
@@ -228,7 +232,8 @@ enum Analyzer {
             handlers: program.handlers,
             references: program.references.values.sorted { $0.text < $1.text },
             variableNames: variableNames,
-            isStochastic: isStochastic
+            isStochastic: isStochastic,
+            usedBuiltins: usedBuiltins
         )
     }
 }

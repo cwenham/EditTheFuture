@@ -302,17 +302,20 @@ Sections:
 
 - **Mac shell:**
   - an `NSPanel` subclass hosting `NSHostingView`
-  - `MenuBarExtra` for the menu bar item and a `Settings` scene
-  - global hot-keys with the KeyboardShortcuts package; peek handles key-down and key-up separately
-- **Charts:** Swift Charts on macOS 15 and iOS 17+.
-  - Marks: `LineMark` for lines, `AreaMark` for bands, `PointMark` for readings, `RuleMark` for now and the cursor.
-  - Scrubbing: `chartXSelection`.
-  - Scrolling: `chartScrollableAxes(.horizontal)`, `chartXVisibleDomain` and `chartScrollPosition`.
-  - Drag gestures: `chartOverlay`.
-  - Feed the charts downsampled tiles from the engine (DESIGN.md, 4.7). Move to a Canvas or Metal renderer only if profiling demands it.
-- **State:**
-  - One `@Observable` view model per scenario, backed by an actor that owns the `Scenario`.
-  - The visible range and the cursor drive `ensure(through:)`, as cancellable tasks.
+  - an `NSStatusItem` for the menu bar item
+  - global hot-keys with Carbon `RegisterEventHotKey`; peek handles key-down and key-up separately
+- **Plots:** drawn with SwiftUI `Canvas`, one path per line (`PlotCanvas`).
+  - M1 first used Swift Charts with one `LineMark` per data point. Profiling showed 80% of each frame going to Charts' generic view-graph work: 40–100 ms per frame for a few thousand marks. A path per line costs well under a millisecond.
+  - Points that land in the same pixel column are reduced to that column's first, lowest, highest and last values, so a century of daily data still draws only a few thousand points.
+  - Axis labels and the events strip are drawn in a `Canvas` too, which keeps the number of SwiftUI views small.
+- **State and redrawing:**
+  - One `@Observable` store per scenario. Views read only what they draw, so SwiftUI redraws only what changed.
+    - `timelineState()`: the plots, axes and events. It doesn't read the cursor.
+    - `cursorState()`: the readout, each lane's value, and the cursor line and dot, drawn as small shape views on top.
+    - `statusText()`: the footer.
+    - The add-event pane reads the draft, and only its effect box reads the cursor.
+  - Never assign an `@Observable` property its current value. Even setting `nil` to `nil` redraws every view that reads it.
+- **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.
   - `NSPasteboard.writeObjects` writes several types at once; `Transferable` handles drag-out.

@@ -120,7 +120,7 @@ extension ScenarioStore {
             draft.parameter = slot.parameters.first ?? ""
             draft.valueText = draft.parameter.isEmpty ? "" : currentValueText(of: draft.parameter, in: slot, at: draft.date)
         }
-        draftError = nil
+        if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
         eventDraft = draft
     }
 
@@ -152,7 +152,7 @@ extension ScenarioStore {
         if !draft.parameter.isEmpty {
             draft.valueText = currentValueText(of: draft.parameter, in: slots[draft.slotIndex], at: now)
         }
-        draftError = nil
+        if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
         eventDraft = draft
     }
 
@@ -195,7 +195,7 @@ extension ScenarioStore {
             previewHorizon = .distantPast
             return
         }
-        draftError = nil
+        if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
         let slot = slots[eventDraft.slotIndex]
         let margin: TimeInterval = 62 * 86_400
         let horizon = frame.end.addingTimeInterval(frame.span)
