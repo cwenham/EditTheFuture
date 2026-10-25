@@ -48,4 +48,70 @@ struct PanelViewTests {
         settle(view)
         #expect(store.eventDraft.amountText.isEmpty)
     }
+
+    @Test("Values too big for whole numbers, infinite or NaN still draw, focused or in a lane")
+    func runawayValues() async throws {
+        let store = try ScenarioStore(definition: .runaway, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+        for zoomed in [false, true] {
+            if zoomed { store.zoom(by: 1e6) }  // the widest view
+            for year in [2022, 2024, 2040, 2060, 2120] {
+                store.show(utc(year, 1))
+                await store.waitUntilIdle()
+                for slot in store.slots.indices {
+                    store.focus(index: slot)
+                    settle(view)
+                }
+            }
+        }
+        // The cursor sits where Rocket has overflowed, and Giant is still finite.
+        store.focus(index: 0)
+        #expect(store.cursorState().readoutValue == "$∞")
+        store.focus(index: 3)
+        #expect(store.cursorState().readoutValue.hasSuffix("e301"))
+
+        // Snapshots of overflowed values still copy, and read back.
+        let data = store.snapshotData()
+        #expect(data.slots.contains { $0.points.contains { $0.v.isInfinite } })
+        #expect(data.slots.contains { $0.points.contains { $0.v.isNaN } })
+        #expect(data.slots.contains { $0.points.contains { $0.v.isFinite && $0.v > 1e19 } } || data.start > utc(2048, 1))
+        let decoded = try SnapshotData.decode(try data.json())
+        #expect(decoded.slots.map(\.points.count) == data.slots.map(\.points.count))
+    }
+}
+
+extension ScenarioDefinition {
+    /// Slots that outgrow every number: ×10 a month (overflows to infinity in 2047), ×−3 a month,
+    /// one that turns into NaN once it overflows, and one that starts near the largest Double.
+    static let runaway = ScenarioDefinition(
+        name: "Runaway",
+        start: utc(2022, 1),
+        slots: [
+            SlotSpec(name: "Rocket", formula: """
+                step 1 month
+                param growth = 10
+                init balance = 1000
+                balance[t] = balance[t-1] * growth
+                on deposit: balance += event.amount
+                """, variable: "balance", format: .currency, summary: "×10 a month"),
+            SlotSpec(name: "Sinker", formula: """
+                step 1 month
+                init n = -1
+                n[t] = n[t-1] * 3
+                """, variable: "n", format: .number, summary: "×3 a month, negative"),
+            SlotSpec(name: "Furnace", formula: """
+                step 1 month
+                init temp = 1
+                temp[t] = temp[t-1] * 100 - temp[t-1] * 90
+                """, variable: "temp", format: .temperature, summary: "NaN after it overflows"),
+            // Every value it ever shows is beyond the ±1e300 plots are clamped to.
+            SlotSpec(name: "Giant", formula: """
+                step 1 month
+                init size = 1e301
+                size[t] = size[t-1] * 1.001
+                """, variable: "size", format: .currency, summary: "Starts at 1e301"),
+        ])
 }

@@ -71,7 +71,7 @@ public struct EventDraft: Equatable, Sendable {
         }
     }
 
-    enum Built {
+    enum Built: Sendable {
         case event(Event)
         case rule(RecurringEvent)
     }
@@ -92,15 +92,12 @@ public struct EventDraft: Equatable, Sendable {
 }
 
 extension ScenarioStore {
-    /// A fresh draft for a slot: its first event kind (or Set parameter) and its first parameter's value.
+    /// A fresh draft for a slot: its first event kind, or Set parameter, and its first parameter.
     func makeDraft(slotIndex: Int, date: Date) -> EventDraft {
         let slot = slots[slotIndex]
         var draft = EventDraft(slotIndex: slotIndex, date: date,
                                kind: slot.eventKinds.first.map(EventDraft.Kind.event) ?? .setParameter)
-        if let parameter = slot.parameters.first {
-            draft.parameter = parameter
-            draft.valueText = currentValueText(of: parameter, in: slot, at: date)
-        }
+        draft.parameter = slot.parameters.first ?? ""
         return draft
     }
 
@@ -118,7 +115,7 @@ extension ScenarioStore {
         }
         if !slot.parameters.contains(draft.parameter) {
             draft.parameter = slot.parameters.first ?? ""
-            draft.valueText = draft.parameter.isEmpty ? "" : currentValueText(of: draft.parameter, in: slot, at: draft.date)
+            draft.valueText = ""
         }
         if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
         eventDraft = draft
@@ -126,6 +123,17 @@ extension ScenarioStore {
 
     /// Whether the draft's date is still the default (now) rather than a date picked on the graph.
     public var eventDateIsNow: Bool { eventDraft.date == now }
+
+    /// Whether the draft has everything it needs to be added (and previewed).
+    public var draftIsComplete: Bool {
+        if case .success = eventDraft.build() { return true }
+        return false
+    }
+
+    /// The draft parameter's value at the draft's date, from the latest results, e.g. 0.045.
+    public func currentValue(ofParameter name: String) -> Double? {
+        computed?.parameters[eventDraft.slotIndex][name]
+    }
 
     /// Sets the draft's date from a click on the graph, and its slot when a lane was clicked.
     public func pickEventDate(_ date: Date, slotIndex: Int? = nil) {
@@ -144,15 +152,13 @@ extension ScenarioStore {
         eventDraft.date = now
     }
 
-    /// Empties the amount, resets the value to the parameter's current one, and goes back to now.
+    /// Empties the amount and value and goes back to now.
     public func clearEvent() {
         var draft = eventDraft
         draft.amountText = ""
+        draft.valueText = ""
         draft.date = now
-        if !draft.parameter.isEmpty {
-            draft.valueText = currentValueText(of: draft.parameter, in: slots[draft.slotIndex], at: now)
-        }
-        if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
+        if draftError != nil { draftError = nil }
         eventDraft = draft
     }
 
@@ -181,53 +187,40 @@ extension ScenarioStore {
         }
     }
 
-    /// The parameter's current value at `date`, as text for the value field (e.g. "0.045" or "400").
-    func currentValueText(of parameter: String, in slot: SlotInfo, at date: Date) -> String {
-        guard let value = try? scenario.value(parameter, of: slot.id, at: date) else { return "" }
-        return String(format: "%g", value)
-    }
-
-    /// Recomputes the dashed preview by trying the draft and taking it out again. It looks one
-    /// screen past the right edge, so scrolling only recomputes when it goes further than that.
+    /// Asks the engine for the dashed preview: the draft slot's line with the draft applied, one
+    /// screen past the right edge so scrolling only asks again when it goes further.
     func updateDraftPreview() {
+        previewSequence += 1
         guard case .success(let built) = eventDraft.build() else {
-            draftPreview = []
-            previewHorizon = .distantPast
+            if !draftPreview.isEmpty { draftPreview = [] }
+            previewThrough = .distantPast
             return
         }
-        if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
-        let slot = slots[eventDraft.slotIndex]
+        if draftError != nil { draftError = nil }
         let margin: TimeInterval = 62 * 86_400
-        let horizon = frame.end.addingTimeInterval(frame.span)
-
-        switch built {
-        case .event(let event): scenario.add(event, to: slot.id)
-        case .rule(let rule): scenario.add(rule, to: slot.id)
-        }
-        let samples = (try? scenario.series(slot.variable, of: slot.id,
-                                            from: eventDraft.date.addingTimeInterval(-margin),
-                                            through: horizon.addingTimeInterval(margin))) ?? []
-        switch built {
-        case .event(let event): scenario.removeEvent(id: event.id, from: slot.id)
-        case .rule(let rule): scenario.removeRecurring(id: rule.id, from: slot.id)
-        }
-        draftPreview = samples
-        previewHorizon = horizon
+        let through = frame.end.addingTimeInterval(frame.span)
+        previewThrough = through
+        requestPreview(ScenarioEngine.PreviewRequest(version: revision, sequence: previewSequence, slot: eventDraft.slotIndex,
+                                                     change: built, from: eventDraft.date.addingTimeInterval(-margin),
+                                                     through: through.addingTimeInterval(margin)))
     }
 
-    /// Extends the preview when the view has scrolled past what was computed.
+    /// Asks again when the view has scrolled past what the preview covers.
     func extendPreviewIfNeeded() {
-        guard !draftPreview.isEmpty, frame.end > previewHorizon else { return }
+        guard draftIsComplete, frame.end > previewThrough else { return }
         updateDraftPreview()
     }
 
-    /// The draft's effect at the cursor and at the right edge, or nil until the draft is complete.
+    /// The draft's effect at the cursor and at the right edge, or nil until its preview is ready.
     func eventPreview() -> EventPreviewState? {
-        guard !draftPreview.isEmpty else { return nil }
-        let slot = slots[eventDraft.slotIndex]
+        guard !draftPreview.isEmpty, let computed else { return nil }
+        let index = eventDraft.slotIndex
+        let slot = slots[index]
         func effect(at date: Date) -> String {
-            guard date >= start, let before = try? scenario.value(slot.variable, of: slot.id, at: date),
-                  let after = Self.held(draftPreview, at: date), date >= eventDraft.date else {
+            guard date <= computed.through else { return "…" }
+            guard date >= start, date >= eventDraft.date,
+                  let before = Self.held(computed.series[index], at: date),
+                  let after = Self.held(draftPreview, at: date) else {
                 return "No change yet"
             }
             let difference = after - before
@@ -237,20 +230,5 @@ extension ScenarioStore {
         }
         return EventPreviewState(cursorDate: DateText.monthYear(cursor), atCursor: effect(at: cursor),
                                  edgeDate: DateText.monthYear(frame.end), atEdge: effect(at: frame.end))
-    }
-
-    /// The last sample at or before `date`.
-    static func held(_ samples: [Sample], at date: Date) -> Double? {
-        var low = 0, high = samples.count - 1, found: Double?
-        while low <= high {
-            let mid = (low + high) / 2
-            if samples[mid].time <= date {
-                found = samples[mid].value
-                low = mid + 1
-            } else {
-                high = mid - 1
-            }
-        }
-        return found
     }
 }

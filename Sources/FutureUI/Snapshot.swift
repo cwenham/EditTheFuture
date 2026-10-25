@@ -58,12 +58,15 @@ public struct SnapshotData: Codable, Equatable, Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
+        // JSON has no infinity or NaN, which values that overflowed become.
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
         return try encoder.encode(self)
     }
 
     public static func decode(_ data: Data) throws -> SnapshotData {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
         return try decoder.decode(SnapshotData.self, from: data)
     }
 

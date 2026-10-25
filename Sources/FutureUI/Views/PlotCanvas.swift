@@ -45,7 +45,11 @@ struct PlotCanvas: View {
         Canvas { context, size in
             let span = domain.upperBound - domain.lowerBound
             let x = { (date: Date) in frame.x(date, width: size.width) }
-            let y = { (value: Double) in size.height * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span))) }
+            // Clamped so a value far outside the range still gives a point CoreGraphics can draw.
+            let y = { (value: Double) -> CGFloat in
+                let y = size.height * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span)))
+                return min(max(y, -size.height * 100), size.height * 101)
+            }
             context.clip(to: Path(CGRect(origin: .zero, size: size)))
 
             if now < frame.end {
@@ -94,12 +98,14 @@ struct PlotCanvas: View {
         guard low <= high else { return path }
 
         let count = high - low + 1
+        // Values that overflowed (infinite or NaN) can't be drawn: the line breaks there.
         if count <= Int(size.width) * 2 {
-            path.move(to: CGPoint(x: x(samples[low].time), y: y(samples[low].value)))
-            if high > low {
-                for index in (low + 1)...high {
-                    path.addLine(to: CGPoint(x: x(samples[index].time), y: y(samples[index].value)))
-                }
+            var penDown = false
+            for index in low...high {
+                let sample = samples[index]
+                guard sample.value.isFinite else { penDown = false; continue }
+                let point = CGPoint(x: x(sample.time), y: y(sample.value))
+                if penDown { path.addLine(to: point) } else { path.move(to: point); penDown = true }
             }
             return path
         }
@@ -120,6 +126,12 @@ struct PlotCanvas: View {
         }
         for index in low...high {
             let sample = samples[index]
+            guard sample.value.isFinite else {
+                flush()
+                column = Int.min
+                started = false
+                continue
+            }
             let sampleColumn = Int(x(sample.time).rounded(.down))
             if sampleColumn != column {
                 flush()

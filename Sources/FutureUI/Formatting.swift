@@ -7,28 +7,37 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
     case temperature
     case number
 
-    /// Full value for readouts and lanes, e.g. "$41,223" or "14.2 °C".
+    /// Full value for readouts and lanes, e.g. "$41,223" or "14.2 °C". Values too big to write
+    /// out are shown as "$1.23e18"; values that overflowed as "∞".
     public func full(_ value: Double) -> String {
-        guard value.isFinite else { return "—" }
+        if value.isNaN { return "—" }
+        let sign = value < 0 ? "−" : ""
+        let magnitude = abs(value)
         switch self {
         case .currency:
-            return (value < 0 ? "−$" : "$") + Self.grouped(abs(value).rounded())
+            guard magnitude < Self.writtenOutLimit else { return sign + "$" + Self.scientific(magnitude) }
+            return sign + "$" + Self.grouped(magnitude.rounded())
         case .temperature:
+            guard magnitude < Self.writtenOutLimit else { return sign + Self.scientific(magnitude) + " °C" }
             return String(format: "%.1f °C", value)
         case .number:
-            return abs(value) >= 100 ? Self.grouped(value.rounded()) : String(format: "%.2f", value)
+            guard magnitude < Self.writtenOutLimit else { return sign + Self.scientific(magnitude) }
+            return magnitude >= 100 ? Self.grouped(value.rounded()) : String(format: "%.2f", value)
         }
     }
 
-    /// Short value for axes, e.g. "$100k", "$1.25M", "15°".
+    /// Short value for axes, e.g. "$100k", "$1.25M", "$3B", "15°", "$2.5e18".
     public func axis(_ value: Double) -> String {
         switch self {
         case .currency:
             let sign = value < 0 ? "−" : ""
             let magnitude = abs(value)
             if magnitude == 0 { return "$0" }
-            if magnitude >= 1_000_000 { return sign + "$" + Self.trimmed(magnitude / 1_000_000) + "M" }
-            if magnitude >= 1_000 { return sign + "$" + Self.trimmed(magnitude / 1_000) + "k" }
+            if magnitude >= Self.writtenOutLimit { return sign + "$" + Self.trimmed(magnitude) }
+            if magnitude >= 1e12 { return sign + "$" + Self.trimmed(magnitude / 1e12) + "T" }
+            if magnitude >= 1e9 { return sign + "$" + Self.trimmed(magnitude / 1e9) + "B" }
+            if magnitude >= 1e6 { return sign + "$" + Self.trimmed(magnitude / 1e6) + "M" }
+            if magnitude >= 1e3 { return sign + "$" + Self.trimmed(magnitude / 1e3) + "k" }
             return sign + "$" + Self.trimmed(magnitude)
         case .temperature:
             return Self.trimmed(value) + "°"
@@ -40,7 +49,7 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
     /// "41223" → "41,223". Written out by hand: creating a NumberFormatter per label was a
     /// measurable part of each frame.
     static func grouped(_ value: Double) -> String {
-        guard value.isFinite, abs(value) < 9e15 else { return String(value) }
+        guard value.isFinite, abs(value) < writtenOutLimit else { return String(value) }
         let integer = Int(value.rounded())
         let digits = String(abs(integer))
         var result = ""
@@ -52,19 +61,40 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
         return integer < 0 ? "-" + result : result
     }
 
+    /// Numbers at or above this are shown in scientific notation: written out, they'd be too long
+    /// to read, and past Int.max (about 9.2e18) they can't become whole numbers at all.
+    static let writtenOutLimit = 1e15
+
+    /// "2", "2.5", "−0.25", "1e18", "∞".
     static func trimmed(_ value: Double) -> String {
+        if value.isNaN { return "—" }
+        if abs(value) >= writtenOutLimit { return (value < 0 ? "−" : "") + scientific(abs(value)) }
         let rounded = (value * 100).rounded() / 100
         if rounded == rounded.rounded() { return String(Int(rounded)) }
         return String(format: "%g", rounded)
     }
+
+    /// "1.23e18" for a positive value, "∞" for infinity.
+    static func scientific(_ value: Double) -> String {
+        if value == .infinity { return "∞" }
+        return String(format: "%.3g", value).replacingOccurrences(of: "e+", with: "e")
+    }
 }
 
 /// Evenly spaced "nice" axis values (steps of 1, 2, 2.5 or 5 × 10ⁿ) covering `low...high`.
+///
+/// Copes with any input: values beyond ±1e300 are clamped (so the range and its steps stay finite),
+/// NaN counts as 0, and a range too narrow for its magnitude is widened instead of producing
+/// ticks that round to the same number.
 public func niceTicks(low: Double, high: Double, target: Int = 5, includeZero: Bool = false) -> (domain: ClosedRange<Double>, ticks: [Double]) {
-    var low = low, high = high
+    let limit = 1e300
+    func clamp(_ value: Double) -> Double { value.isNaN ? 0 : min(max(value, -limit), limit) }
+    let a = clamp(low), b = clamp(high)
+    var low = min(a, b), high = max(a, b)
     if includeZero { low = min(low, 0); high = max(high, 0) }
-    if !(high > low) {
-        let pad = max(abs(low) * 0.1, 1)
+    let magnitudeOfValues = max(abs(low), abs(high))
+    if !(high - low > magnitudeOfValues * 1e-9) {
+        let pad = max(magnitudeOfValues * 0.1, 1)
         low -= pad
         high += pad
     }
@@ -74,11 +104,11 @@ public func niceTicks(low: Double, high: Double, target: Int = 5, includeZero: B
     let step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10) * magnitude
     let start = floor(low / step) * step
     let end = ceil(high / step) * step
-    var ticks: [Double] = []
-    var value = start
-    while value <= end + step / 2 {
-        ticks.append(abs(value) < step / 1e6 ? 0 : value)
-        value += step
+    guard step.isFinite, step > 0, start.isFinite, end.isFinite, start < end else { return (0...1, [0, 1]) }
+    let count = min(Int(((end - start) / step).rounded()), 100)
+    let ticks = (0...count).map { index -> Double in
+        let value = start + Double(index) * step
+        return abs(value) < step / 1e6 ? 0 : value
     }
     return (start...end, ticks)
 }

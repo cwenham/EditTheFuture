@@ -308,6 +308,7 @@ Sections:
   - M1 first used Swift Charts with one `LineMark` per data point. Profiling showed 80% of each frame going to Charts' generic view-graph work: 40–100 ms per frame for a few thousand marks. A path per line costs well under a millisecond.
   - Points that land in the same pixel column are reduced to that column's first, lowest, highest and last values, so a century of daily data still draws only a few thousand points.
   - Axis labels and the events strip are drawn in a `Canvas` too, which keeps the number of SwiftUI views small.
+  - **Huge numbers:** the timeline goes on forever, so compounding values eventually outgrow every number. From 10¹⁵ up, values show in scientific notation ("$1.14e28"). Values that overflow show as "∞", and the line breaks where they start. Ranges and tick steps are clamped to ±10³⁰⁰ so they stay finite. (Converting a label past Int.max to a whole number crashed the app.)
 - **State and redrawing:**
   - One `@Observable` store per scenario. Views read only what they draw, so SwiftUI redraws only what changed.
     - `timelineState()`: the plots, axes and events. It doesn't read the cursor.
@@ -315,7 +316,8 @@ Sections:
     - `statusText()`: the footer.
     - The add-event pane reads the draft, and only its effect box reads the cursor.
   - Never assign an `@Observable` property its current value. Even setting `nil` to `nil` redraws every view that reads it.
-- **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
+  - The store never computes. It asks `ScenarioEngine` (an actor on its own thread) for the visible range and draws the latest results it has. Past the end of those results, lines stop and readouts show "…" until the rest arrives (DESIGN.md, 4.8).
+- **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.
   - `NSPasteboard.writeObjects` writes several types at once; `Transferable` handles drag-out.

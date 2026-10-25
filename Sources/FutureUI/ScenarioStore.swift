@@ -4,8 +4,13 @@ import SwiftUI
 import FutureEngine
 import FutureFormula
 
-/// The app's state for one scenario: the engine, what's focused, the cursor, the visible range,
-/// the command bar and undo. Views read `timelineState()`, `cursorState()` and `statusText()` separately.
+/// The app's state for one scenario: what's focused, the cursor, the visible range, the add-event
+/// draft, the command bar and undo. Views read `timelineState()`, `cursorState()` and `statusText()`
+/// separately.
+///
+/// The scenario itself lives in a `ScenarioEngine` actor on a thread of its own. The store keeps
+/// the latest results (`computed`) and draws only from those, so the main thread never waits for
+/// the engine. Edits, fetches and previews go to the engine one at a time, in order.
 @MainActor
 @Observable
 public final class ScenarioStore {
@@ -35,6 +40,24 @@ public final class ScenarioStore {
         case addedRule(slot: Int, RecurringEvent)
     }
 
+    /// The largest magnitude a plot's range reaches. Leaves headroom so the range, its padding and
+    /// its tick steps never overflow to infinity.
+    nonisolated static let plotLimit = 1e300
+
+    nonisolated static func clampToPlot(_ value: Double) -> Double {
+        value.isNaN ? 0 : min(max(value, -plotLimit), plotLimit)
+    }
+
+    /// A lane's vertical range: its values with a little room above and below. Always a valid,
+    /// finite range, whatever the values (building a range whose bounds are out of order traps).
+    nonisolated static func laneDomain(low: Double, high: Double) -> ClosedRange<Double> {
+        let a = clampToPlot(low), b = clampToPlot(high)
+        let low = min(a, b), high = max(a, b)
+        let pad = max((high - low) * 0.12, max(abs(low), abs(high)) * 0.01, 1e-9)
+        let lower = low - pad, upper = high + pad
+        return lower < upper ? lower...upper : (low - 1)...(low + 1)
+    }
+
     public static let minimumSpan: TimeInterval = 2 * 365.2425 * 86_400
     public static let maximumSpan: TimeInterval = 80 * 365.2425 * 86_400
 
@@ -58,43 +81,74 @@ public final class ScenarioStore {
 
     /// The event in the add-event pane. Always present; it targets the focused slot and starts at now.
     public var eventDraft = EventDraft(slotIndex: 0, date: .distantPast, kind: .setParameter) {
-        didSet { if eventDraft != oldValue { updateDraftPreview() } }
+        didSet {
+            guard eventDraft != oldValue else { return }
+            updateDraftPreview()
+            // Parameter values are read at the draft's date, for the pane's "now" hint.
+            if eventDraft.date != oldValue.date || eventDraft.slotIndex != oldValue.slotIndex { requestData(force: true) }
+        }
     }
     /// The draft slot's line with the draft event applied, for the dashed preview. Empty until the draft is complete.
     public internal(set) var draftPreview: [Sample] = []
     public internal(set) var draftError: String?
     /// Incremented to ask the pane to focus its amount field.
     public internal(set) var eventFieldFocusRequest = 0
-    /// How far ahead `draftPreview` has been computed.
-    @ObservationIgnored var previewHorizon = Date.distantPast
+    /// How far ahead the latest preview was requested.
+    @ObservationIgnored var previewThrough = Date.distantPast
+    /// Identifies the newest preview request; older results are dropped.
+    @ObservationIgnored var previewSequence = 0
+
+    /// The latest results from the engine. Everything on screen is drawn from these.
+    var computed: ScenarioEngine.FetchResult?
 
     /// Called when the command bar asks for something only the app can do (copying).
     @ObservationIgnored public var onAppAction: ((CommandBarAction) -> Void)?
 
-    @ObservationIgnored let scenario: Scenario
+    /// The store's own copy of each slot's authored events and rules, for drawing markers
+    /// without asking the engine.
+    @ObservationIgnored private var authored: [[Event]]
+    @ObservationIgnored private var recurring: [[RecurringEvent]]
     @ObservationIgnored private var undoStack: [Change] = []
     @ObservationIgnored private var redoStack: [Change] = []
 
+    // The engine and its queue of work.
+    @ObservationIgnored let engine: ScenarioEngine
+    @ObservationIgnored private var engineQueue: [EngineOperation] = []
+    @ObservationIgnored private var isDraining = false
+    @ObservationIgnored private var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var fetchGeneration = 0
+    @ObservationIgnored private var requested: (version: Int, from: Date, through: Date)?
+    /// Which way the view last scrolled; fetches reach further that way.
+    @ObservationIgnored private var scrollDirection = 1.0
+
+    public let linkCount: Int
+
     public init(definition: ScenarioDefinition, now: Date = Date()) throws {
-        let scenario = Scenario(start: definition.start)
         var infos: [SlotInfo] = []
+        var setups: [ScenarioEngine.SlotSetup] = []
         for (index, spec) in definition.slots.enumerated() {
             let model = try FormulaModel(spec.formula, name: spec.name)
-            let id = try scenario.addSlot(spec.name, model: model)
             let reads = model.descriptor.inputs.compactMap { $0.source?.text }
-            infos.append(SlotInfo(id: id, key: index + 1, name: spec.name, title: displayName(spec.name),
+            infos.append(SlotInfo(id: SlotID(rawValue: index), key: index + 1, name: spec.name, title: displayName(spec.name),
                                   variable: spec.variable, colorHex: spec.color ?? SlotPalette.color(forSlotAt: index),
                                   format: spec.format, summary: spec.summary,
                                   reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
                                   eventKinds: model.handledEventKinds, parameters: model.parameterNames))
+            setups.append(ScenarioEngine.SlotSetup(name: spec.name, variable: spec.variable, model: model))
         }
-        for initial in definition.events {
-            guard let id = scenario.slotID(named: initial.slot) else { continue }
-            scenario.add(initial.event, to: id)
+        var authored = Array(repeating: [Event](), count: definition.slots.count)
+        var initial: [(slot: Int, event: Event)] = []
+        for event in definition.events {
+            guard let index = definition.slots.firstIndex(where: { $0.name == event.slot }) else { continue }
+            authored[index].append(event.event)
+            initial.append((index, event.event))
         }
-        try scenario.validate()
+        let engine = try ScenarioEngine(start: definition.start, slots: setups, events: initial)
 
-        self.scenario = scenario
+        self.engine = engine
+        self.linkCount = engine.linkCount
+        self.authored = authored
+        self.recurring = Array(repeating: [], count: definition.slots.count)
         self.name = definition.name
         self.slots = infos
         self.start = definition.start
@@ -104,11 +158,10 @@ public final class ScenarioStore {
         let frameStart = max(definition.start, now.addingTimeInterval(-5 * year))
         self.frame = TimeFrame(start: frameStart, end: frameStart.addingTimeInterval(19 * year))
         self.eventDraft = makeDraft(slotIndex: 0, date: now)
+        requestData()
     }
 
     public var focused: SlotInfo { slots[focusedIndex] }
-
-    public var linkCount: Int { scenario.connections.count + scenario.eventRoutes.count }
 
     // MARK: Navigation
 
@@ -166,8 +219,12 @@ public final class ScenarioStore {
         let newStart = max(start, frame.start.addingTimeInterval(shift))
         let newFrame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
         guard newFrame != frame else { return }  // at the start already: don't redraw for nothing
+        if fraction != 0 { scrollDirection = fraction > 0 ? 1 : -1 }
+        // The cursor moves with the view so it stays under the pointer (which doesn't move while
+        // the wheel scrolls), and the readout shows the date being pointed at.
+        if frame.contains(cursor) { cursor = max(start, cursor.addingTimeInterval(newStart.timeIntervalSince(frame.start))) }
         frame = newFrame
-        extendPreviewIfNeeded()
+        frameChanged()
     }
 
     /// Zooms around `anchor` (the cursor by default). Factor < 1 zooms in.
@@ -177,36 +234,36 @@ public final class ScenarioStore {
         let proportion = anchor.timeIntervalSince(frame.start) / frame.span
         let newStart = max(start, anchor.addingTimeInterval(-proportion * span))
         frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(span))
-        extendPreviewIfNeeded()
+        frameChanged()
     }
 
     private func reveal(_ date: Date) {
         guard !frame.contains(date) else { return }
         let newStart = max(start, date.addingTimeInterval(-frame.span / 2))
         frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
+        frameChanged()
+    }
+
+    /// After the view moves: fetch whatever isn't computed yet and extend the preview.
+    private func frameChanged() {
+        requestData()
         extendPreviewIfNeeded()
     }
 
     // MARK: Editing
 
     public func add(_ event: Event, toSlotAt index: Int) {
-        scenario.add(event, to: slots[index].id)
+        authored[index].append(event)
         undoStack.append(.addedEvent(slot: index, event))
         redoStack.removeAll()
-        scenarioChanged()
+        send(.addEvent(slot: index, event))
     }
 
     public func add(_ rule: RecurringEvent, toSlotAt index: Int) {
-        scenario.add(rule, to: slots[index].id)
+        recurring[index].append(rule)
         undoStack.append(.addedRule(slot: index, rule))
         redoStack.removeAll()
-        scenarioChanged()
-    }
-
-    /// Refreshes views and the draft's preview after the scenario's events change.
-    private func scenarioChanged() {
-        revision += 1
-        updateDraftPreview()
+        send(.addRule(slot: index, rule))
     }
 
     public var canUndo: Bool { !undoStack.isEmpty }
@@ -215,23 +272,123 @@ public final class ScenarioStore {
     public func undo() {
         guard let change = undoStack.popLast() else { return }
         switch change {
-        case .addedEvent(let slot, let event): scenario.removeEvent(id: event.id, from: slots[slot].id)
-        case .addedRule(let slot, let rule): scenario.removeRecurring(id: rule.id, from: slots[slot].id)
+        case .addedEvent(let slot, let event):
+            authored[slot].removeAll { $0.id == event.id }
+            send(.removeEvent(slot: slot, id: event.id))
+        case .addedRule(let slot, let rule):
+            recurring[slot].removeAll { $0.id == rule.id }
+            send(.removeRule(slot: slot, id: rule.id))
         }
         redoStack.append(change)
-        scenarioChanged()
         say("Undone")
     }
 
     public func redo() {
         guard let change = redoStack.popLast() else { return }
         switch change {
-        case .addedEvent(let slot, let event): scenario.add(event, to: slots[slot].id)
-        case .addedRule(let slot, let rule): scenario.add(rule, to: slots[slot].id)
+        case .addedEvent(let slot, let event):
+            authored[slot].append(event)
+            send(.addEvent(slot: slot, event))
+        case .addedRule(let slot, let rule):
+            recurring[slot].append(rule)
+            send(.addRule(slot: slot, rule))
         }
         undoStack.append(change)
-        scenarioChanged()
         say("Redone")
+    }
+
+    /// Sends an edit to the engine, then refetches and re-previews. The queue keeps them in order.
+    private func send(_ mutation: ScenarioEngine.Mutation) {
+        revision += 1
+        enqueue(.mutate(mutation))
+        requestData()
+        updateDraftPreview()
+    }
+
+    // MARK: Engine queue
+
+    private enum EngineOperation {
+        case mutate(ScenarioEngine.Mutation)
+        case fetch(ScenarioEngine.FetchRequest)
+        case preview(ScenarioEngine.PreviewRequest)
+
+        var isFetch: Bool { if case .fetch = self { return true } else { return false } }
+        var isPreview: Bool { if case .preview = self { return true } else { return false } }
+    }
+
+    /// Whether the engine has no work queued or running.
+    public var isEngineIdle: Bool { !isDraining && engineQueue.isEmpty }
+
+    /// Waits until the engine has finished everything queued, and its results are on screen.
+    public func waitUntilIdle() async {
+        while !isEngineIdle {
+            await withCheckedContinuation { idleWaiters.append($0) }
+        }
+    }
+
+    /// Queues work for the engine. A new fetch or preview replaces one still waiting (only the
+    /// newest matters); edits are never dropped or reordered.
+    private func enqueue(_ operation: EngineOperation) {
+        switch operation {
+        case .fetch: engineQueue.removeAll(where: \.isFetch)
+        case .preview: engineQueue.removeAll(where: \.isPreview)
+        case .mutate: break
+        }
+        engineQueue.append(operation)
+        guard !isDraining else { return }
+        isDraining = true
+        Task { await drainEngineQueue() }
+    }
+
+    private func drainEngineQueue() async {
+        while !engineQueue.isEmpty {
+            switch engineQueue.removeFirst() {
+            case .mutate(let mutation): await engine.apply(mutation)
+            case .fetch(let request): receive(await engine.fetch(request))
+            case .preview(let request): receive(await engine.preview(request))
+            }
+        }
+        isDraining = false
+        let waiters = idleWaiters
+        idleWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    /// Asks the engine for the visible range plus some to spare, reaching further in the direction
+    /// of scrolling. Does nothing when the latest results (or a request on its way) already cover the view.
+    func requestData(force: Bool = false) {
+        let span = frame.span
+        let neededFrom = max(start, frame.start.addingTimeInterval(-span * 0.1))
+        let neededThrough = frame.end.addingTimeInterval(span * 0.1)
+        if !force {
+            if let computed, computed.version == revision, computed.from <= neededFrom, computed.through >= neededThrough { return }
+            if let requested, requested.version == revision, requested.from <= neededFrom, requested.through >= neededThrough { return }
+        }
+        let behind = scrollDirection < 0 ? 1.5 : 0.5
+        let ahead = scrollDirection < 0 ? 0.5 : 1.5
+        let from = max(start, frame.start.addingTimeInterval(-span * behind))
+        let through = frame.end.addingTimeInterval(span * ahead)
+        fetchGeneration += 1
+        engine.latestGeneration.advance(to: fetchGeneration)
+        requested = (revision, from, through)
+        enqueue(.fetch(ScenarioEngine.FetchRequest(version: revision, generation: fetchGeneration, from: from,
+                                                   through: through, parameterDate: eventDraft.date)))
+    }
+
+    private func receive(_ result: ScenarioEngine.FetchResult) {
+        guard result.version == revision else { return }  // an edit came after this was asked for
+        if let computed, computed.version == revision, computed.generation > result.generation { return }
+        computed = result
+        requestData()  // the view may have moved on, or this fetch was cut short
+    }
+
+    func requestPreview(_ request: ScenarioEngine.PreviewRequest) {
+        enqueue(.preview(request))
+    }
+
+    private func receive(_ result: ScenarioEngine.PreviewResult) {
+        guard result.sequence == previewSequence, result.version == revision else { return }
+        draftPreview = result.samples
     }
 
     // MARK: Command bar
@@ -288,7 +445,7 @@ public final class ScenarioStore {
                 say("Added \(amountText) on \(DateText.monthYear(when)) to \(focused.title)")
             }
         case .setParameter(let name, let value, let at):
-            let parameters = scenario.descriptor(of: focused.id).variables.filter { $0.causality == .parameter }.map(\.name)
+            let parameters = focused.parameters
             guard parameters.contains(name) else {
                 say("\(focused.title) has no parameter called \(name). Its parameters: \(parameters.joined(separator: ", ")).", isError: true)
                 return true
@@ -326,7 +483,7 @@ public final class ScenarioStore {
     // MARK: State for drawing
     //
     // Views read these separately so that SwiftUI only redraws what changed: moving the pointer
-    // touches `cursor` alone, which only the cursor views read.
+    // touches `cursor` alone, which only the cursor views read. All of them draw from `computed`.
 
     /// Everything the timeline draws that doesn't depend on the cursor.
     public func timelineState() -> TimelineState {
@@ -334,23 +491,29 @@ public final class ScenarioStore {
         let margin: TimeInterval = 62 * 86_400
         let from = frame.start.addingTimeInterval(-margin)
         let through = frame.end.addingTimeInterval(margin)
+        let computed = self.computed
 
-        // Compute any missing range for all slots at once, with independent groups on separate cores.
-        try? scenario.ensureAll(through: through)
-        func samples(_ slot: SlotInfo) -> [Sample] {
-            (try? scenario.series(slot.variable, of: slot.id, from: from, through: through)) ?? []
+        func samples(_ index: Int) -> [Sample] {
+            guard let series = computed?.series[index], !series.isEmpty else { return [] }
+            let low = Self.firstIndex(in: series, atOrAfter: from)
+            let high = Self.firstIndex(in: series, atOrAfter: through.addingTimeInterval(1))
+            return low < high ? Array(series[low..<high]) : []
         }
+        /// The visible values' range. Values that overflowed (infinite or NaN) can't be placed on an
+        /// axis, so they're left out and the line breaks there; the rest is clamped so a range
+        /// and its padding stay finite.
         func range(_ list: [Sample]) -> (low: Double, high: Double)? {
             var low = Double.infinity, high = -Double.infinity
-            for sample in list where frame.contains(sample.time) {
+            for sample in list where sample.value.isFinite && frame.contains(sample.time) {
                 low = min(low, sample.value)
                 high = max(high, sample.value)
             }
-            return low <= high ? (low, high) : nil
+            guard low <= high else { return nil }
+            return (Self.clampToPlot(low), Self.clampToPlot(high))
         }
 
         let focusSlot = focused
-        let focusSamples = samples(focusSlot)
+        let focusSamples = samples(focusedIndex)
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
         let preview = draftOnFocus == nil ? [] : draftPreview
         let lineRange = range(focusSamples), previewRange = range(preview)
@@ -360,49 +523,47 @@ public final class ScenarioStore {
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: draftOnFocus?.date,
-            yDomain: domain, yTicks: ticks, events: markers(for: focusSlot))
+            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex))
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
-            let list = samples(slot)
+            let list = samples(index)
             let bounds = range(list) ?? (0, 1)
-            let pad = max((bounds.high - bounds.low) * 0.12, abs(bounds.high) * 0.01, 1e-9)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
-                             yDomain: (bounds.low - pad)...(bounds.high + pad), reads: slot.reads)
+                             yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads)
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, focus: focus, lanes: lanes,
                              yearTicks: TimelineState.yearTicks(for: frame))
     }
 
-    /// The readout and lane values at the cursor.
+    /// The readout and lane values at the cursor, from the latest results. Shows "…" while the
+    /// cursor is past what's been computed.
     public func cursorState() -> CursorState {
-        _ = revision
-        func value(_ slot: SlotInfo) -> Double? {
-            guard cursor >= start else { return nil }
-            return try? scenario.value(slot.variable, of: slot.id, at: cursor)
+        let computed = self.computed
+        let ready = computed.map { cursor >= start && cursor <= $0.through } ?? false
+        func value(_ index: Int) -> Double? {
+            guard ready, let series = computed?.series[index] else { return nil }
+            return Self.held(series, at: cursor)
         }
         let focusSlot = focused
-        let focusValue = value(focusSlot)
+        let focusValue = value(focusedIndex)
         var laneValues: [Int: String] = [:]
         for (index, slot) in slots.enumerated() where index != focusedIndex {
-            laneValues[index] = value(slot).map(slot.format.full) ?? "—"
+            laneValues[index] = ready ? (value(index).map(slot.format.full) ?? "—") : "…"
         }
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
-                           readoutValue: focusValue.map(focusSlot.format.full) ?? "—",
-                           readoutNote: cursor > now ? "Projection" : "Model",
+                           readoutValue: ready ? (focusValue.map(focusSlot.format.full) ?? "—") : "…",
+                           readoutNote: !ready ? "Computing" : cursor > now ? "Projection" : "Model",
                            focusValue: focusValue, laneValues: laneValues)
     }
 
     /// "Computed through Dec 2045 · 5 of 8 slots · 1 link".
     public func statusText() -> String {
-        _ = revision
-        _ = frame
-        let computed = slots.compactMap { scenario.computedThrough($0.id) }.min()
-        return [
-            computed.map { "Computed through " + DateText.monthYear($0) },
+        [
+            computed?.computedThrough.map { "Computed through " + DateText.monthYear($0) } ?? "Computing…",
             "\(slots.count) of \(Scenario.bankSize) slots",
             "\(linkCount) link\(linkCount == 1 ? "" : "s")",
-        ].compactMap { $0 }.joined(separator: " · ")
+        ].joined(separator: " · ")
     }
 
     /// The whole panel at once, for clipboard snapshots and tests.
@@ -410,24 +571,38 @@ public final class ScenarioStore {
         PanelState(timeline: timelineState(), cursor: cursorState(), status: statusText(), eventPreview: eventPreview())
     }
 
-    private func markers(for slot: SlotInfo) -> [EventMarker] {
+    private func markers(forSlotAt index: Int) -> [EventMarker] {
         var markers: [EventMarker] = []
-        for event in scenario.events(in: slot.id) where event.time <= frame.end {
+        for event in authored[index] where event.time <= frame.end {
             markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: Self.label(for: event), kind: .oneOff))
         }
-        for rule in scenario.recurringEvents(in: slot.id) where rule.first <= frame.end {
+        for rule in recurring[index] where rule.first <= frame.end {
             let end = min(rule.until ?? frame.end, frame.end)
             let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
             let sign = rule.kind == "withdraw" ? "−" : "+"
             markers.append(EventMarker(id: rule.id, date: rule.first, endDate: end,
                                        label: "\(sign)\(amount) \(Self.describe(rule.every))", kind: .recurring))
         }
-        if let generated = try? scenario.generatedEvents(in: slot.id, through: frame.end) {
-            for event in generated where event.time >= frame.start {
-                markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: event.kind, kind: .generated))
-            }
+        for event in computed?.generated[index] ?? [] where frame.contains(event.time) {
+            markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: event.kind, kind: .generated))
         }
         return markers.sorted { $0.date < $1.date }
+    }
+
+    /// The last sample at or before `date`.
+    static func held(_ samples: [Sample], at date: Date) -> Double? {
+        let index = firstIndex(in: samples, atOrAfter: date.addingTimeInterval(1e-6)) - 1
+        return index >= 0 ? samples[index].value : nil
+    }
+
+    /// The first sample at or after `date` (binary search).
+    static func firstIndex(in samples: [Sample], atOrAfter date: Date) -> Int {
+        var low = 0, high = samples.count
+        while low < high {
+            let mid = (low + high) / 2
+            if samples[mid].time < date { low = mid + 1 } else { high = mid }
+        }
+        return low
     }
 
     static func label(for event: Event) -> String {
@@ -448,10 +623,12 @@ public final class ScenarioStore {
     /// The visible data for the clipboard: the focused slot first, then the lanes.
     public func snapshotData() -> SnapshotData {
         let state = panelState()
-        var ordered = [focused]
-        ordered += slots.enumerated().filter { $0.offset != focusedIndex }.map(\.element)
-        let slotData = ordered.map { slot in
-            let points = ((try? scenario.series(slot.variable, of: slot.id, from: frame.start, through: frame.end)) ?? [])
+        var order = [focusedIndex]
+        order += slots.indices.filter { $0 != focusedIndex }
+        let slotData = order.map { index in
+            let slot = slots[index]
+            let points = (computed?.series[index] ?? [])
+                .filter { frame.contains($0.time) }
                 .map { SnapshotData.Point(t: $0.time, v: $0.value) }
             return SnapshotData.Slot(name: slot.title, variable: slot.variable, color: slot.colorHex,
                                      format: slot.format, points: points)

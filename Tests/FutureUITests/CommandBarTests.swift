@@ -112,6 +112,57 @@ struct FormattingTests {
         #expect(flat.domain.lowerBound < 5 && flat.domain.upperBound > 5)
     }
 
+    @Test("Numbers too big to write out, infinity and NaN")
+    func hugeValues() {
+        // Past Int.max (about 9.2e18) labels used to crash when converted to whole numbers.
+        #expect(ValueFormat.currency.axis(2.5e9) == "$2.5B")
+        #expect(ValueFormat.currency.axis(4e12) == "$4T")
+        #expect(ValueFormat.currency.axis(2.5e25) == "$2.5e25")
+        #expect(ValueFormat.currency.axis(-1e300) == "−$1e300")
+        #expect(ValueFormat.number.axis(1e19) == "1e19")
+        #expect(ValueFormat.temperature.axis(-3e20) == "−3e20°")
+        #expect(ValueFormat.currency.full(1.234e18) == "$1.23e18")
+        #expect(ValueFormat.currency.full(-.infinity) == "−$∞")
+        #expect(ValueFormat.number.full(.infinity) == "∞")
+        #expect(ValueFormat.temperature.full(5e30) == "5e30 °C")
+        #expect(ValueFormat.currency.full(.nan) == "—")
+        #expect(ValueFormat.number.axis(.nan) == "—")
+        #expect(ValueFormat.currency.full(999_999_999_999_999) == "$999,999,999,999,999")
+    }
+
+    @Test("Nice ticks stay finite and few, whatever the values")
+    func extremeTicks() {
+        let cases: [(Double, Double)] = [
+            (0, .infinity), (-.infinity, .infinity), (.nan, 5), (.nan, .nan),
+            (0, .greatestFiniteMagnitude), (-.greatestFiniteMagnitude, .greatestFiniteMagnitude),
+            (1e17, 1e17 + 16),  // a range smaller than the values' precision
+            (3e20, 3e20), (7, 2),
+        ]
+        for (low, high) in cases {
+            let result = niceTicks(low: low, high: high, includeZero: low == 0)
+            #expect(result.domain.lowerBound.isFinite && result.domain.upperBound.isFinite, "\(low)...\(high)")
+            #expect(result.domain.lowerBound < result.domain.upperBound, "\(low)...\(high)")
+            #expect((2...101).contains(result.ticks.count), "\(low)...\(high)")
+            #expect(Set(result.ticks).count == result.ticks.count, "\(low)...\(high): ticks repeat")
+            for tick in result.ticks { _ = ValueFormat.currency.axis(tick) }
+        }
+    }
+
+    @Test("Lane ranges are valid and finite, whatever the values")
+    func laneDomains() {
+        let cases: [(Double, Double)] = [
+            (1.5e305, 1.7e308),  // everything visible beyond the plot limit: this used to trap
+            (-1.7e308, -1.5e305), (5, 3), (0, 0), (.nan, 1), (-.infinity, .infinity),
+            (1e17, 1e17 + 16), (-.greatestFiniteMagnitude, .greatestFiniteMagnitude),
+        ]
+        for (low, high) in cases {
+            let domain = ScenarioStore.laneDomain(low: low, high: high)
+            #expect(domain.lowerBound.isFinite && domain.upperBound.isFinite, "\(low)...\(high)")
+            #expect(domain.lowerBound < domain.upperBound, "\(low)...\(high)")
+        }
+        #expect(ScenarioStore.laneDomain(low: 5, high: 3).contains(4.9))
+    }
+
     @Test("Slot names read naturally")
     func names() {
         #expect(displayName("IndexFund") == "Index fund")

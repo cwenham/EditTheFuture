@@ -82,7 +82,10 @@ struct Parser {
     private mutating func parseRate() throws -> StepRate {
         var count = 1
         if case .number(let value) = current.kind {
-            guard value >= 1, value == value.rounded() else { throw syntax("A step must be a whole number of units.") }
+            // The upper limit also keeps the conversion to Int from trapping on numbers like 1e30.
+            guard value >= 1, value <= 1_000_000, value == value.rounded() else {
+                throw syntax("A step must be a whole number of units, from 1 to 1,000,000.")
+            }
             count = Int(value)
             advance()
         }

@@ -102,11 +102,21 @@ Always simulate at the model's own step. To draw, downsample to the screen: keep
 - **Flat history:** slot history is one array of numbers with a column per readable variable, instead of a dictionary per step.
 - **Event delivery:** generated events are found by binary search, and slot bookkeeping isn't copied each step.
 
-**Across cores.** Slots split into groups joined by connections or event routes. Groups never read each other, so `Scenario.ensureAll(through:)` computes them concurrently with `DispatchQueue.concurrentPerform`. Each slot is its own object, so a group only writes to its own slots. Eight independent slots compute about 4× faster on the 8-core Xeon. The store calls `ensureAll` before drawing, so zooming out, or edits that recompute a lot, use every core.
+**Across cores.** Slots split into groups joined by connections or event routes. Groups never read each other, so `Scenario.ensureAll(through:)` computes them concurrently with `DispatchQueue.concurrentPerform`. Each slot is its own object, so a group only writes to its own slots. Eight independent slots compute about 4× faster on the 8-core Xeon. The engine calls `ensureAll` for every fetch, so zooming out, or edits that recompute a lot, use every core.
+
+**Off the main thread.** The main thread never computes. `ScenarioEngine`, an actor running on a serial dispatch queue of its own, owns the `Scenario`. The store keeps the engine's latest results and draws only from those.
+
+- **What crosses over:** plain values. The store sends edits (add or remove an event or rule), fetches (a date range plus the date to read parameters at) and previews (the draft change, which the engine adds, reads and removes again). It gets back each slot's samples, generated events and parameter values.
+- **Order:** the store sends work one operation at a time, in order, so a fetch always sees every edit made before it. Edits are never dropped. A new fetch or preview replaces one still waiting, since only the newest matters.
+- **Stale results:** every edit increases the store's revision. Results carry the revision and fetch number they were asked for, and older ones are ignored.
+- **Superseded fetches:** a fetch computes four years at a time. Between chunks it checks a lock-protected counter, the newest fetch number. When a newer fetch exists, it stops and returns what it has, so a long jump doesn't hold up the next request.
+- **Prefetching:** a fetch covers the visible range plus 1.5 screen widths in the scroll direction and half a width behind. The store asks again only when the view comes within a tenth of a width of the edge of what it has.
+- **While waiting:** lines end where the results end. Readouts past that point show "…" and "Computing", and the add-event pane shows "Working out the effect…". On launch the footer shows "Computing…" until the first results arrive, about 7 ms later.
+- **Measured** (`etf-bench`, iMac Pro): the engine catches up 7–21 ms after creating the store, zooming out to 80 years, jumping to 2200 or making an edit near the start. In frame tests it keeps up with continuous scrolling and zooming, and is idle when each burst ends.
+- **Tests** call `await store.waitUntilIdle()` before reading results.
 
 **Not done yet:**
 
-- **Computing off the main thread:** the main thread still waits for the engine. With today's speeds, routine scrolling computes a few dozen steps (well under a millisecond), so this only matters for big bursts and for ensembles. The plan: an actor owns the scenario, the visible range is requested as a cancellable task, the view shows the last computed values until new ones arrive, and the scroll direction drives prefetching.
 - **Pipelining inside a group:** an upstream slot works ahead while downstream slots catch up.
 - **Remote and WebAssembly models** run off the main actor, with the coordinator batching steps to them (5.6).
 
@@ -483,7 +493,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 | M3 | Drag the future UI; readings import; drift alerts |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
-| Later | Ensembles and fan charts; computing off the main thread; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
+| Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
 
 ## 17. Open questions
 
@@ -519,7 +529,7 @@ Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), goal seek
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
-  FutureUI/          ScenarioStore, panel views, Canvas plots, add-event pane, command bar, snapshots, scroll mapping
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), panel views, Canvas plots, add-event pane, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
 Tests/

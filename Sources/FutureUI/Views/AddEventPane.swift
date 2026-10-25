@@ -54,7 +54,7 @@ struct AddEventPane: View {
                     .labelsHidden()
                 }
                 field("New value") {
-                    TextField("e.g. 4% or 650", text: $store.eventDraft.valueText)
+                    TextField(currentValueHint, text: $store.eventDraft.valueText)
                         .textFieldStyle(.roundedBorder)
                         .focused($focusedField, equals: .value)
                         .onSubmit { store.commitEvent() }
@@ -152,6 +152,11 @@ struct AddEventPane: View {
         #endif
     }
 
+    /// "Now 0.045", from the latest results, or an example until they arrive.
+    private var currentValueHint: String {
+        store.currentValue(ofParameter: draft.parameter).map { "Now " + String(format: "%g", $0) } ?? "e.g. 4% or 650"
+    }
+
     private struct KindOption {
         let kind: EventDraft.Kind
         let title: String
@@ -186,6 +191,10 @@ struct EffectBox: View {
                 row("At right edge · \(preview.edgeDate)", preview.atEdge)
                 Text("Scroll the timeline to watch it play out")
                     .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondary)
+            } else if store.draftIsComplete {
+                Text("Working out the effect…")
+                    .font(.system(size: 12))
                     .foregroundStyle(Theme.secondary)
             } else {
                 Text(isSetParameter ? "Enter a value to see its effect over time" : "Enter an amount to see its effect over time")

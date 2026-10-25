@@ -34,6 +34,17 @@ struct FormulaTests {
         }
     }
 
+    @Test("Step counts must be whole and reasonable, not crash when huge")
+    func stepCounts() throws {
+        let message = "A step must be a whole number of units, from 1 to 1,000,000."
+        for count in ["1e30", "2.5", "0", "1000001"] {
+            #expect(throws: FormulaError.syntax(line: 1, message: message), "step \(count)") {
+                try FormulaModel("step \(count) month\ninit x = 1\nx[t] = x[t-1]")
+            }
+        }
+        _ = try FormulaModel("step 3 month\ninit x = 1\nx[t] = x[t-1]")
+    }
+
     @Test("Unknown names are caught before running")
     func unknownName() {
         #expect(throws: FormulaError.unknownName("y", line: 1)) { try FormulaModel("x[t] = y + 1") }
