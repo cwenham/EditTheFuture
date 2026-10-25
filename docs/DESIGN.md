@@ -106,7 +106,9 @@ Always simulate at the model's own step. To draw, downsample to the screen: keep
 
 **Off the main thread.** The main thread never computes. `ScenarioEngine`, an actor running on a serial dispatch queue of its own, owns the `Scenario`. The store keeps the engine's latest results and draws only from those.
 
-- **What crosses over:** plain values. The store sends edits (add or remove an event or rule), fetches (a date range plus the date to read parameters at) and previews (the draft change, which the engine adds, reads and removes again). It gets back each slot's samples, generated events and parameter values.
+- **What crosses over:** plain values. The store sends edits (add or remove an event or rule), slot layouts, fetches (a date range plus the date to read parameters at) and previews (the draft change, which the engine adds, reads and removes again). It gets back each slot's samples, generated events and parameter values.
+- **Slot layouts:** when slots are added, removed, moved, renamed or given new values, the store sends every slot with its model, values, events and rules, and a gap for each paused slot (5.9). If the same slots run under the same names, the engine swaps only the models that changed (`Scenario.replaceModel`), which recomputes those slots and the ones downstream and leaves the rest. Otherwise it rebuilds the scenario.
+- **Slider previews:** while a parameter's slider is dragged, the engine swaps in the model with the dragged value, reads the slot's line and swaps the old model back.
 - **Order:** the store sends work one operation at a time, in order, so a fetch always sees every edit made before it. Edits are never dropped. A new fetch or preview replaces one still waiting, since only the newest matters.
 - **Stale results:** every edit increases the store's revision. Results carry the revision and fetch number they were asked for, and older ones are ignored.
 - **Superseded fetches:** a fetch computes four years at a time. Between chunks it checks a lock-protected counter, the newest fetch number. When a newer fetch exists, it stops and returns what it has, so a long jump doesn't hold up the next request.
@@ -185,7 +187,13 @@ A what-if branch covers the whole scenario, because forking `Climate` also forks
 
 The engine has no slot limit. The UI and hardware show 8 slots per bank and page between banks, the same reason DAW control surfaces come in banks of 8. A model that only feeds others can sit in a later bank.
 
-### 5.9 FMI and SSP
+### 5.9 Slots that can't run
+
+Before a scenario is built, `Wiring.check` works out which slots can run. A slot is paused when it reads a slot or value that isn't there, listens for events from a slot that isn't there or never sends them, reads itself by its own slot name, or is in a same-step loop with other slots. Anything that reads a paused slot, at any distance, is paused too, with the reason "Reads from Climate, which is paused".
+
+Paused slots stay in the scenario's list with their events, but the engine doesn't run them. The rest run as usual. This replaces failing the whole scenario, so removing a slot others read from only pauses those readers (UI.md, 5.7).
+
+### 5.10 FMI and SSP
 
 The engine borrows FMI 3.0 and SSP vocabulary (see the glossary) so it can import FMUs (functional mock-up units) later. That would be Mac-only for binary FMUs, because they contain native code. It also keeps the concepts familiar to simulation engineers. The scenario plays the role FMI calls the importer, and the step method is the counterpart of `fmi3DoStep`. Further reading is in section 18.
 
@@ -237,6 +245,25 @@ occupancy[t] = min(capacity, occupancy[t-1] * 1.02)
 when Building.occupancy > Building.fireCodeLimit emit OverCapacity
 on FireRisk.OverCapacity[t-1]: occupancy = fireCodeLimit * 0.9
 ```
+
+Parameters and starting values can say how people see and set them, after the value:
+
+```
+param rate = 4.5% range 0%..15% label "Interest rate"
+param monthly = 400 range 0..5000 by 50 label "Monthly deposit" as currency
+init balance = 18000 label "Balance" as currency
+```
+
+| Option | Meaning |
+|---|---|
+| `range low..high` | The slider's range. Values outside it can still be typed. |
+| `by step` | The slider's step. |
+| `label "text"` | The name shown in the Slot tab. Defaults to the variable's name. |
+| `as currency` | How the value is written: `number`, `percent`, `currency` or `temperature`. A value written with `%` is a percent unless it says otherwise. |
+
+They become the variable's `label`, `minimum`, `maximum`, `increment` and `quantity` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
+
+A slot can override any parameter's or starting value's default (UI.md, 5.7), like an SSP parameter binding. The formula keeps its defaults, and the slot keeps its own values next to it.
 
 References:
 
@@ -340,7 +367,7 @@ The detailed UI design (visual language, layouts, input, interactions, accessibi
 
 ### 9.4 Command bar
 
-Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040", "goto 100°C", "goto mortgage $0". `goto` with a value finds where a slot's line first reaches it (UI.md, 5.1). Natural-language input goes through section 7's providers.
+Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040", "goto 100°C", "goto mortgage $0", "add loan to 7", "remove climate". `goto` with a value finds where a slot's line first reaches it (UI.md, 5.1). `add` and `remove` change slots (UI.md, 5.7). Natural-language input goes through section 7's providers.
 
 ### 9.5 iPad and iPhone
 
@@ -503,6 +530,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 - Ensemble size and progressive refinement budget per frame.
 - Market data provider and licensing.
 - Branch storage: copy-on-write event lists vs a diff log.
+- A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 
 ## 18. Further reading: FMI and co-simulation
 
@@ -528,17 +556,17 @@ docs/
   HANDOFF.md         where the work stands, for the next session
 Package.swift
 Sources/
-  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), goal seek
+  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), panel views, Canvas plots, add-event pane, command bar, snapshots, scroll mapping
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), model library, slot editing, panel views, Canvas plots, side pane (Event and Slot tabs), model picker, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
-  FutureFormulaTests/   parsing, savings maths, ODEs, coupled scenarios, goal seek, determinism
+  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, savings maths, ODEs, coupled scenarios, goal seek, determinism
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
-  FutureUITests/        store, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
+  FutureUITests/        store, slot editing, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
 scripts/
   build-app.sh       builds .build/EditTheFuture.app
 ```

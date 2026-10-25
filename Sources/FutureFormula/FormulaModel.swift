@@ -43,14 +43,61 @@ public struct FormulaModel: TimelineModel {
     /// Parameter names in declaration order.
     public var parameterNames: [String] { program.params.map(\.name) }
 
-    public init(_ source: String, name: String = "Formula") throws {
+    /// Variables with an `init` line, in declaration order: the values a slot can set at its start.
+    public var startingValueNames: [String] { program.inits.map(\.name) }
+
+    /// The slot's own values for parameters and starting values, which replace the formula's
+    /// defaults at the start (like an SSP parameter binding). `set` events still change parameters later.
+    public let overrides: [String: Double]
+
+    /// Each parameter's and starting value's default as the formula writes it, when it can be worked
+    /// out without running the model: numbers, `pi`, and earlier parameters and starting values.
+    public let declaredDefaults: [String: Double]
+
+    /// The same with `overrides` applied: what the slot starts with. A default that depends on an
+    /// overridden parameter (`init P = K / 10`) follows it.
+    public let startingValues: [String: Double]
+
+    private let parameterOverrides: [Int: Double]
+    private let initOverrides: [Int: Double]
+
+    /// - Parameter values: the slot's own values for parameters and starting values, by name.
+    ///   Names the formula doesn't declare are ignored.
+    public init(_ source: String, name: String = "Formula", values: [String: Double] = [:]) throws {
         self.source = source
         let program = try Analyzer.compile(Parser.parse(source))
         self.program = program
-        self.executable = program.makeExecutable()
+        let executable = program.makeExecutable()
+        self.executable = executable
 
-        var variables = program.params.map { Variable(name: $0.name, causality: .parameter) }
-        variables += program.variableNames.map { Variable(name: $0, causality: .output) }
+        let declared = Set(program.params.map(\.name) + program.inits.map(\.name))
+        overrides = values.filter { declared.contains($0.key) }
+        var parameterOverrides: [Int: Double] = [:]
+        for (index, param) in program.params.enumerated() { parameterOverrides[index] = overrides[param.name] }
+        var initOverrides: [Int: Double] = [:]
+        for (position, initial) in program.inits.enumerated() { initOverrides[executable.inits[position].index] = overrides[initial.name] }
+        self.parameterOverrides = parameterOverrides
+        self.initOverrides = initOverrides
+        declaredDefaults = Self.constantValues(program, executable, overrides: [:])
+        startingValues = Self.constantValues(program, executable, overrides: overrides)
+
+        func describe(_ name: String, _ causality: Causality, _ options: DeclarationOptions?) -> Variable {
+            Variable(name: name, causality: causality, label: options?.label, minimum: options?.minimum,
+                     maximum: options?.maximum, increment: options?.increment, quantity: options?.quantity)
+        }
+        // A variable's options can be on its init line or the line that defines it; the init line wins.
+        var outputOptions: [String: DeclarationOptions] = [:]
+        for assignment in program.inits + program.definitionOrder + program.odes {
+            var options = outputOptions[assignment.name] ?? DeclarationOptions()
+            options.label = options.label ?? assignment.options.label
+            options.minimum = options.minimum ?? assignment.options.minimum
+            options.maximum = options.maximum ?? assignment.options.maximum
+            options.increment = options.increment ?? assignment.options.increment
+            options.quantity = options.quantity ?? assignment.options.quantity
+            outputOptions[assignment.name] = options
+        }
+        var variables = program.params.map { describe($0.name, .parameter, $0.options) }
+        variables += program.variableNames.map { describe($0, .output, outputOptions[$0]) }
         variables += program.references.map { Variable(name: $0.text, causality: .input, source: $0) }
 
         var emits: [String] = []
@@ -74,10 +121,18 @@ public struct FormulaModel: TimelineModel {
                                   current: zeros, previous: zeros, inputs: inputs(from: context),
                                   builtins: builtins(for: context), random: context.makeRandom())
         for parameter in executable.parameters {
-            evaluator.parameters[parameter.index] = try evaluator.evaluate(parameter.expr)
+            if let value = parameterOverrides[parameter.index] {
+                evaluator.parameters[parameter.index] = value
+            } else {
+                evaluator.parameters[parameter.index] = try evaluator.evaluate(parameter.expr)
+            }
         }
         for initial in executable.inits {
-            evaluator.current[initial.index] = try evaluator.evaluate(initial.expr)
+            if let value = initOverrides[initial.index] {
+                evaluator.current[initial.index] = value
+            } else {
+                evaluator.current[initial.index] = try evaluator.evaluate(initial.expr)
+            }
         }
         // At the start, x[t-1] means the starting value (or 0).
         evaluator.previous = evaluator.current
@@ -168,6 +223,57 @@ public struct FormulaModel: TimelineModel {
     }
 
     // MARK: Helpers
+
+    /// Params and inits that are constants (numbers, `pi`, earlier constants), worked out without a
+    /// step context. Ones that read the date, another slot or randomness are left out.
+    private static func constantValues(_ program: CompiledProgram, _ executable: Executable,
+                                       overrides: [String: Double]) -> [String: Double] {
+        var builtins = [Double](repeating: 0, count: Builtin.allCases.count)
+        builtins[Builtin.pi.index] = Double.pi
+        var evaluator = Evaluator(parameters: [Double](repeating: 0, count: executable.parameterCount),
+                                  current: [Double](repeating: 0, count: executable.variableCount),
+                                  previous: [Double](repeating: 0, count: executable.variableCount),
+                                  inputs: [Double](repeating: 0, count: executable.inputNames.count),
+                                  builtins: builtins, random: SeededRandom(seed: 0))
+        var known: [String: Double] = [:]
+        func isConstant(_ expr: Expr) -> Bool {
+            var constant = true
+            expr.visit { node in
+                switch node {
+                case .name(let name, let lagged):
+                    if lagged || !(known[name] != nil || name == "pi") { constant = false }
+                case .input, .eventField:
+                    constant = false
+                case .call(let function, _):
+                    if function == "random" || function == "normal" { constant = false }
+                case .number, .unary, .binary:
+                    break
+                }
+            }
+            return constant
+        }
+        for (param, resolved) in zip(program.params, executable.parameters) {
+            if let value = overrides[param.name] {
+                known[param.name] = value
+            } else if isConstant(param.expr), let value = try? evaluator.evaluate(resolved.expr) {
+                known[param.name] = value
+            } else {
+                continue
+            }
+            evaluator.parameters[resolved.index] = known[param.name]!
+        }
+        for (initial, resolved) in zip(program.inits, executable.inits) {
+            if let value = overrides[initial.name] {
+                known[initial.name] = value
+            } else if isConstant(initial.expr), let value = try? evaluator.evaluate(resolved.expr) {
+                known[initial.name] = value
+            } else {
+                continue
+            }
+            evaluator.current[resolved.index] = known[initial.name]!
+        }
+        return known
+    }
 
     private func inputs(from context: StepContext) -> [Double] {
         executable.inputNames.map { context.inputs[$0] ?? 0 }

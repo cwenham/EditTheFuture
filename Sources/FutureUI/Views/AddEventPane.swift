@@ -7,28 +7,22 @@ public enum PaneSide: String, Sendable {
     var other: PaneSide { self == .left ? .right : .left }
 }
 
-/// The add-event pane (docs/UI.md, 5.3): always visible, docked on one side, so the timeline
-/// can be scrolled freely to watch the draft's effect play out.
+/// The side pane's Event tab (docs/UI.md, 5.3): always visible, docked on one side, so the
+/// timeline can be scrolled freely to watch the draft's effect play out.
 struct AddEventPane: View {
     @Bindable var store: ScenarioStore
-    let side: PaneSide
-    var onMoveToOtherSide: () -> Void
-    var onDragChanged: (DragGesture.Value) -> Void
-    var onDragEnded: (DragGesture.Value) -> Void
-
-    static let width: CGFloat = 300
 
     @FocusState private var focusedField: Field?
     enum Field { case amount, value }
 
     private var draft: EventDraft { store.eventDraft }
-    private var slot: ScenarioStore.SlotInfo { store.slots[draft.slotIndex] }
+    private var slot: ScenarioStore.SlotInfo {
+        store.slots.indices.contains(draft.slotIndex) ? store.slots[draft.slotIndex] : store.focused
+    }
     private var isSetParameter: Bool { draft.kind == .setParameter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            header
-
             HStack(spacing: 8) {
                 Circle().fill(slot.color).frame(width: 9, height: 9)
                 Text(slot.title).font(.system(size: 14, weight: .semibold))
@@ -109,47 +103,17 @@ struct AddEventPane: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.secondary)
         }
-        .padding(16)
-        .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline))
+        .onAppear {
+            // Switching from the Slot tab to set a date or a parameter: the request came before this appeared.
+            if store.focusEventFieldOnAppear {
+                store.focusEventFieldOnAppear = false
+                focusedField = isSetParameter ? .value : .amount
+            }
+        }
         .onChange(of: store.eventFieldFocusRequest) {
             focusedField = isSetParameter ? .value : .amount
         }
-    }
-
-    /// The pane's title bar, which is also its drag handle.
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Theme.secondary)
-            Text("Add event").font(.system(size: 15, weight: .semibold))
-            Spacer()
-            Button(action: onMoveToOtherSide) {
-                Image(systemName: side == .left ? "arrow.right.to.line" : "arrow.left.to.line")
-                    .font(.system(size: 12))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Move to the \(side.other.rawValue) side")
-            .accessibilityLabel("Move the add-event pane to the \(side.other.rawValue) side")
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 3, coordinateSpace: .named(PanelView.bodySpace))
-                .onChanged(onDragChanged)
-                .onEnded(onDragEnded)
-        )
-        .help("Drag to dock on the other side")
-        #if os(macOS)
-        .onHover { inside in
-            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-        }
-        #endif
     }
 
     /// "Now 0.045", from the latest results, or an example until they arrive.
@@ -239,6 +203,6 @@ struct DockZones: View {
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Theme.proposal.opacity(active ? 0.9 : 0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
             .overlay(Text("Dock \(side.rawValue)").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.proposal))
-            .frame(width: AddEventPane.width)
+            .frame(width: SidePane.width)
     }
 }

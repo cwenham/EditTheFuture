@@ -14,6 +14,10 @@ public enum CommandBarAction: Equatable, Sendable {
     /// `kind` is "deposit" for `+amount` and "withdraw" for `-amount`. `at` nil means the cursor.
     case addEvent(kind: String, amount: Double, at: Date?, repeats: StepRate?)
     case setParameter(name: String, value: Double, at: Date?)
+    /// Adds a library model by name, to a slot number (1...8) or the first free one.
+    case addModel(String, slot: Int?)
+    /// Asks to remove a slot, by name or number.
+    case removeSlot(String)
     case copySnapshot
     case copyData
     case undo
@@ -46,6 +50,7 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
 /// - `focus savings`, `3`
 /// - `+500`, `+500 monthly from 2027-03`, `-6,000 on Aug 2028`, `+1.2k every year`
 /// - `set rate 4% from 2027-06`, `set monthly 650`
+/// - `add savings account`, `add loan to 7`, `remove climate`
 /// - `copy`, `copy data`, `undo`, `redo`
 ///
 /// Natural-language input goes to a language model instead (DESIGN.md, section 7).
@@ -88,6 +93,24 @@ public enum CommandBarParser {
                 }
             }
             throw CommandBarError.badGoto(originalWords.joined(separator: " "))
+        }
+
+        if words.first == "add", words.count >= 2 {
+            var rest = Array(text.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst())
+            var slot: Int?
+            if rest.count >= 2, let number = Int(rest[rest.count - 1]) {
+                let before = rest[rest.count - 2].lowercased()
+                if before == "to" || before == "slot" {
+                    slot = number
+                    rest.removeLast(before == "slot" && rest.count >= 3 && rest[rest.count - 3].lowercased() == "to" ? 3 : 2)
+                }
+            }
+            guard !rest.isEmpty else { throw CommandBarError.notUnderstood(text) }
+            return .addModel(rest.joined(separator: " "), slot: slot)
+        }
+
+        if ["remove", "delete"].contains(words.first), words.count >= 2 {
+            return .removeSlot(text.split(whereSeparator: \.isWhitespace).dropFirst().joined(separator: " "))
         }
 
         if words.first == "set", words.count >= 3 {

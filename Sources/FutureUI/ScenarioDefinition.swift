@@ -1,25 +1,32 @@
 import Foundation
 import FutureEngine
 
-/// One slot of a scenario as the app sets it up: a formula plus how to show it.
+/// One slot of a scenario as it's set up when the scenario loads: a model plus how to show it.
 public struct SlotSpec: Sendable {
     public var name: String
+    /// The model's name, as the library calls it, e.g. "Savings account".
+    public var model: String
     public var formula: String
     /// The variable drawn on the graph.
     public var variable: String
-    /// Hex color, e.g. "#5AA9FF". Defaults to the slot palette by position.
+    /// Hex color, e.g. "#5AA9FF". nil uses the slot palette's color for its position.
     public var color: String?
     public var format: ValueFormat
-    /// Short description under the slot name, e.g. "Formula · monthly · 4.5% interest".
-    public var summary: String
+    /// 0-based position in the bank (slot 1 is 0). nil takes the first free position.
+    public var position: Int?
+    /// The slot's own parameter and starting values, by name, in place of the formula's defaults.
+    public var values: [String: Double]
 
-    public init(name: String, formula: String, variable: String, color: String? = nil, format: ValueFormat, summary: String) {
+    public init(name: String, model: String = "Custom formula", formula: String, variable: String, color: String? = nil,
+                format: ValueFormat, position: Int? = nil, values: [String: Double] = [:]) {
         self.name = name
+        self.model = model
         self.formula = formula
         self.variable = variable
         self.color = color
         self.format = format
-        self.summary = summary
+        self.position = position
+        self.values = values
     }
 }
 
@@ -63,44 +70,26 @@ extension ScenarioDefinition {
         name: "Home & money",
         start: DateText.startOfYear(2022),
         slots: [
-            SlotSpec(name: "Savings", formula: """
+            ModelLibrary.savingsAccount.slot(),
+            ModelLibrary.indexFund.slot(),
+            ModelLibrary.loan.slot(),
+            // The library's versions count warming and price rises from the scenario's start; these
+            // count from 2022, as the mockups do.
+            SlotSpec(name: "Climate", model: "Seasonal temperature", formula: """
                 step 1 month
-                param rate = 4.5%
-                param monthly = 400
-                init balance = 18000
-                balance[t] = balance[t-1] * (1 + rate / 12) + monthly
-                on deposit: balance += event.amount
-                on withdraw: balance -= event.amount
-                """, variable: "balance", format: .currency, summary: "Formula · monthly · deposits with interest"),
-            SlotSpec(name: "IndexFund", formula: """
+                param mean = 11 range -20..35 by 0.5 label "Yearly mean" as temperature
+                param swing = 9 range 0..30 by 0.5 label "Seasonal swing" as temperature
+                param warming = 0.03 range 0..0.2 by 0.005 label "Warming per year" as temperature
+                param heatwave = 20.2 range 0..45 by 0.1 label "Heatwave above" as temperature
+                temp[t] = mean - swing * cos(2 * pi * (month - 1.5) / 12) + warming * (year - 2022) label "Temperature" as temperature
+                when temp > heatwave emit Heatwave
+                """, variable: "temp", format: .temperature),
+            SlotSpec(name: "EnergyBill", model: "Energy bill", formula: """
                 step 1 month
-                param growth = 6%
-                param contribution = 500
-                init value = 42000
-                value[t] = value[t-1] * (1 + growth / 12) + contribution
-                on deposit: value += event.amount
-                on withdraw: value -= event.amount
-                """, variable: "value", format: .currency, summary: "Formula · monthly · median growth (bands arrive with ensembles)"),
-            SlotSpec(name: "Mortgage", formula: """
-                step 1 month
-                param rate = 3.1%
-                param payment = 1324
-                init owed = 310000
-                owed[t] = max(0, owed[t-1] * (1 + rate / 12) - payment)
-                on overpay: owed = max(0, owed - event.amount)
-                on deposit: owed = max(0, owed - event.amount)
-                """, variable: "owed", format: .currency, summary: "Formula · monthly · balance owed"),
-            SlotSpec(name: "Climate", formula: """
-                step 1 month
-                param warming = 0.03
-                temp[t] = 11 - 9 * cos(2 * pi * (month - 1.5) / 12) + warming * (year - 2022)
-                when temp > 20.2 emit Heatwave
-                """, variable: "temp", format: .temperature, summary: "Seasonal model · monthly mean · emits Heatwave"),
-            SlotSpec(name: "EnergyBill", formula: """
-                step 1 month
-                param tariff = 1
-                bill[t] = (70 + 7.5 * max(0, 15 - Climate.temp) + 9 * max(0, Climate.temp - 22)) * tariff * 1.03 ^ (year - 2022)
-                """, variable: "bill", format: .currency, summary: "Formula · monthly · reads Climate.temp"),
+                param base = 70 range 0..500 by 5 label "Base cost per month" as currency
+                param tariff = 1 range 0.5..3 by 0.01 label "Tariff"
+                bill[t] = (base + 7.5 * max(0, 15 - Climate.temp) + 9 * max(0, Climate.temp - 22)) * tariff * 1.03 ^ (year - 2022) label "Monthly bill" as currency
+                """, variable: "bill", format: .currency),
         ],
         events: [
             InitialEvent(slot: "Savings", event: Event(time: date(2028, 8, 1), kind: "withdraw", values: ["amount": 6000])),
@@ -115,18 +104,45 @@ extension ScenarioDefinition {
     }
 }
 
-/// A slot name as people read it: "IndexFund" → "Index fund", "EnergyBill" → "Energy bill".
+/// A slot name as people read it: "IndexFund" → "Index fund", "EnergyBill" → "Energy bill",
+/// "USStocks" → "US stocks", "Savings2" → "Savings 2".
 func displayName(_ slotName: String) -> String {
+    let characters = Array(slotName)
     var words: [String] = []
     var current = ""
-    for character in slotName {
-        if character.isUppercase, !current.isEmpty {
-            words.append(current)
+    for (index, character) in characters.enumerated() {
+        if character == "_" || character == " " {
+            if !current.isEmpty { words.append(current) }
             current = ""
+            continue
         }
-        current.append(character == "_" ? " " : character)
+        if let previous = current.last {
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+            let startsWord = (character.isUppercase && !previous.isUppercase)
+                || (character.isUppercase && previous.isUppercase && next?.isLowercase == true)
+                || (character.isNumber && !previous.isNumber)
+                || (character.isLetter && previous.isNumber)
+            if startsWord {
+                words.append(current)
+                current = ""
+            }
+        }
+        current.append(character)
     }
     if !current.isEmpty { words.append(current) }
     guard let first = words.first else { return slotName }
-    return ([first] + words.dropFirst().map { $0.lowercased() }).joined(separator: " ")
+    // Acronyms keep their capitals; other words after the first are lowercased.
+    let rest = words.dropFirst().map { word in
+        word.count > 1 && word.allSatisfy({ $0.isUppercase || $0.isNumber }) ? word : word.lowercased()
+    }
+    return ([first] + rest).joined(separator: " ")
+}
+
+/// The name formulas use for a slot people called `title`: "Rainy day fund" → "RainyDayFund".
+/// Returns nil when nothing usable is left, or it wouldn't start with a letter.
+func formulaName(fromTitle title: String) -> String? {
+    let words = title.split { !($0.isLetter || $0.isNumber) }
+    let name = words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined()
+    guard let first = name.first, first.isLetter else { return nil }
+    return name
 }

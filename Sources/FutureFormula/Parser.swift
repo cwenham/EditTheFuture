@@ -44,14 +44,10 @@ struct Parser {
             program.timeUnit = try parseUnit(count: 1)
         case "param":
             advance()
-            let name = try expectIdentifier()
-            try expectSymbol("=")
-            program.params.append(Assignment(name: name, expr: try parseExpression(), line: line))
+            program.params.append(try parseDeclaration(line: line))
         case "init":
             advance()
-            let name = try expectIdentifier()
-            try expectSymbol("=")
-            program.inits.append(Assignment(name: name, expr: try parseExpression(), line: line))
+            program.inits.append(try parseDeclaration(line: line))
         case "when":
             advance()
             let condition = try parseExpression()
@@ -64,7 +60,9 @@ struct Parser {
         default:
             if word.count > 1, word.hasPrefix("d"), isSymbol("/", at: 1), isIdentifier("dt", at: 2), isSymbol("=", at: 3) {
                 advance(4)
-                program.odes.append(Assignment(name: String(word.dropFirst()), expr: try parseExpression(), line: line))
+                let name = String(word.dropFirst())
+                let (expr, options) = try parseValueWithOptions(for: name)
+                program.odes.append(Assignment(name: name, expr: expr, line: line, options: options))
             } else {
                 advance()
                 if isSymbol("[") {
@@ -74,9 +72,65 @@ struct Parser {
                     try expectSymbol("]")
                 }
                 try expectSymbol("=")
-                program.definitions.append(Assignment(name: word, expr: try parseExpression(), line: line))
+                let (expr, options) = try parseValueWithOptions(for: word)
+                program.definitions.append(Assignment(name: word, expr: expr, line: line, options: options))
             }
         }
+    }
+
+    /// `name = value [range low..high] [by step] [label "text"] [as quantity]`, after `param` or `init`.
+    private mutating func parseDeclaration(line: Int) throws -> Assignment {
+        let name = try expectIdentifier()
+        try expectSymbol("=")
+        let (expr, options) = try parseValueWithOptions(for: name)
+        return Assignment(name: name, expr: expr, line: line, options: options)
+    }
+
+    /// A value followed by any of `range low..high`, `by step`, `label "text"` and `as quantity`.
+    private mutating func parseValueWithOptions(for name: String) throws -> (Expr, DeclarationOptions) {
+        let valueStart = position
+        let expr = try parseExpression()
+        let writtenAsPercent = tokens[valueStart..<position].contains { $0.kind == .symbol("%") }
+        var options = DeclarationOptions()
+        var seen: Set<String> = []
+        while case .identifier(let word) = current.kind, ["range", "by", "label", "as"].contains(word) {
+            guard seen.insert(word).inserted else { throw syntax("\(name) has more than one \(word).") }
+            advance()
+            switch word {
+            case "range":
+                options.minimum = try parseConstant()
+                try expectSymbol("..")
+                options.maximum = try parseConstant()
+            case "by":
+                options.increment = try parseConstant()
+            case "label":
+                guard case .string(let text) = current.kind else { throw syntax("Write the label in quotes, e.g. label \"Interest rate\".") }
+                advance()
+                options.label = text
+            default:
+                let kind = try expectIdentifier()
+                guard let quantity = Self.quantities[kind] else {
+                    throw syntax("\(kind) isn't a kind of value. Use number, percent, currency or temperature.")
+                }
+                options.quantity = quantity
+            }
+        }
+        if options.quantity == nil, writtenAsPercent { options.quantity = .percent }
+        return (expr, options)
+    }
+
+    static let quantities: [String: Quantity] = [
+        "number": .number, "percent": .percent, "currency": .currency, "money": .currency,
+        "temperature": .temperature, "celsius": .temperature,
+    ]
+
+    /// A plain number for a range or step: `15%`, `-40`, `1e6`.
+    private mutating func parseConstant() throws -> Double {
+        let negative = consumeSymbol("-")
+        guard case .number(var value) = current.kind else { throw syntax("Expected a number, found \(describe(current)).") }
+        advance()
+        if consumeSymbol("%") { value /= 100 }
+        return negative ? -value : value
     }
 
     private mutating func parseRate() throws -> StepRate {
@@ -343,6 +397,7 @@ struct Parser {
         case .number(let value): return "\(value)"
         case .identifier(let name): return "\"\(name)\""
         case .symbol(let symbol): return "\"\(symbol)\""
+        case .string(let text): return "the text \"\(text)\""
         case .newline: return "the end of the line"
         case .end: return "the end of the formula"
         }

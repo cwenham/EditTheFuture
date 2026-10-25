@@ -136,12 +136,22 @@ public final class Scenario {
         return SlotID(rawValue: slots.count - 1)
     }
 
-    /// Swaps the model in a slot, keeping its events and readings. Everything is recomputed.
+    /// Swaps the model in a slot, keeping its events and readings. The slot and everything
+    /// downstream of it are recomputed from the start; other slots keep their results.
     public func replaceModel<M: TimelineModel>(of slot: SlotID, with model: M) throws {
         let old = slots[slot.rawValue]
-        slots[slot.rawValue] = Slot(name: old.name, runner: try makeRunner(for: model, slotName: old.name),
+        let runner = try makeRunner(for: model, slotName: old.name)
+        if !isPrepared { try? prepareIfNeeded() }
+        if isPrepared {
+            // Slots that read this one are found from the current wiring. The new model can only
+            // change what this slot reads, not who reads it.
+            invalidate(slot, from: start)
+            isPrepared = false
+        } else {
+            structureChanged()
+        }
+        slots[slot.rawValue] = Slot(name: old.name, runner: runner,
                                     authored: old.authored, recurring: old.recurring, readings: old.readings)
-        structureChanged()
     }
 
     /// Connects explicitly, for models whose inputs don't name their source (e.g. plug-ins).

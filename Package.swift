@@ -22,6 +22,6 @@ let package = Package(
         .testTarget(name: "FutureEngineTests", dependencies: ["FutureEngine"]),
         .testTarget(name: "FutureFormulaTests", dependencies: ["FutureFormula", "FutureEngine"]),
         .testTarget(name: "FutureCommandsTests", dependencies: ["FutureCommands"]),
-        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureCommands"]),
+        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureCommands"]),
     ]
 )

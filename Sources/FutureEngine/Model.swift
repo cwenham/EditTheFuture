@@ -56,6 +56,15 @@ public struct Reference: Hashable, Sendable, Codable {
     }
 }
 
+/// What kind of quantity a variable holds, so the app knows how to write it and which control to offer.
+public enum Quantity: String, Hashable, Sendable, Codable, CaseIterable {
+    case number
+    /// A fraction shown as a percent: 0.045 is 4.5%.
+    case percent
+    case currency
+    case temperature
+}
+
 /// A named value a model exposes or needs (FMI: model variable).
 public struct Variable: Hashable, Sendable, Codable {
     public var name: String
@@ -65,13 +74,28 @@ public struct Variable: Hashable, Sendable, Codable {
     public var start: Double
     /// For inputs: which slot variable to connect, by name. Formula models fill this in.
     public var source: Reference?
+    /// The name people see, e.g. "Interest rate" for `rate` (FMI: `description`).
+    public var label: String?
+    /// The range a slider covers (FMI: `min` and `max`). Values outside it can still be typed.
+    public var minimum: Double?
+    public var maximum: Double?
+    /// A slider's step.
+    public var increment: Double?
+    public var quantity: Quantity?
 
-    public init(name: String, causality: Causality, unit: String? = nil, start: Double = 0, source: Reference? = nil) {
+    public init(name: String, causality: Causality, unit: String? = nil, start: Double = 0, source: Reference? = nil,
+                label: String? = nil, minimum: Double? = nil, maximum: Double? = nil, increment: Double? = nil,
+                quantity: Quantity? = nil) {
         self.name = name
         self.causality = causality
         self.unit = unit
         self.start = start
         self.source = source
+        self.label = label
+        self.minimum = minimum
+        self.maximum = maximum
+        self.increment = increment
+        self.quantity = quantity
     }
 }
 

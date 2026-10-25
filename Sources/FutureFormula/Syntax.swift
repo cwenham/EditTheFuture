@@ -45,6 +45,17 @@ struct Assignment: Sendable {
     let name: String
     let expr: Expr
     let line: Int
+    /// How people see and set a param or init: `range 0%..15% by 0.1% label "Interest rate" as percent`.
+    var options = DeclarationOptions()
+}
+
+/// The options after a param's or init's value (docs/DESIGN.md, 6.2).
+struct DeclarationOptions: Sendable, Equatable {
+    var label: String?
+    var minimum: Double?
+    var maximum: Double?
+    var increment: Double?
+    var quantity: Quantity?
 }
 
 /// `when condition emit Kind`

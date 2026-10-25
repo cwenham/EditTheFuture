@@ -86,7 +86,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Header:**
 - Scenario menu.
-- Eight slot chips: number, color and name. Empty slots are dashed with a "+".
+- Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol.
 - Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider, and Hide.
 
 **Focus area:**
@@ -99,7 +99,9 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Events strip:** one row under the time axis for the focused slot. Its label reads "click to pick a date".
 
-**Add-event pane:** always visible, docked on the left or right of the timeline (section 5.3). Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered.
+**Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. It has two tabs:
+- **Event:** adds events to the focused slot (5.3).
+- **Slot:** the focused slot's name, model, parameters, starting values and display settings (5.7).
 
 **Lanes:** one per other slot in the bank. Each lane has:
 - the slot number, color bar and name
@@ -128,7 +130,7 @@ Clicking a lane's name focuses that slot.
 | ⌥-scroll | Zoom the value axis (auto-fit is the default; ⌥0 resets) |
 | ← / → | Move the cursor one step; ⇧ moves one year |
 | T, or the Now button | Jump to now |
-| 1–8 | Focus a slot |
+| 1–8 | Focus the slot at that position |
 | S / M | Solo or mute the focused slot |
 | [ / ] | Previous or next bank |
 | Click the graph or events strip | Pick that date for the add-event pane and put the keyboard in its amount field |
@@ -138,7 +140,9 @@ Clicking a lane's name focuses that slot.
 | ⇧-drag the projection | Sketch a target curve |
 | ⌘C / ⇧⌘C | Copy snapshot / copy data |
 | ⌘K | Command bar |
-| ⌘I / ⌘L | Slot inspector / links view |
+| ⌘I | The side pane's Slot tab for the focused slot (pressed again, back to Event) |
+| ⌘L | Links view (planned) |
+| Right-click a slot chip | The chip's menu (5.7) |
 | Esc | Cancel the current gesture, then leave the field being edited, then hide the panel |
 
 **Mouse wheels:** macOS doesn't report how many wheels a mouse has, so the app watches for one. The first wheel event with a horizontal movement and no Shift held can only come from a horizontal wheel. From then on the vertical wheel zooms, and the app says so in the status line. (macOS turns Shift + vertical wheel into horizontal movement, so those events don't count.) The finding is remembered, and the menu bar item has a "Mouse Has a Horizontal Wheel" toggle to override it. Zooming centres on the pointer.
@@ -190,7 +194,7 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 ### 5.3 Adding an event
 
-- **The pane:** always visible and docked beside the timeline, so you can scroll as far as you like into the future and watch a draft's effect play out. It never scrolls with the graph.
+- **The pane:** the side pane's Event tab, always visible and docked beside the timeline, so you can scroll as far as you like into the future and watch a draft's effect play out. It never scrolls with the graph.
   - Docks on the left or right. Drag its title bar to the other side (drop zones light up), or press its arrow button. The side is remembered.
   - Follows the focused slot. Switching slots keeps the amount and date when the new slot handles the same kind of event.
 - **When:** defaults to now. Clicking the graph or events strip picks that date; clicking a lane picks the date and switches to that lane's slot. "Now" puts it back. The date picker also shows and edits the time.
@@ -218,11 +222,53 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 - A pill appears on the graph, and a notification is sent when the app isn't visible.
 - Clicking the pill opens "Refit parameters": the model's parameters re-fitted to recent readings, shown as a preview before anything changes.
 
-### 5.7 Slot inspector and links
+### 5.7 Models and slots
 
-- **Inspector (⌘I):** tabs for Formula, Variables, Events and Readings.
-  - The formula editor checks the formula as you type (debounced 300 ms) and shows errors inline, with quick fixes. Example: "Use FireRisk.OverCapacity[t-1]".
-  - Slots affected by an error pause and show "paused" instead of values. They don't show stale numbers.
+**Models and slots are separate things:**
+- A **model** is a reusable definition: a formula, a script or a plug-in. The model library lists them.
+- A **slot** holds one model, with its own name, color, parameter values, events and readings. Two slots can hold the same model, for example two savings accounts.
+- Formulas, and later scripts, are copied into the slot when it's added, so changing one slot never changes another. Plug-ins will be referred to by ID and version, since there's no source to copy.
+- **Slots keep their positions.** Removing one leaves a gap, so the others keep their numbers, colors and hardware buttons. A scenario always keeps at least one slot.
+
+**The model picker** is a popover. It opens from an empty chip or its menu to add a model, and from a chip's Change model… or the Slot tab's Change… to give a slot a different one.
+- A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). A Blank formula comes with the formula editor.
+- Changing a model starts on the slot's current model.
+- Each model shows its kind (Formula for now; later Lua, Python, Plug-in or Remote) and a one-line description.
+- The detail shows a preview of the model's line over 20 years with its defaults, its parameters and starting values, its step, and the events it handles and sends. The preview is computed off the main thread. A model that reads another slot, like Energy bill, has no preview on its own.
+- **Add to slot N** adds the model with its defaults, focuses the slot and opens the Slot tab. ↩ does the same, and Esc closes the picker.
+- **Changing** a slot's model keeps the slot's name, color, events and readings. Parameter and starting values carry over wherever the new model has one of the same name. The picker says when some of the slot's events won't apply ("2 deposit events won't apply to this model"). They're kept, but ignored.
+
+**The Slot tab** in the side pane (⌘I) shows the focused slot:
+- **Name.** Names start with a letter and can use letters, digits and spaces. Formulas write them without spaces: "Rainy day fund" is `RainyDayFund`. Renaming a slot updates the formulas in other slots that refer to it, so `Climate.temp` becomes `Weather.temp`.
+- **Model:** its name and kind, with Change….
+- **Parameters:** each has its label and value, and a slider when the model gives it a range.
+  - These are the values the slot starts with. Changes from a date are events: they're added in the Event tab and listed under the slider ("Changes to 4.0% from Jun 2027"). "Change from a date…" opens the Event tab, ready to set that parameter.
+  - While a slider is dragged, a dashed line shows the slot's new future. Letting go applies it.
+  - Typing a value and pressing ↩ applies it straight away. Percent parameters are typed in percent: "6" means 6%.
+  - A changed parameter has a reset button that puts back the model's default.
+  - Every change can be undone.
+- **Starting values:** the model's `init` values, such as a starting balance, at the scenario's start date. They're typed and reset the same way.
+- **Display:** which of the model's values the graph shows, its format (currency, temperature, percent or number) and its color. A slot with a color of its own has a reset button that puts back its position's color.
+- **Duplicate** copies the slot, with its events, to the next free position.
+- **Remove** asks first, at the top of the pane: "Remove Climate and its 2 events? Energy bill reads Climate.temp, so it will pause. You can undo this." Undo brings the slot back with its events, and focuses it.
+- Event markers name parameter changes the way the model does: "Interest rate → 4%".
+
+**The chip menu** (right-click a chip): Slot settings, Change model…, Duplicate, Move to slot (1–8), Remove…. An empty chip's menu has Add a model…. Dragging a chip onto another number moves the slot there, swapping with any slot already there. A moved slot takes its new position's default color unless it has a color of its own.
+
+**Paused slots:** a slot pauses when:
+- it reads a slot or value that isn't there,
+- it listens for events from a slot that isn't there or doesn't emit them,
+- it's part of a same-step loop with other slots, or
+- it reads from a paused slot.
+
+A paused slot shows "Paused" and the reason in place of its line and values, and its chip shows a pause symbol. It never shows stale numbers. It runs again as soon as the problem goes away, for example after undoing a removal.
+
+**Command bar:** `add savings account` adds a model to the first free slot, `add loan to 7` to slot 7, and `remove climate` asks to remove a slot in the Slot tab. 1–8 focus by position; an empty position says how to fill it.
+
+**Planned:**
+- **The formula editor:** checks the formula as you type (debounced 300 ms) and shows errors inline, with quick fixes. Example: "Use FireRisk.OverCapacity[t-1]". Slots affected by an error pause, as above.
+- **Saving to the library:** a slot's model saved as "Your models".
+- **Scripts and plug-ins** in the picker (DESIGN.md, 6).
 - **Links view (⌘L):** slots as nodes, connections as wires.
   - Solid wire: same step. Dashed wire: previous step. Wires in a loop turn red.
   - Dragging from an output to another slot creates a connection, with resampling and timing pickers.
@@ -323,6 +369,12 @@ Sections:
     - The add-event pane reads the draft, and only its effect box reads the cursor.
   - Never assign an `@Observable` property its current value. Even setting `nil` to `nil` redraws every view that reads it.
   - The store never computes. It asks `ScenarioEngine` (an actor on its own thread) for the visible range and draws the latest results it has. Past the end of those results, lines stop and readouts show "…" until the rest arrives (DESIGN.md, 4.8).
+- **Slots** (5.7):
+  - The store keeps each slot as a plain record: its position, name, model source, its own values, display settings, events and rules. Every change to slots replaces the whole list, so undo puts the old list back.
+  - Before anything reaches the engine, the store compiles each model and checks how the slots read each other (`Wiring.check`, DESIGN.md 5.9). Slots that can't run are paused, not dropped.
+  - The engine gets the whole layout. When only models or values changed, it swaps just those models, and only those slots and the slots that read them are recomputed. Adding, removing, moving or renaming rebuilds the scenario.
+  - The latest results follow their slots when the list changes, so lines stay on screen until the engine has new ones.
+  - Sliders don't use SwiftUI's `step`: on the Mac it draws a tick mark per step, and a range of 10,000 steps took 16 seconds to draw. The value is snapped to the step instead.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.

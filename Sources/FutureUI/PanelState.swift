@@ -50,6 +50,8 @@ public struct FocusedSlotState: Sendable {
     public let yDomain: ClosedRange<Double>
     public let yTicks: [Double]
     public let events: [EventMarker]
+    /// Why the slot can't run, shown in place of its line.
+    public let pausedReason: String?
 }
 
 public struct LaneState: Identifiable, Sendable {
@@ -61,6 +63,8 @@ public struct LaneState: Identifiable, Sendable {
     public let yDomain: ClosedRange<Double>
     /// What the slot reads from other slots, e.g. "← Climate.temp".
     public let reads: String?
+    /// Why the slot can't run, shown in place of its sparkline.
+    public let pausedReason: String?
 }
 
 public struct YearTick: Identifiable, Hashable, Sendable {

@@ -102,8 +102,9 @@ extension ScenarioStore {
     }
 
     /// Points the draft at the focused slot, keeping the amount, date and repeat where they still make sense.
-    func retargetDraft() {
-        guard eventDraft.slotIndex != focusedIndex else { return }
+    /// `force` checks it again even when the index is the same, for after slots were added or removed.
+    func retargetDraft(force: Bool = false) {
+        guard force || eventDraft.slotIndex != focusedIndex else { return }
         let slot = slots[focusedIndex]
         var draft = eventDraft
         draft.slotIndex = focusedIndex
@@ -118,7 +119,7 @@ extension ScenarioStore {
             draft.valueText = ""
         }
         if draftError != nil { draftError = nil }  // setting it, even to nil, redraws the pane
-        eventDraft = draft
+        if draft != eventDraft { eventDraft = draft }
     }
 
     /// Whether the draft's date is still the default (now) rather than a date picked on the graph.
@@ -132,7 +133,8 @@ extension ScenarioStore {
 
     /// The draft parameter's value at the draft's date, from the latest results, e.g. 0.045.
     public func currentValue(ofParameter name: String) -> Double? {
-        computed?.parameters[eventDraft.slotIndex][name]
+        guard let parameters = computed?.parameters, parameters.indices.contains(eventDraft.slotIndex) else { return nil }
+        return parameters[eventDraft.slotIndex][name]
     }
 
     /// Sets the draft's date from a click on the graph, and its slot when a lane was clicked.
@@ -144,6 +146,15 @@ extension ScenarioStore {
     /// Picks a date and puts the keyboard in the pane's amount field.
     public func beginEvent(at date: Date, slotIndex: Int? = nil) {
         pickEventDate(date, slotIndex: slotIndex)
+        requestEventFieldFocus()
+    }
+
+    /// Shows the Event tab with the keyboard in its amount (or value) field.
+    func requestEventFieldFocus() {
+        if sidePane != .event {
+            sidePane = .event
+            focusEventFieldOnAppear = true
+        }
         eventFieldFocusRequest += 1
     }
 
@@ -177,7 +188,7 @@ extension ScenarioStore {
             switch built {
             case .event(let event):
                 add(event, toSlotAt: draft.slotIndex)
-                say("Added \(Self.label(for: event)) on \(DateText.monthYear(event.time)) to \(slot.title)")
+                say("Added \(label(for: event, inSlotAt: draft.slotIndex)) on \(DateText.monthYear(event.time)) to \(slot.title)")
             case .rule(let rule):
                 add(rule, toSlotAt: draft.slotIndex)
                 let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
@@ -201,7 +212,7 @@ extension ScenarioStore {
         let through = frame.end.addingTimeInterval(frame.span)
         previewThrough = through
         requestPreview(ScenarioEngine.PreviewRequest(version: revision, sequence: previewSequence, slot: eventDraft.slotIndex,
-                                                     change: built, from: eventDraft.date.addingTimeInterval(-margin),
+                                                     change: .event(built), from: eventDraft.date.addingTimeInterval(-margin),
                                                      through: through.addingTimeInterval(margin)))
     }
 
@@ -213,8 +224,8 @@ extension ScenarioStore {
 
     /// The draft's effect at the cursor and at the right edge, or nil until its preview is ready.
     func eventPreview() -> EventPreviewState? {
-        guard !draftPreview.isEmpty, let computed else { return nil }
         let index = eventDraft.slotIndex
+        guard !draftPreview.isEmpty, let computed, computed.series.indices.contains(index) else { return nil }
         let slot = slots[index]
         func effect(at date: Date) -> String {
             guard date <= computed.through else { return "…" }

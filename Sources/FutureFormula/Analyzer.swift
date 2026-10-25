@@ -51,6 +51,15 @@ enum Analyzer {
         }
         let paramNames = Set(program.params.map(\.name))
         for param in program.params { try declare(param.name, line: param.line) }
+        for declaration in program.params + program.inits + program.definitions + program.odes {
+            let options = declaration.options
+            if let low = options.minimum, let high = options.maximum, !(low.isFinite && high.isFinite && low < high) {
+                throw FormulaError.invalid(line: declaration.line, message: "The range of \(declaration.name) must go from a smaller number to a larger one.")
+            }
+            if let step = options.increment, !(step.isFinite && step > 0) {
+                throw FormulaError.invalid(line: declaration.line, message: "The step of \(declaration.name) must be more than 0.")
+            }
+        }
 
         var variableNames: [String] = []
         var initNames: Set<String> = []

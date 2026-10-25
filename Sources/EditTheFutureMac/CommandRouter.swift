@@ -21,7 +21,7 @@ final class CommandRouter {
         case .toggleWindow: panel.toggle()
         case .peek(.begin): panel.summonPressed()
         case .peek(.end): panel.summonReleased()
-        case .selectSlot(let number): store.focus(index: number - 1)
+        case .selectSlot(let number): store.focus(key: number)
         case .toggleSlotVisible, .soloSlot, .nextBank, .previousBank: break  // single bank for now
         case .scroll(let ticks): store.pan(by: Double(ticks) / 24)
         case .zoom(let ticks): store.zoom(by: pow(0.9, Double(ticks)))

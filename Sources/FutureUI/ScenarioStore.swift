@@ -4,9 +4,9 @@ import SwiftUI
 import FutureEngine
 import FutureFormula
 
-/// The app's state for one scenario: what's focused, the cursor, the visible range, the add-event
-/// draft, the command bar and undo. Views read `timelineState()`, `cursorState()` and `statusText()`
-/// separately.
+/// The app's state for one scenario: its slots, what's focused, the cursor, the visible range, the
+/// side pane, the command bar and undo. Views read `timelineState()`, `cursorState()` and
+/// `statusText()` separately.
 ///
 /// The scenario itself lives in a `ScenarioEngine` actor on a thread of its own. The store keeps
 /// the latest results (`computed`) and draws only from those, so the main thread never waits for
@@ -15,29 +15,69 @@ import FutureFormula
 @Observable
 public final class ScenarioStore {
     public struct SlotInfo: Identifiable, Sendable {
-        public let id: SlotID
-        /// 1-based position, as on the slot chips and hardware buttons.
+        /// Stays the same for the slot's life, whatever happens to other slots.
+        public let id: UUID
+        /// 1-based position, as on the slot chips and hardware buttons. Positions can have gaps.
         public let key: Int
         /// Name used in formulas, e.g. "IndexFund".
         public let name: String
         /// Name shown to people, e.g. "Index fund".
         public let title: String
+        /// The model's name, e.g. "Savings account".
+        public let model: String
+        public let kind: ModelKind
         public let variable: String
         public let colorHex: String
+        /// Whether the color was chosen, rather than taken from the slot's position.
+        public let hasOwnColor: Bool
         public let format: ValueFormat
+        /// "Savings account · Formula · monthly".
         public let summary: String
         public let reads: String?
         /// Kinds of event the slot's formula handles, e.g. ["deposit", "withdraw"].
         public let eventKinds: [String]
         /// Parameters that `set` events can change.
         public let parameters: [String]
+        /// The parameters with their labels, ranges and the values the slot starts with.
+        public let parameterValues: [SlotValue]
+        /// Starting values (`init` lines), such as a starting balance.
+        public let startingValues: [SlotValue]
+        /// What the graph can show.
+        public let outputs: [SlotOutput]
+        /// Kinds of event the slot sends, e.g. ["Heatwave"].
+        public let emits: [String]
+        /// Why the slot can't run, or nil when it runs (docs/UI.md, 5.7).
+        public let pausedReason: String?
 
         public var color: Color { Color(hex: colorHex) }
+        public var isPaused: Bool { pausedReason != nil }
+    }
+
+    /// The side pane's tabs (docs/UI.md, section 3).
+    public enum SidePaneTab: String, Sendable {
+        case event, slot
+    }
+
+    /// Which model picker is open (docs/UI.md, 5.7).
+    public enum PickerRequest: Equatable, Sendable {
+        /// Adding a model at a 0-based position.
+        case add(position: Int)
+        /// Changing a slot's model.
+        case change(slot: UUID)
     }
 
     private enum Change {
-        case addedEvent(slot: Int, Event)
-        case addedRule(slot: Int, RecurringEvent)
+        case addedEvent(slot: UUID, Event)
+        case addedRule(slot: UUID, RecurringEvent)
+        /// Slots were added, removed, moved or changed. Undo puts the old list back.
+        case slots(before: [SlotConfig], after: [SlotConfig], focusBefore: UUID?, focusAfter: UUID?)
+    }
+
+    /// A parameter or starting value being dragged on its slider.
+    struct ParameterDrag {
+        let slot: UUID
+        let name: String
+        var value: Double
     }
 
     /// The largest magnitude a plot's range reaches. Leaves headroom so the range, its padding and
@@ -60,11 +100,16 @@ public final class ScenarioStore {
 
     public static let minimumSpan: TimeInterval = 2 * 365.2425 * 86_400
     public static let maximumSpan: TimeInterval = 80 * 365.2425 * 86_400
+    /// Slot positions in a bank, as on the chips and hardware.
+    public static let bankSize = Scenario.bankSize
 
     public let name: String
-    public let slots: [SlotInfo]
+    /// The slots in position order. Positions can have gaps; `SlotInfo.key` is the position.
+    public private(set) var slots: [SlotInfo]
     public let now: Date
     public let start: Date
+    /// Connections and event routes between the slots that run.
+    public private(set) var linkCount: Int
 
     public private(set) var focusedIndex = 0
     public private(set) var cursor: Date
@@ -78,6 +123,13 @@ public final class ScenarioStore {
 
     public var opacity = 0.86
     public var commandText = ""
+
+    /// Which tab the side pane shows.
+    public var sidePane = SidePaneTab.event
+    /// The model picker that's open, if any.
+    public var picker: PickerRequest?
+    /// The slot whose removal is waiting to be confirmed in the Slot tab.
+    public internal(set) var pendingRemoval: UUID?
 
     /// The event in the add-event pane. Always present; it targets the focused slot and starts at now.
     public var eventDraft = EventDraft(slotIndex: 0, date: .distantPast, kind: .setParameter) {
@@ -93,21 +145,28 @@ public final class ScenarioStore {
     public internal(set) var draftError: String?
     /// Incremented to ask the pane to focus its amount field.
     public internal(set) var eventFieldFocusRequest = 0
+    /// Set when the Event tab should focus its field as soon as it appears.
+    @ObservationIgnored var focusEventFieldOnAppear = false
     /// How far ahead the latest preview was requested.
     @ObservationIgnored var previewThrough = Date.distantPast
     /// Identifies the newest preview request; older results are dropped.
     @ObservationIgnored var previewSequence = 0
 
+    /// The focused slot's line while a parameter's slider is dragged, drawn dashed.
+    public internal(set) var parameterPreview: [Sample] = []
+    @ObservationIgnored var parameterDrag: ParameterDrag?
+    @ObservationIgnored var parameterPreviewSequence = 0
+
     /// The latest results from the engine. Everything on screen is drawn from these.
     var computed: ScenarioEngine.FetchResult?
+    /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
+    @ObservationIgnored private var computedSlots: [UUID] = []
 
     /// Called when the command bar asks for something only the app can do (copying).
     @ObservationIgnored public var onAppAction: ((CommandBarAction) -> Void)?
 
-    /// The store's own copy of each slot's authored events and rules, for drawing markers
-    /// without asking the engine.
-    @ObservationIgnored private var authored: [[Event]]
-    @ObservationIgnored private var recurring: [[RecurringEvent]]
+    /// Every slot with its model, values and events, in position order. `slots` is built from these.
+    @ObservationIgnored var configs: [SlotConfig]
     @ObservationIgnored private var undoStack: [Change] = []
     @ObservationIgnored private var redoStack: [Change] = []
 
@@ -121,36 +180,30 @@ public final class ScenarioStore {
     /// Which way the view last scrolled; fetches reach further that way.
     @ObservationIgnored private var scrollDirection = 1.0
 
-    public let linkCount: Int
-
     public init(definition: ScenarioDefinition, now: Date = Date()) throws {
-        var infos: [SlotInfo] = []
-        var setups: [ScenarioEngine.SlotSetup] = []
-        for (index, spec) in definition.slots.enumerated() {
-            let model = try FormulaModel(spec.formula, name: spec.name)
-            let reads = model.descriptor.inputs.compactMap { $0.source?.text }
-            infos.append(SlotInfo(id: SlotID(rawValue: index), key: index + 1, name: spec.name, title: displayName(spec.name),
-                                  variable: spec.variable, colorHex: spec.color ?? SlotPalette.color(forSlotAt: index),
-                                  format: spec.format, summary: spec.summary,
-                                  reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
-                                  eventKinds: model.handledEventKinds, parameters: model.parameterNames))
-            setups.append(ScenarioEngine.SlotSetup(name: spec.name, variable: spec.variable, model: model))
+        var configs: [SlotConfig] = []
+        for spec in definition.slots {
+            let taken = Set(configs.map(\.position))
+            guard let position = spec.position.flatMap({ taken.contains($0) ? nil : $0 })
+                    ?? (0..<Self.bankSize).first(where: { !taken.contains($0) }) else { break }
+            configs.append(SlotConfig(position: position, name: spec.name, model: spec.model, kind: .formula,
+                                      formula: spec.formula, variable: spec.variable, color: spec.color,
+                                      format: spec.format, values: spec.values))
         }
-        var authored = Array(repeating: [Event](), count: definition.slots.count)
-        var initial: [(slot: Int, event: Event)] = []
         for event in definition.events {
-            guard let index = definition.slots.firstIndex(where: { $0.name == event.slot }) else { continue }
-            authored[index].append(event.event)
-            initial.append((index, event.event))
+            guard let index = configs.firstIndex(where: { $0.name == event.slot }) else { continue }
+            configs[index].events.append(event.event)
         }
-        let engine = try ScenarioEngine(start: definition.start, slots: setups, events: initial)
+        configs.sort { $0.position < $1.position }
+        guard !configs.isEmpty else { throw EngineError.invalidSlotName("") }
+        let assembly = Self.assemble(configs)
 
-        self.engine = engine
-        self.linkCount = engine.linkCount
-        self.authored = authored
-        self.recurring = Array(repeating: [], count: definition.slots.count)
+        self.engine = try ScenarioEngine(start: definition.start, layout: assembly.layout)
+        self.configs = configs
+        self.slots = assembly.slots
+        self.linkCount = assembly.linkCount
+        self.computedSlots = assembly.slots.map(\.id)
         self.name = definition.name
-        self.slots = infos
         self.start = definition.start
         self.now = now
         self.cursor = now
@@ -162,6 +215,110 @@ public final class ScenarioStore {
     }
 
     public var focused: SlotInfo { slots[focusedIndex] }
+
+    // MARK: Building slots
+
+    struct Assembly {
+        let slots: [SlotInfo]
+        let layout: ScenarioEngine.Layout
+        let linkCount: Int
+    }
+
+    /// Compiles each slot's model, checks how the slots read each other, and describes the result
+    /// for the views and the engine. Slots that can't run are paused, not dropped.
+    nonisolated static func assemble(_ configs: [SlotConfig]) -> Assembly {
+        var models: [FormulaModel?] = []
+        var errors: [Int: String] = [:]
+        for (index, config) in configs.enumerated() {
+            do {
+                models.append(try config.makeModel())
+            } catch {
+                models.append(nil)
+                errors[index] = String(describing: error)
+            }
+        }
+        let report = Wiring.check(configs.indices.map { (configs[$0].name, models[$0]?.descriptor) })
+
+        var slots: [SlotInfo] = []
+        var setups: [ScenarioEngine.SlotSetup?] = []
+        for (index, config) in configs.enumerated() {
+            let model = models[index]
+            let paused = errors[index] ?? report.problems[index]?.description
+            setups.append(paused == nil ? model.map {
+                ScenarioEngine.SlotSetup(name: config.name, variable: config.variable, model: $0, key: config.modelKey)
+            } : nil)
+            slots.append(slotInfo(config, model: model, paused: paused))
+        }
+        let layout = ScenarioEngine.Layout(slots: setups, events: configs.map(\.events), rules: configs.map(\.rules))
+        return Assembly(slots: slots, layout: layout, linkCount: report.linkCount)
+    }
+
+    nonisolated private static func slotInfo(_ config: SlotConfig, model: FormulaModel?, paused: String?) -> SlotInfo {
+        let descriptor = model?.descriptor
+        let reads = descriptor?.inputs.compactMap { $0.source?.text } ?? []
+        func value(_ variable: Variable) -> SlotValue {
+            SlotValue(name: variable.name, label: variable.label ?? variable.name, quantity: variable.quantity ?? .number,
+                      minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
+                      value: model?.startingValues[variable.name], defaultValue: model?.declaredDefaults[variable.name],
+                      isChanged: config.values[variable.name] != nil)
+        }
+        let parameters = descriptor?.variables.filter { $0.causality == .parameter } ?? []
+        let starting = (model?.startingValueNames ?? []).compactMap { descriptor?.variable(named: $0) }
+        let outputs = descriptor?.variables.filter { $0.causality == .output }.map { SlotOutput(name: $0.name, label: $0.label ?? $0.name) } ?? []
+        var summary = [config.model, config.kind.title]
+        if let rate = descriptor?.stepRate { summary.append(rate.adverb) }
+        if let emits = descriptor?.emits, !emits.isEmpty { summary.append("emits " + emits.joined(separator: ", ")) }
+        return SlotInfo(id: config.id, key: config.position + 1, name: config.name, title: displayName(config.name),
+                        model: config.model, kind: config.kind, variable: config.variable,
+                        colorHex: config.color ?? SlotPalette.color(forSlotAt: config.position), hasOwnColor: config.color != nil,
+                        format: config.format, summary: summary.joined(separator: " · "),
+                        reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
+                        eventKinds: model?.handledEventKinds ?? [], parameters: model?.parameterNames ?? [],
+                        parameterValues: parameters.map(value), startingValues: starting.map(value),
+                        outputs: outputs, emits: descriptor?.emits ?? [], pausedReason: paused)
+    }
+
+    /// Replaces the slots, remembering the old ones for undo.
+    func applySlotChange(_ newConfigs: [SlotConfig], focus: UUID?) {
+        let sorted = newConfigs.sorted { $0.position < $1.position }
+        guard sorted != configs else { return }
+        undoStack.append(.slots(before: configs, after: sorted, focusBefore: slots.indices.contains(focusedIndex) ? focused.id : nil,
+                                focusAfter: focus))
+        redoStack.removeAll()
+        configs = sorted
+        refreshSlots(focus: focus)
+    }
+
+    /// Rebuilds `slots` from `configs` and sends the new layout to the engine. The latest results
+    /// follow their slots, so lines stay on screen until the engine has the new ones.
+    private func refreshSlots(focus: UUID?) {
+        let wanted = focus ?? (slots.indices.contains(focusedIndex) ? focused.id : nil)
+        let assembly = Self.assemble(configs)
+        let order = assembly.slots.map(\.id)
+        if let computed {
+            let old = Dictionary(uniqueKeysWithValues: computedSlots.enumerated().map { ($0.element, $0.offset) })
+            func pick<T>(_ list: [T], empty: T) -> [T] {
+                order.map { id in old[id].flatMap { list.indices.contains($0) ? list[$0] : nil } ?? empty }
+            }
+            self.computed = ScenarioEngine.FetchResult(
+                version: computed.version, generation: computed.generation, from: computed.from, through: computed.through,
+                series: pick(computed.series, empty: []), generated: pick(computed.generated, empty: []),
+                computedThrough: computed.computedThrough, parameters: pick(computed.parameters, empty: [:]),
+                parameterDate: computed.parameterDate)
+        }
+        computedSlots = order
+        slots = assembly.slots
+        if linkCount != assembly.linkCount { linkCount = assembly.linkCount }
+        let index = slots.firstIndex { $0.id == wanted } ?? min(focusedIndex, slots.count - 1)
+        if focusedIndex != index { focusedIndex = index }
+        if let pendingRemoval, !slots.contains(where: { $0.id == pendingRemoval }) { self.pendingRemoval = nil }
+        if case .change(let id) = picker, !slots.contains(where: { $0.id == id }) { picker = nil }
+        retargetDraft(force: true)
+        revision += 1
+        enqueue(.mutate(.layout(assembly.layout)))
+        requestData()
+        updateDraftPreview()
+    }
 
     // MARK: Navigation
 
@@ -180,9 +337,19 @@ public final class ScenarioStore {
         return true
     }
 
+    /// Focuses the slot at a 1-based position (the number keys and hardware buttons). An empty
+    /// position says how to fill it.
+    public func focus(key: Int) {
+        guard let index = slots.firstIndex(where: { $0.key == key }) else {
+            if (1...Self.bankSize).contains(key) { say("Slot \(key) is empty. Click its chip to add a model.") }
+            return
+        }
+        focus(index: index)
+    }
+
     /// A slot by number ("3") or name ("savings", "Index fund", "indexfund").
     func slotIndex(named text: String) -> Int? {
-        if let number = Int(text), slots.indices.contains(number - 1) { return number - 1 }
+        if let number = Int(text) { return slots.firstIndex { $0.key == number } }
         let wanted = text.lowercased().replacingOccurrences(of: " ", with: "")
         return slots.firstIndex(where: { $0.name.lowercased() == wanted })
     }
@@ -255,15 +422,17 @@ public final class ScenarioStore {
     // MARK: Editing
 
     public func add(_ event: Event, toSlotAt index: Int) {
-        authored[index].append(event)
-        undoStack.append(.addedEvent(slot: index, event))
+        guard configs.indices.contains(index) else { return }
+        configs[index].events.append(event)
+        undoStack.append(.addedEvent(slot: configs[index].id, event))
         redoStack.removeAll()
         send(.addEvent(slot: index, event))
     }
 
     public func add(_ rule: RecurringEvent, toSlotAt index: Int) {
-        recurring[index].append(rule)
-        undoStack.append(.addedRule(slot: index, rule))
+        guard configs.indices.contains(index) else { return }
+        configs[index].rules.append(rule)
+        undoStack.append(.addedRule(slot: configs[index].id, rule))
         redoStack.removeAll()
         send(.addRule(slot: index, rule))
     }
@@ -275,11 +444,18 @@ public final class ScenarioStore {
         guard let change = undoStack.popLast() else { return }
         switch change {
         case .addedEvent(let slot, let event):
-            authored[slot].removeAll { $0.id == event.id }
-            send(.removeEvent(slot: slot, id: event.id))
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                configs[index].events.removeAll { $0.id == event.id }
+                send(.removeEvent(slot: index, id: event.id))
+            }
         case .addedRule(let slot, let rule):
-            recurring[slot].removeAll { $0.id == rule.id }
-            send(.removeRule(slot: slot, id: rule.id))
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                configs[index].rules.removeAll { $0.id == rule.id }
+                send(.removeRule(slot: index, id: rule.id))
+            }
+        case .slots(let before, _, let focusBefore, _):
+            configs = before
+            refreshSlots(focus: focusBefore)
         }
         redoStack.append(change)
         say("Undone")
@@ -289,11 +465,18 @@ public final class ScenarioStore {
         guard let change = redoStack.popLast() else { return }
         switch change {
         case .addedEvent(let slot, let event):
-            authored[slot].append(event)
-            send(.addEvent(slot: slot, event))
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                configs[index].events.append(event)
+                send(.addEvent(slot: index, event))
+            }
         case .addedRule(let slot, let rule):
-            recurring[slot].append(rule)
-            send(.addRule(slot: slot, rule))
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                configs[index].rules.append(rule)
+                send(.addRule(slot: index, rule))
+            }
+        case .slots(_, let after, _, let focusAfter):
+            configs = after
+            refreshSlots(focus: focusAfter)
         }
         undoStack.append(change)
         say("Redone")
@@ -316,7 +499,12 @@ public final class ScenarioStore {
         case find(ScenarioEngine.FindRequest)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
-        var isPreview: Bool { if case .preview = self { return true } else { return false } }
+        /// Draft-event previews and slider previews replace only their own kind.
+        var previewOfModel: Bool? {
+            guard case .preview(let request) = self else { return nil }
+            if case .model = request.change { return true }
+            return false
+        }
     }
 
     /// Whether the engine has no work queued or running.
@@ -334,7 +522,7 @@ public final class ScenarioStore {
     private func enqueue(_ operation: EngineOperation) {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
-        case .preview: engineQueue.removeAll(where: \.isPreview)
+        case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
         case .mutate, .find: break
         }
         engineQueue.append(operation)
@@ -348,7 +536,9 @@ public final class ScenarioStore {
             switch engineQueue.removeFirst() {
             case .mutate(let mutation): await engine.apply(mutation)
             case .fetch(let request): receive(await engine.fetch(request))
-            case .preview(let request): receive(await engine.preview(request))
+            case .preview(let request):
+                let result = await engine.preview(request)
+                if case .model = request.change { receiveParameterPreview(result) } else { receive(result) }
             case .find(let request): receive(await engine.find(request))
             }
         }
@@ -393,6 +583,11 @@ public final class ScenarioStore {
     private func receive(_ result: ScenarioEngine.PreviewResult) {
         guard result.sequence == previewSequence, result.version == revision else { return }
         draftPreview = result.samples
+    }
+
+    private func receiveParameterPreview(_ result: ScenarioEngine.PreviewResult) {
+        guard parameterDrag != nil, result.sequence == parameterPreviewSequence, result.version == revision else { return }
+        parameterPreview = result.samples
     }
 
     // MARK: Command bar
@@ -460,6 +655,33 @@ public final class ScenarioStore {
             let when = at ?? cursor
             add(Event.set([name: value], at: when), toSlotAt: focusedIndex)
             say("Set \(name) to \(ValueFormat.number.axis(value)) from \(DateText.monthYear(when)) in \(focused.title)")
+        case .addModel(let text, let key):
+            guard let template = ModelLibrary.named(text) else {
+                say("There's no model called “\(text)”. Try savings account, loan, index fund or seasonal temperature.", isError: true)
+                return true
+            }
+            if let key {
+                guard (1...Self.bankSize).contains(key) else {
+                    say("Slots go from 1 to \(Self.bankSize).", isError: true)
+                    return true
+                }
+                if let taken = slots.first(where: { $0.key == key }) {
+                    say("Slot \(key) has \(taken.title) in it. Remove it first, or add to another slot.", isError: true)
+                    return true
+                }
+            }
+            addModel(template, atPosition: key.map { $0 - 1 })
+        case .removeSlot(let text):
+            guard let index = slotIndex(named: text) else {
+                say("There's no slot called “\(text)”. Slots: \(slots.map(\.title).joined(separator: ", ")).", isError: true)
+                return true
+            }
+            guard canRemoveSlot else {
+                say("A scenario needs at least one slot. Change its model instead.", isError: true)
+                return true
+            }
+            requestRemoval(ofSlotAt: index)
+            say("Confirm in the Slot tab to remove \(slots[index].title).")
         case .undo:
             undo()
         case .redo:
@@ -483,6 +705,7 @@ public final class ScenarioStore {
             case .currency: return "dollars"
             case .temperature: return "°C"
             case .number: return "plain numbers"
+            case .percent: return "percent"
             }
         }
         if let name {
@@ -575,7 +798,9 @@ public final class ScenarioStore {
         let computed = self.computed
 
         func samples(_ index: Int) -> [Sample] {
-            guard let series = computed?.series[index], !series.isEmpty else { return [] }
+            guard let all = computed?.series, all.indices.contains(index), !slots[index].isPaused else { return [] }
+            let series = all[index]
+            guard !series.isEmpty else { return [] }
             let low = Self.firstIndex(in: series, atOrAfter: from)
             let high = Self.firstIndex(in: series, after: through)
             return low < high ? Array(series[low..<high]) : []
@@ -596,21 +821,23 @@ public final class ScenarioStore {
         let focusSlot = focused
         let focusSamples = samples(focusedIndex)
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
-        let preview = draftOnFocus == nil ? [] : draftPreview
+        let dragging = parameterDrag?.slot == focusSlot.id && !parameterPreview.isEmpty
+        let preview = dragging ? parameterPreview : draftOnFocus == nil ? [] : draftPreview
         let lineRange = range(focusSamples), previewRange = range(preview)
         let low = min(lineRange?.low ?? 0, previewRange?.low ?? .infinity)
         let high = max(lineRange?.high ?? 1, previewRange?.high ?? -.infinity)
         let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
-            format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: draftOnFocus?.date,
-            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex))
+            format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: dragging ? nil : draftOnFocus?.date,
+            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex), pausedReason: focusSlot.pausedReason)
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)
             let bounds = range(list) ?? (0, 1)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
-                             yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads)
+                             yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads,
+                             pausedReason: slot.pausedReason)
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, focus: focus, lanes: lanes,
@@ -623,14 +850,18 @@ public final class ScenarioStore {
         let computed = self.computed
         let ready = computed.map { cursor >= start && cursor <= $0.through } ?? false
         func value(_ index: Int) -> Double? {
-            guard ready, let series = computed?.series[index] else { return nil }
-            return Self.held(series, at: cursor)
+            guard ready, !slots[index].isPaused, let all = computed?.series, all.indices.contains(index) else { return nil }
+            return Self.held(all[index], at: cursor)
         }
         let focusSlot = focused
         let focusValue = value(focusedIndex)
         var laneValues: [Int: String] = [:]
         for (index, slot) in slots.enumerated() where index != focusedIndex {
-            laneValues[index] = ready ? (value(index).map(slot.format.full) ?? "—") : "…"
+            laneValues[index] = slot.isPaused ? "Paused" : ready ? (value(index).map(slot.format.full) ?? "—") : "…"
+        }
+        if focusSlot.isPaused {
+            return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
+                               readoutNote: "Paused", focusValue: nil, laneValues: laneValues)
         }
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
                            readoutValue: ready ? (focusValue.map(focusSlot.format.full) ?? "—") : "…",
@@ -640,11 +871,13 @@ public final class ScenarioStore {
 
     /// "Computed through Dec 2045 · 5 of 8 slots · 1 link".
     public func statusText() -> String {
-        [
-            computed?.computedThrough.map { "Computed through " + DateText.monthYear($0) } ?? "Computing…",
+        let paused = slots.filter(\.isPaused).count
+        return [
+            computed?.computedThrough.map { "Computed through " + DateText.monthYear($0) }
+                ?? (paused == slots.count ? "Nothing to compute" : "Computing…"),
             "\(slots.count) of \(Scenario.bankSize) slots",
             "\(linkCount) link\(linkCount == 1 ? "" : "s")",
-        ].joined(separator: " · ")
+        ].joined(separator: " · ") + (paused > 0 ? " · \(paused) paused" : "")
     }
 
     /// The whole panel at once, for clipboard snapshots and tests.
@@ -654,17 +887,18 @@ public final class ScenarioStore {
 
     private func markers(forSlotAt index: Int) -> [EventMarker] {
         var markers: [EventMarker] = []
-        for event in authored[index] where event.time <= frame.end {
-            markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: Self.label(for: event), kind: .oneOff))
+        for event in configs[index].events where event.time <= frame.end {
+            markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: label(for: event, inSlotAt: index), kind: .oneOff))
         }
-        for rule in recurring[index] where rule.first <= frame.end {
+        for rule in configs[index].rules where rule.first <= frame.end {
             let end = min(rule.until ?? frame.end, frame.end)
             let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
             let sign = rule.kind == "withdraw" ? "−" : "+"
             markers.append(EventMarker(id: rule.id, date: rule.first, endDate: end,
                                        label: "\(sign)\(amount) \(Self.describe(rule.every))", kind: .recurring))
         }
-        for event in computed?.generated[index] ?? [] where frame.contains(event.time) {
+        let generated = computed.flatMap { $0.generated.indices.contains(index) ? $0.generated[index] : nil } ?? []
+        for event in generated where frame.contains(event.time) {
             markers.append(EventMarker(id: event.id, date: event.time, endDate: nil, label: event.kind, kind: .generated))
         }
         return markers.sorted { $0.date < $1.date }
@@ -697,6 +931,17 @@ public final class ScenarioStore {
         return low
     }
 
+    /// Like `label(for:)`, with a parameter change in the model's words: "Interest rate → 4%".
+    func label(for event: Event, inSlotAt index: Int) -> String {
+        guard event.kind == Event.setKind, slots.indices.contains(index) else { return Self.label(for: event) }
+        return event.values.sorted { $0.key < $1.key }.map { name, value in
+            guard let parameter = slots[index].parameterValues.first(where: { $0.name == name }) else {
+                return "\(name) → \(ValueFormat.number.axis(value))"
+            }
+            return "\(parameter.label) → \(parameter.text(value))"
+        }.joined(separator: ", ")
+    }
+
     static func label(for event: Event) -> String {
         let amount = event.values["amount"].map { ValueFormat.currency.full($0) }
         switch event.kind {
@@ -719,7 +964,8 @@ public final class ScenarioStore {
         order += slots.indices.filter { $0 != focusedIndex }
         let slotData = order.map { index in
             let slot = slots[index]
-            let points = (computed?.series[index] ?? [])
+            let series = computed.flatMap { $0.series.indices.contains(index) ? $0.series[index] : nil } ?? []
+            let points = (slot.isPaused ? [] : series)
                 .filter { frame.contains($0.time) }
                 .map { SnapshotData.Point(t: $0.time, v: $0.value) }
             return SnapshotData.Slot(name: slot.title, variable: slot.variable, color: slot.colorHex,

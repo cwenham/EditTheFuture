@@ -41,6 +41,9 @@ struct TimelineRows: View {
                 FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
+                    .overlay {
+                        if let reason = timeline.focus.pausedReason { PausedNote(reason: reason, large: true) }
+                    }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
                         interactions?.pickDate(Double(location.x / plotWidth))
@@ -328,6 +331,9 @@ struct LaneRow: View {
                        series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
                        rules: [PlotRule(date: timeline.now, color: Theme.nowLine)])
                 .frame(width: plotWidth, height: 36)
+                .overlay(alignment: .leading) {
+                    if let reason = lane.pausedReason { PausedNote(reason: reason, large: false) }
+                }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 1, coordinateSpace: .local) { location in
                     interactions?.pickDateOnLane(lane.id, Double(location.x / plotWidth))
@@ -340,6 +346,34 @@ struct LaneRow: View {
                 .frame(width: TimelineLayout.valueWidth, alignment: .trailing)
         }
         .frame(height: TimelineLayout.laneRowHeight)
+    }
+}
+
+/// Shown in place of a paused slot's line (docs/UI.md, 5.7).
+struct PausedNote: View {
+    let reason: String
+    let large: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "pause.circle")
+                .font(.system(size: large ? 15 : 12))
+            Text(large ? "Paused" : "Paused · " + reason)
+                .font(.system(size: large ? 15 : 12, weight: .semibold))
+                .lineLimit(1)
+            if large {
+                Text(reason)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .foregroundStyle(Theme.warning)
+        .padding(.horizontal, large ? 14 : 8)
+        .padding(.vertical, large ? 10 : 3)
+        .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .help(reason)
+        .accessibilityElement(children: .combine)
     }
 }
 

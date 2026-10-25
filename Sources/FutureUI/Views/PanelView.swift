@@ -61,7 +61,7 @@ public struct PanelView: View {
     }
 
     private func pane(side: PaneSide, areaWidth: CGFloat) -> some View {
-        AddEventPane(
+        SidePane(
             store: store,
             side: side,
             onMoveToOtherSide: {
@@ -132,13 +132,11 @@ struct PanelHeader: View {
             .allowsHitTesting(false)
 
             HStack(spacing: 6) {
-                ForEach(0..<8, id: \.self) { index in
-                    if index < store.slots.count {
-                        SlotChip(slot: store.slots[index], selected: index == store.focusedIndex) {
-                            store.focus(index: index)
-                        }
+                ForEach(0..<ScenarioStore.bankSize, id: \.self) { position in
+                    if let index = store.slotIndex(atPosition: position) {
+                        SlotChip(store: store, slot: store.slots[index], selected: index == store.focusedIndex)
                     } else {
-                        EmptySlotChip(key: index + 1)
+                        EmptySlotChip(store: store, position: position)
                     }
                 }
             }
@@ -184,17 +182,30 @@ struct WindowDragArea: NSViewRepresentable {
 }
 #endif
 
+/// A slot's chip in the header: click to focus, right-click for its menu, drag onto another
+/// number to move it (docs/UI.md, 5.7).
+///
+/// It keeps the slot itself, not its index in `store.slots`: after a slot is removed, SwiftUI can
+/// draw a chip once more with what it was given before, and an old index can be past the end.
 struct SlotChip: View {
+    let store: ScenarioStore
     let slot: ScenarioStore.SlotInfo
     let selected: Bool
-    let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if let index = store.slotIndex(id: slot.id) { store.focus(index: index) }
+        } label: {
             HStack(spacing: 7) {
                 Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
                 Circle().fill(slot.color).frame(width: 8, height: 8)
                 Text(slot.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                if slot.isPaused {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityLabel("Paused")
+                }
             }
             .padding(.leading, 8)
             .padding(.trailing, 10)
@@ -205,23 +216,81 @@ struct SlotChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .help("Focus \(slot.title)  \(slot.key)")
+        .help(slot.pausedReason.map { "\(slot.title) is paused: \($0)" } ?? "Focus \(slot.title)  \(slot.key)")
+        .contextMenu { SlotMenu(store: store, slot: slot) }
+        .draggable(slot.id.uuidString) {
+            Text(slot.title).font(.system(size: 13, weight: .medium)).padding(6)
+        }
+        .dropDestination(for: String.self) { items, _ in
+            store.dropSlot(items.first, atPosition: slot.key - 1)
+        }
     }
 }
 
-struct EmptySlotChip: View {
-    let key: Int
+/// The chip menu: settings, model, duplicate, move and remove.
+struct SlotMenu: View {
+    let store: ScenarioStore
+    let slot: ScenarioStore.SlotInfo
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("\(key)").font(.system(size: 11)).monospacedDigit()
-            Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
+        Button("Slot settings") { act { store.showSlotSettings(forSlotAt: $0) } }
+        Button("Change model…") { store.openPicker(.change(slot: slot.id)) }
+        Button("Duplicate") { act { store.duplicateSlot(at: $0) } }
+            .disabled(store.freePositions.isEmpty)
+        Menu("Move to slot") {
+            ForEach(0..<ScenarioStore.bankSize, id: \.self) { position in
+                let other = store.slotIndex(atPosition: position).map { store.slots[$0].title }
+                Button("\(position + 1)" + (other.map { " (swap with \($0))" } ?? "")) {
+                    act { store.moveSlot(at: $0, toPosition: position) }
+                }
+                .disabled(position == slot.key - 1)
+            }
         }
-        .foregroundStyle(Theme.secondary)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
-        .accessibilityLabel("Slot \(key) is empty")
+        Divider()
+        Button("Remove…", role: .destructive) { act { store.requestRemoval(ofSlotAt: $0) } }
+            .disabled(!store.canRemoveSlot)
+    }
+
+    /// Runs an action on the slot wherever it is now.
+    private func act(_ action: (Int) -> Void) {
+        if let index = store.slotIndex(id: slot.id) { action(index) }
+    }
+}
+
+/// An empty position: click to add a model there.
+struct EmptySlotChip: View {
+    let store: ScenarioStore
+    let position: Int
+
+    var body: some View {
+        let key = position + 1
+        Button {
+            store.openPicker(.add(position: position))
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(key)").font(.system(size: 11)).monospacedDigit()
+                Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(Theme.secondary)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help("Add a model to slot \(key)")
+        .accessibilityLabel("Slot \(key) is empty. Add a model")
+        .contextMenu {
+            Button("Add a model…") { store.openPicker(.add(position: position)) }
+        }
+        .popover(isPresented: Binding(get: { store.picker == .add(position: position) },
+                                      set: { if !$0 { store.closePicker() } }),
+                 arrowEdge: .bottom) {
+            ModelPicker(store: store, request: .add(position: position))
+        }
+        .dropDestination(for: String.self) { items, _ in
+            store.dropSlot(items.first, atPosition: position)
+        }
     }
 }
 

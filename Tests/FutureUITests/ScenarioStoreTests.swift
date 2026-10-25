@@ -170,7 +170,7 @@ struct ScenarioStoreTests {
         #expect(store.focused.title == "Climate")
         #expect(store.eventDraft.slotIndex == 3)
         #expect(store.eventDraft.kind == .setParameter)
-        #expect(store.eventDraft.parameter == "warming")
+        #expect(store.eventDraft.parameter == "mean")  // Climate's first parameter
         await store.waitUntilIdle()
         #expect(store.currentValue(ofParameter: "warming") == 0.03)
 

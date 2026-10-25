@@ -48,6 +48,7 @@ final class PanelController {
         panel.onFocusCommandBar = { [weak self] in self?.store.requestCommandBarFocus() }
         panel.onUndo = { [weak self] in self?.store.undo() }
         panel.onRedo = { [weak self] in self?.store.redo() }
+        panel.onToggleSlotSettings = { [weak self] in self?.store.toggleSlotSettings() }
         panel.onHide = { [weak self] in self?.hide() }
         panel.onKey = { [weak self] event in self?.handleKey(event) ?? false }
 
@@ -182,8 +183,8 @@ final class PanelController {
         case "=", "+": store.zoom(by: 0.8); return true
         case "-": store.zoom(by: 1.25); return true
         default:
-            if let number = Int(key), (1...8).contains(number) {
-                store.focus(index: number - 1)
+            if let number = Int(key), (1...ScenarioStore.bankSize).contains(number) {
+                store.focus(key: number)
                 return true
             }
             return false

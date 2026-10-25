@@ -6,6 +6,8 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
     case currency
     case temperature
     case number
+    /// A fraction shown as a percent: 0.045 is "4.5%".
+    case percent
 
     /// Full value for readouts and lanes, e.g. "$41,223" or "14.2 °C". Values too big to write
     /// out are shown as "$1.23e18"; values that overflowed as "∞".
@@ -23,6 +25,10 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
         case .number:
             guard magnitude < Self.writtenOutLimit else { return sign + Self.scientific(magnitude) }
             return magnitude >= 100 ? Self.grouped(value.rounded()) : String(format: "%.2f", value)
+        case .percent:
+            let percent = magnitude * 100
+            guard percent < Self.writtenOutLimit else { return sign + Self.scientific(percent) + "%" }
+            return sign + (percent >= 100 ? Self.grouped(percent.rounded()) : String(format: "%.1f", percent)) + "%"
         }
     }
 
@@ -43,6 +49,8 @@ public enum ValueFormat: String, Sendable, Codable, Hashable {
             return Self.trimmed(value) + "°"
         case .number:
             return Self.trimmed(value)
+        case .percent:
+            return Self.trimmed(value * 100) + "%"
         }
     }
 

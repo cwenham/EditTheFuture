@@ -49,6 +49,78 @@ struct PanelViewTests {
         #expect(store.eventDraft.amountText.isEmpty)
     }
 
+    @Test("The Slot tab, picker and slot changes draw without crashing")
+    func slotFlow() async throws {
+        let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+
+        store.showSlotSettings()
+        settle(view)
+        store.openPicker(.add(position: 5))
+        settle(view)
+        store.addModel(ModelLibrary.batteryCapacity, atPosition: 5)
+        await store.waitUntilIdle()
+        settle(view)
+        store.previewStartingValue("cycles", 14, inSlotAt: store.focusedIndex)
+        await store.waitUntilIdle()
+        settle(view)
+        store.endStartingValuePreview(commit: true)
+        settle(view)
+        store.openPicker(.change(slot: store.focused.id))
+        settle(view)
+        store.changeModel(ofSlotAt: store.focusedIndex, to: ModelLibrary.logisticGrowth)
+        settle(view)
+
+        store.requestRemoval(ofSlotAt: 3)
+        settle(view)
+        store.removeSlot(at: 3)
+        await store.waitUntilIdle()
+        store.focus(named: "energybill")
+        settle(view)
+        #expect(store.focused.isPaused)
+        store.undo()
+        await store.waitUntilIdle()
+        settle(view)
+        store.moveSlot(at: 0, toPosition: 7)
+        store.toggleSlotSettings()
+        settle(view)
+        #expect(store.sidePane == .event)
+    }
+
+    @Test("Removing the last slot in the list, from its Slot tab, doesn't crash")
+    func removeLastSlot() async throws {
+        let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+        // As in the app: add a model to an empty chip, ask to remove it, confirm.
+        store.addModel(ModelLibrary.radioactiveDecay, atPosition: 5)
+        await store.waitUntilIdle()
+        settle(view)
+        store.requestRemoval(ofSlotAt: store.focusedIndex)
+        settle(view)
+        store.removeSlot(at: store.focusedIndex)
+        settle(view)
+        await store.waitUntilIdle()
+        settle(view)
+        #expect(store.slots.count == 5)
+        // And again from the end of a longer list, with the slot after it moved away first.
+        store.addModel(ModelLibrary.prices, atPosition: 7)
+        store.addModel(ModelLibrary.bodyWeight, atPosition: 6)
+        settle(view)
+        store.removeSlot(at: store.slots.count - 1)
+        settle(view)
+        store.undo()
+        settle(view)
+        store.removeSlot(at: 0)
+        settle(view)
+        #expect(store.slots.count == 6)
+    }
+
     @Test("Values too big for whole numbers, infinite or NaN still draw, focused or in a lane")
     func runawayValues() async throws {
         let store = try ScenarioStore(definition: .runaway, now: utc(2026, 10, 25))
@@ -96,22 +168,22 @@ extension ScenarioDefinition {
                 init balance = 1000
                 balance[t] = balance[t-1] * growth
                 on deposit: balance += event.amount
-                """, variable: "balance", format: .currency, summary: "×10 a month"),
+                """, variable: "balance", format: .currency),
             SlotSpec(name: "Sinker", formula: """
                 step 1 month
                 init n = -1
                 n[t] = n[t-1] * 3
-                """, variable: "n", format: .number, summary: "×3 a month, negative"),
+                """, variable: "n", format: .number),
             SlotSpec(name: "Furnace", formula: """
                 step 1 month
                 init temp = 1
                 temp[t] = temp[t-1] * 100 - temp[t-1] * 90
-                """, variable: "temp", format: .temperature, summary: "NaN after it overflows"),
+                """, variable: "temp", format: .temperature),
             // Every value it ever shows is beyond the ±1e300 plots are clamped to.
             SlotSpec(name: "Giant", formula: """
                 step 1 month
                 init size = 1e301
                 size[t] = size[t-1] * 1.001
-                """, variable: "size", format: .currency, summary: "Starts at 1e301"),
+                """, variable: "size", format: .currency),
         ])
 }

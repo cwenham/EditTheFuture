@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import FutureEngine
+import FutureFormula
 @testable import FutureUI
 
 func utc(_ year: Int, _ month: Int, _ day: Int = 1) -> Date {
@@ -39,6 +40,38 @@ struct CommandBarTests {
     func parameters() throws {
         #expect(try CommandBarParser.parse("set rate 4% from 2027-06") == .setParameter(name: "rate", value: 0.04, at: utc(2027, 6)))
         #expect(try CommandBarParser.parse("set monthly 650") == .setParameter(name: "monthly", value: 650, at: nil))
+    }
+
+    @Test("Adding and removing models")
+    func models() throws {
+        #expect(try CommandBarParser.parse("add savings account") == .addModel("savings account", slot: nil))
+        #expect(try CommandBarParser.parse("add Loan to 7") == .addModel("Loan", slot: 7))
+        #expect(try CommandBarParser.parse("add loan to slot 3") == .addModel("loan", slot: 3))
+        #expect(try CommandBarParser.parse("add loan slot 3") == .addModel("loan", slot: 3))
+        #expect(try CommandBarParser.parse("remove Energy bill") == .removeSlot("Energy bill"))
+        #expect(try CommandBarParser.parse("delete 4") == .removeSlot("4"))
+        #expect(ModelLibrary.named("savings account")?.id == "savings-account")
+        #expect(ModelLibrary.named("mortgage")?.id == "loan")
+        #expect(ModelLibrary.named("loan")?.id == "loan")
+        #expect(ModelLibrary.named("weight")?.id == "body-weight")
+        #expect(ModelLibrary.named("teleporter") == nil)
+        #expect(ModelLibrary.search("half-life").map(\.id) == ["radioactive-decay"])
+    }
+
+    @Test("Every library model compiles and declares what the Slot tab needs")
+    func library() throws {
+        for template in ModelLibrary.all {
+            let model = try FormulaModel(template.formula, name: template.slotName)
+            #expect(model.descriptor.variable(named: template.variable) != nil, "\(template.name) has no \(template.variable)")
+            for parameter in model.descriptor.variables where parameter.causality == .parameter {
+                #expect(parameter.label != nil, "\(template.name).\(parameter.name) has no label")
+                #expect(parameter.minimum != nil && parameter.maximum != nil, "\(template.name).\(parameter.name) has no range")
+                if let value = model.declaredDefaults[parameter.name], let low = parameter.minimum, let high = parameter.maximum {
+                    #expect(value >= low && value <= high, "\(template.name).\(parameter.name)'s default is outside its range")
+                }
+            }
+        }
+        #expect(Set(ModelLibrary.all.map(\.id)).count == ModelLibrary.all.count)
     }
 
     @Test("Clipboard and undo")

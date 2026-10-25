@@ -4,6 +4,8 @@ enum TokenKind: Equatable {
     case number(Double)
     case identifier(String)
     case symbol(String)
+    /// `"Interest rate"`, for labels.
+    case string(String)
     case newline
     case end
 }
@@ -14,7 +16,7 @@ struct Token: Equatable {
 }
 
 enum Lexer {
-    private static let twoCharacterSymbols: Set<String> = ["+=", "-=", "*=", "/=", "<=", ">=", "==", "!="]
+    private static let twoCharacterSymbols: Set<String> = ["+=", "-=", "*=", "/=", "<=", ">=", "==", "!=", ".."]
     private static let oneCharacterSymbols: Set<Character> = ["+", "-", "*", "/", "^", "(", ")", "[", "]", ",", ".", ":", "=", "<", ">", "%", ";"]
 
     static func tokenize(_ source: String) throws -> [Token] {
@@ -36,6 +38,17 @@ enum Lexer {
                 index += 1
             } else if character == "#" || (character == "/" && peek(1) == "/") {
                 while let next = peek(), next != "\n" { index += 1 }
+            } else if character == "\"" {
+                index += 1
+                var text = ""
+                while let next = peek(), next != "\"" {
+                    guard next != "\n" else { throw FormulaError.syntax(line: line, message: "This text needs a closing \".") }
+                    text.append(next)
+                    index += 1
+                }
+                guard peek() == "\"" else { throw FormulaError.syntax(line: line, message: "This text needs a closing \".") }
+                index += 1
+                tokens.append(Token(kind: .string(text), line: line))
             } else if character.isNumber {
                 tokens.append(Token(kind: .number(try readNumber(characters, &index, line: line)), line: line))
             } else if character.isLetter || character == "_" {

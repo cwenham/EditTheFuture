@@ -9,6 +9,7 @@ final class FloatingPanel: NSPanel {
     var onFocusCommandBar: (() -> Void)?
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
+    var onToggleSlotSettings: (() -> Void)?
     var onHide: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
 
@@ -44,6 +45,10 @@ final class FloatingPanel: NSPanel {
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if flags == .command && key == "k" {
             onFocusCommandBar?()
+            return true
+        }
+        if flags == .command && key == "i" {
+            onToggleSlotSettings?()
             return true
         }
         if !isEditingText {
