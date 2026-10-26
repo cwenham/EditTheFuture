@@ -19,9 +19,18 @@ public struct SlotSpec: Sendable {
     public var position: Int?
     /// The slot's own parameter and starting values, by name, in place of the formula's defaults.
     public var values: [String: Double]
+    public var events: [Event]
+    public var rules: [RecurringEvent]
+    public var readings: SlotReadings
+    /// Why the slot can't run, from a mistake in its section of scenario.md.
+    public var problem: String?
+    /// Whether scenario.md said what the graph shows, and how (`SlotConfig.showsInFile`).
+    var showsInFile = true
+    var formatInFile = false
 
     public init(name: String, model: String = "Custom formula", kind: ModelKind = .formula, formula: String, variable: String,
-                color: String? = nil, format: ValueFormat, position: Int? = nil, values: [String: Double] = [:]) {
+                color: String? = nil, format: ValueFormat, position: Int? = nil, values: [String: Double] = [:],
+                events: [Event] = [], rules: [RecurringEvent] = [], readings: SlotReadings = .none, problem: String? = nil) {
         self.name = name
         self.model = model
         self.kind = kind
@@ -31,6 +40,10 @@ public struct SlotSpec: Sendable {
         self.format = format
         self.position = position
         self.values = values
+        self.events = events
+        self.rules = rules
+        self.readings = readings
+        self.problem = problem
     }
 }
 
@@ -48,12 +61,15 @@ public struct InitialEvent: Sendable {
 public struct ScenarioDefinition: Sendable {
     public var name: String
     public var start: Date
+    /// nil for the engine's own.
+    public var seed: UInt64?
     public var slots: [SlotSpec]
     public var events: [InitialEvent]
 
-    public init(name: String, start: Date, slots: [SlotSpec], events: [InitialEvent] = []) {
+    public init(name: String, start: Date, seed: UInt64? = nil, slots: [SlotSpec], events: [InitialEvent] = []) {
         self.name = name
         self.start = start
+        self.seed = seed
         self.slots = slots
         self.events = events
     }

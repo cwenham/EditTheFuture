@@ -1,4 +1,5 @@
 import Foundation
+import FutureDocument
 import FutureEngine
 import FutureFormula
 import FutureScript
@@ -28,6 +29,7 @@ actor ScenarioEngine {
         let slots: [SlotSetup?]
         let events: [[Event]]
         let rules: [[RecurringEvent]]
+        let readings: [ReadingSet]
     }
 
     enum Mutation: Sendable {
@@ -35,8 +37,12 @@ actor ScenarioEngine {
         case removeEvent(slot: Int, id: UUID)
         case addRule(slot: Int, RecurringEvent)
         case removeRule(slot: Int, id: UUID)
-        /// Slots were added, removed, moved, renamed or given new values.
+        /// Slots were added, removed, moved, renamed or given new values, events or readings.
         case layout(Layout)
+        /// A new start or seed: everything is built again.
+        case rebuild(start: Date, seed: UInt64, layout: Layout)
+        /// Results saved earlier (docs/DESIGN.md, 15.5), by slot index, put back instead of computed.
+        case restore([Int: SlotHistory])
     }
 
     struct FetchRequest: Sendable {
@@ -146,9 +152,12 @@ actor ScenarioEngine {
     private let queue = DispatchSerialQueue(label: "com.editthefuture.engine", qos: .userInitiated)
     nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
-    private let start: Date
+    private var start: Date
+    private var seed: UInt64
     private var scenario: Scenario
     private var setups: [SlotSetup?]
+    /// Each slot's readings as last sent, to tell when they change without comparing every reading.
+    private var readingSets: [ReadingSet]
     /// Each store slot's place in the scenario, or nil while it's paused.
     private var ids: [SlotID?]
     /// Errors slots raised while computing, by slot name. Edits clear them; computing again finds them again.
@@ -158,20 +167,23 @@ actor ScenarioEngine {
     /// How far each chunk of a fetch computes before checking whether it's been superseded.
     static let chunk: TimeInterval = 4 * 365.2425 * 86_400
 
-    init(start: Date, layout: Layout) throws {
+    init(start: Date, seed: UInt64 = Scenario.defaultSeed, layout: Layout) throws {
         self.start = start
-        (scenario, ids) = try Self.build(start: start, layout: layout)
+        self.seed = seed
+        (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout)
         setups = layout.slots
+        readingSets = layout.readings
     }
 
-    private static func build(start: Date, layout: Layout) throws -> (Scenario, [SlotID?]) {
-        let scenario = Scenario(start: start)
+    private static func build(start: Date, seed: UInt64, layout: Layout) throws -> (Scenario, [SlotID?]) {
+        let scenario = Scenario(start: start, seed: seed)
         var ids: [SlotID?] = []
         for (index, setup) in layout.slots.enumerated() {
             guard let setup else { ids.append(nil); continue }
             let id = try scenario.addSlot(setup.name, model: setup.model)
             for event in layout.events[index] { scenario.add(event, to: id) }
             for rule in layout.rules[index] { scenario.add(rule, to: id) }
+            scenario.setReadings(layout.readings[index].readings, for: id)
             ids.append(id)
         }
         try scenario.validate()
@@ -186,11 +198,20 @@ actor ScenarioEngine {
         case .addRule(let slot, let rule): if let id = ids[slot] { scenario.add(rule, to: id) }
         case .removeRule(let slot, let ruleID): if let id = ids[slot] { scenario.removeRecurring(id: ruleID, from: id) }
         case .layout(let layout): change(to: layout)
+        case .rebuild(let start, let seed, let layout):
+            self.start = start
+            self.seed = seed
+            rebuild(layout)
+        case .restore(let histories):
+            for (index, history) in histories where ids.indices.contains(index) {
+                if let id = ids[index] { scenario.restore(history, to: id) }
+            }
         }
     }
 
-    /// When the same slots run under the same names, swaps only the models that changed, so the
-    /// other slots keep what they've computed. Anything else rebuilds the scenario.
+    /// When the same slots run under the same names, swaps only the models that changed and brings
+    /// each slot's events and readings up to date, so the rest keep what they've computed.
+    /// Anything else rebuilds the scenario.
     private func change(to layout: Layout) {
         let sameSlots = layout.slots.count == setups.count
             && zip(layout.slots, setups).allSatisfy { $0?.name == $1?.name }
@@ -201,21 +222,67 @@ actor ScenarioEngine {
                     try scenario.replaceModel(of: id, with: setup.model)
                 }
                 try scenario.validate()
+                for (index, id) in ids.enumerated() {
+                    guard let id else { continue }
+                    syncEvents(of: id, to: layout.events[index], rules: layout.rules[index])
+                    if readingSets.indices.contains(index), readingSets[index] != layout.readings[index] {
+                        scenario.setReadings(layout.readings[index].readings, for: id)
+                    }
+                }
                 setups = layout.slots
+                readingSets = layout.readings
                 return
             } catch {
                 // Fall through and rebuild from scratch.
             }
         }
+        rebuild(layout)
+    }
+
+    private func rebuild(_ layout: Layout) {
         do {
-            (scenario, ids) = try Self.build(start: start, layout: layout)
+            (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout)
         } catch {
             // The store only sends slots whose wiring checks out, so this shouldn't happen. If it
             // does, run nothing rather than something half-wired.
-            scenario = Scenario(start: start)
+            scenario = Scenario(start: start, seed: seed)
             ids = layout.slots.map { _ in nil }
         }
         setups = layout.slots
+        readingSets = layout.readings
+    }
+
+    /// Removes events and rules the slot no longer has and adds new ones, by id. Unchanged ones
+    /// stay, so only the time after a change is computed again.
+    private func syncEvents(of id: SlotID, to events: [Event], rules: [RecurringEvent]) {
+        let wanted = Set(events.map(\.id))
+        let have = scenario.events(in: id)
+        for event in have where !wanted.contains(event.id) { scenario.removeEvent(id: event.id, from: id) }
+        let kept = Set(have.map(\.id))
+        for event in events where !kept.contains(event.id) { scenario.add(event, to: id) }
+        for event in events where kept.contains(event.id) {
+            if let old = have.first(where: { $0.id == event.id }), old != event { scenario.upsert(event, in: id) }
+        }
+
+        let wantedRules = Set(rules.map(\.id))
+        let haveRules = scenario.recurringEvents(in: id)
+        for rule in haveRules where !wantedRules.contains(rule.id) || !rules.contains(rule) {
+            scenario.removeRecurring(id: rule.id, from: id)
+        }
+        let keptRules = Set(scenario.recurringEvents(in: id).map(\.id))
+        for rule in rules where !keptRules.contains(rule.id) { scenario.add(rule, to: id) }
+    }
+
+    /// Results worth saving (docs/DESIGN.md, 15.5): slots whose results took at least
+    /// `minimumSeconds` to compute, that can save their state and didn't stop with an error.
+    func resultsToSave(minimumSeconds: Double) -> [Int: SlotHistory] {
+        var results: [Int: SlotHistory] = [:]
+        for (index, id) in ids.enumerated() {
+            guard let id, let setup = setups[index], failures[setup.name] == nil,
+                  scenario.computeCost(of: id) >= minimumSeconds, let history = scenario.history(of: id) else { continue }
+            results[index] = history
+        }
+        return results
     }
 
     /// Computes every slot through the requested range (independent groups on separate cores),

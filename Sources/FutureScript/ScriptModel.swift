@@ -101,6 +101,15 @@ public struct ScriptModel: AuthoredModel {
         state.values
     }
 
+    /// The script's state is already numbers (docs/DESIGN.md, 6.4).
+    public func savedNumbers(of state: State) -> [Double]? {
+        state.values
+    }
+
+    public func restoredState(from numbers: [Double]) -> State? {
+        numbers.count == initial.count ? State(values: numbers) : nil
+    }
+
     // MARK: Helpers
 
     /// Names the slot in errors the script raises.

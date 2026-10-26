@@ -222,6 +222,19 @@ public struct FormulaModel: AuthoredModel {
         state.parameters + state.values
     }
 
+    /// Parameters, variables, then each `when` condition as 1 or 0.
+    public func savedNumbers(of state: State) -> [Double]? {
+        state.parameters + state.values + state.triggerStates.map { $0 ? 1 : 0 }
+    }
+
+    public func restoredState(from numbers: [Double]) -> State? {
+        let parameters = executable.parameterCount, variables = executable.variableCount
+        guard numbers.count == parameters + variables + executable.triggers.count else { return nil }
+        return State(parameters: Array(numbers[..<parameters]),
+                     values: Array(numbers[parameters..<(parameters + variables)]),
+                     triggerStates: numbers[(parameters + variables)...].map { $0 != 0 })
+    }
+
     // MARK: Helpers
 
     /// Params and inits that are constants (numbers, `pi`, earlier constants), worked out without a

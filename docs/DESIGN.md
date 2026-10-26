@@ -687,7 +687,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 
 ## 15. Persistence and sync
 
-Decided in October 2026. Nothing is built yet.
+Decided and built in October 2026, on the Mac. The code is `FutureDocument` (reading and writing the folder) and `ScenarioDocument` in `FutureUI` (saving, reloading and the cache). Not built yet: sync, iOS, branches, and drawing readings.
 
 A scenario is saved as plain text that people can read, edit in any editor and keep in git, the way [KeybowNotes](https://github.com/cwenham/KeybowNotes) keeps its key trees in a Markdown outline. Values the models computed are saved beside it, so slow models don't have to run again.
 
@@ -706,9 +706,16 @@ Home & money.etf/
 
 - `scenario.md` is the source of truth. Everything else is either linked from it or can be rebuilt.
 - One folder holds one scenario: one group of linked slots.
-- The app watches `scenario.md`. When another editor saves it, the app reloads it within a couple of seconds. Reloading goes through the same path as editing slots (4.8, "Slot layouts"), so only the slots that changed compute again. If the app has unsaved changes as well, it asks which to keep.
-- Where the panel was looking (the focused slot, the zoom, the cursor) isn't part of the scenario. The app remembers it for each scenario in its own settings.
+- **Where scenarios live:** the Scenarios folder, beside the script Libraries folder: `Application Support/Edit The Future/Scenarios` on the Mac, `Documents/Scenarios` on iOS. At launch the app opens the scenario used last. The first time, it writes the built-in "Home & money" there. Open Scenario… in the menu bar item opens one from anywhere (UI.md, 6).
+- **Saving:** changes in the app are saved half a second after they stop, so a burst of changes is one save. Closing a scenario, or quitting, saves too.
+- **Changes from other apps:** the app checks `scenario.md` every second. When another editor has saved it, the app reads it again. Reloading goes through the same path as editing slots (4.8, "Slot layouts"), so only the slots that changed compute again.
+  - The reload is one change, so ⌘Z takes it back, and the app says so. A new start or seed builds the scenario again, and undo starts afresh.
+  - If the app has a change waiting to be saved, the file's version wins; ⌘Z brings the app's change back.
+  - While the file can't be read (half-way through an edit, say), the app says why and doesn't save over it. Once it reads again, it loads.
+  - The app doesn't write the file back after reading it, unless something in it changed.
+- Where the panel was looking (the focused slot, the zoom, the cursor) isn't part of the scenario. Each opening starts at now; remembering it is still to do.
 - A scenario from someone else holds their scripts, and opening it runs them. Scripts run with guard rails, not a full sandbox (6.4), so this needs a decision (17).
+- In Finder the folder shows as an "Edit The Future scenario" document (the `com.editthefuture.scenario` type, a package), and double-clicking opens it in the app.
 
 ### 15.2 scenario.md
 
@@ -774,8 +781,8 @@ select ts as date, temp_c as temp from readings where sensor = 'kitchen'
 | Part | How it's written |
 |---|---|
 | The scenario | The first heading: the scenario's name, then its settings in brackets. `start` is required. `seed` defaults to the engine's own. |
-| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8) and 9–16 the second. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`) and `color` (hex). |
-| The model | The fenced block under the slot's heading, exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). |
+| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8); later banks aren't built yet. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it; it's left out for a model of the slot's own. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`) and `color` (hex). Without `shows` the graph draws the model's first output, and without `as` it uses that variable's own `as`. |
+| The model | The first fenced block in a model's language in the slot's section (not under Readings), exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). A part such as Values ends where the model's block starts. |
 | The slot's own values | `### Values`: one `- name: value` line for each parameter or starting value that differs from the model's default (6.2). |
 | Events | `### Events`: one line per event or recurring rule. |
 | Readings | `### Readings`: a `csv` block, a link to a CSV file (15.3), or a link to a SQLite database followed by a `sql` block (15.4). |
@@ -803,13 +810,17 @@ Branches (5.7) aren't in the format yet. One possibility is a section that lists
 **Event IDs** aren't written. The engine orders events within a step by their IDs (4.4), so the app derives each one from its slot and its line: the date, kind and fields, and how many identical lines come before it. The same file always gives the same results, and adding notes or moving lines changes nothing.
 
 **Writing back:**
-- The app keeps what it doesn't understand: notes, other headings, blank lines.
-- An edit in the app rewrites only the parts it changed, in one consistent form: a slot's heading, model, values, events or readings. New slots go in position order.
+- The app keeps what it doesn't understand: notes, other headings, blank lines, and settings it doesn't know.
+- An edit in the app rewrites only the parts whose meaning changed, in one consistent form: a slot's heading, model, values, events or readings. A part written another way that means the same, such as `rate: 0.042` for `4.2%` or `amount: 6e3`, stays as it is. Within a part that changed, the items that didn't change keep their lines.
+- `shows` and `as` are written when the file had them, or when they differ from the model's own.
+- New slots go before the first slot with a later number, else after the last slot. A slot keeps its place when it's renamed or moved, since it's matched by name, then by number.
 
-**Mistakes** are reported with their line, and only affect what they're in:
-- A mistake in a slot's section pauses that slot, with the reason, as slots that can't run are paused now (5.9). The other slots run.
-- An event line that can't be read is skipped and listed.
-- A scenario whose first heading or start date can't be read doesn't open, and the app says why.
+**Mistakes** are reported with their line, and only affect what they're in. The app shows the first in its footer, with how many more there are:
+- A slot without a model is paused, with the reason, as slots that can't run are paused now (5.9). The other slots run.
+- A slot heading with a number outside 1–8, a name that isn't one word, or a number or name already used, is kept as written but not used.
+- An event or value line that can't be read is skipped and listed, and kept as written.
+- Values and readings for variables the model doesn't have are listed.
+- A scenario whose first heading or start date can't be read doesn't open, and the app says why (UI.md, 6).
 
 ### 15.3 Readings from CSV
 
@@ -826,9 +837,9 @@ Readings can come straight from a SQLite database, such as a sensor logger's, Ho
 - **The link and the query:** a link to the database, then a `sql` block. The query's columns follow the CSV rule: `date` first, then the slot's variable names.
 - **Times:** `date` can be ISO text or seconds since 1970. Other forms are converted in the query, such as `ts / 1000.0 as date` for milliseconds. The app compares times as numbers, because SQLite's own date functions stop at the year 9999.
 - **Values:** null means no reading. SQLite can't store NaN (it stores null instead), and −0 loses its sign. Neither matters for readings.
-- **Read-only:** the app opens the database read-only and refuses `ATTACH`, through an authorizer. Loading extensions stays off. A query has a time limit, as scripts do. So a query can only read that one database.
-- **Paths** are relative to the scenario folder, and `~` is the home folder.
-- **A copy travels with the scenario:** the app keeps a CSV copy of what it last read in `readings/`, and updates it when the database changes. A scenario opened without the database, on another device or by someone else, uses the copy.
+- **Read-only:** the app opens the database read-only and refuses `ATTACH` and `PRAGMA`, through an authorizer. Loading extensions stays off. The `sql` block holds one query, which must only read. A query has a time limit of 10 seconds, as scripts have limits. So a query can only read that one database.
+- **Paths** are relative to the scenario folder; `~` is the home folder, and a path from `/` is absolute.
+- **A copy travels with the scenario:** the app keeps a CSV copy of what it last read in `readings/`, named for the slot and the database (`readings/Kitchen-sensors.csv`). It reads the database, and updates the copy, when the scenario opens and whenever `scenario.md` changes. A scenario opened without the database, on another device or by someone else, uses the copy, and says so.
 - **The sandbox.** iOS apps are always sandboxed, and the Mac App Store app will be too (the Mac app isn't yet). Then:
   - The user picks the database once. That gives the app access to it, and it's also consent: a scenario from someone else can't read a database on your device without asking. The app keeps that access (a security-scoped bookmark) in its own settings, not in the scenario.
   - SQLite makes `-wal`, `-shm` or `-journal` files beside a database, which the sandbox blocks. On the Mac, the app declares them as related files (`NSIsRelatedItemType` in its Info.plist). Otherwise it opens the database with `immutable=1` when it won't change while open, or imports a copy.
@@ -838,6 +849,8 @@ Readings can come straight from a SQLite database, such as a sensor logger's, Ho
   - SQLite changes its file in place, while document saving (autosave, Versions, Save As) and iCloud Drive copy whole files. Syncing a database while it's open, or without its `-wal` file, can lose data.
 
   Reading databases avoids both problems. Writing them by default would bring them in.
+
+**What readings do so far:** they reach the slot's model with each step (`StepContext.readings`, found by binary search), and changing them recomputes from the first reading that changed. No model uses them yet, and the graph doesn't draw them yet (UI.md, 2.4).
 
 ### 15.5 The cache
 
@@ -849,23 +862,27 @@ Some models take a long time to compute: ensembles (4.6), slow scripts, and remo
   - Its generated events.
 - **Format:** one file per slot.
   - The first line is a text header in JSON: the file format's version, the fingerprint, the column names, the step rate and start, the number of points, and where the checkpoints and events begin.
-  - Then the values and the checkpoints, as little-endian doubles, followed by the generated events. Times aren't stored, because point *i* is start + *i* × step rate (4.2).
-  - The app maps the file into memory instead of reading it.
+  - Then the values and the checkpoints, as little-endian doubles, starting on an 8-byte boundary, followed by the generated events as JSON. Event times and values are written as exact text, since JSON writers don't all keep every digit. Times of points aren't stored, because point *i* is start + *i* × step rate (4.2).
+  - The app maps the file into memory and copies the numbers straight into the slot's history.
+- **The engine's part:** a model writes its state as numbers and reads it back (`savedNumbers` and `restoredState` on `TimelineModel`; formulas and scripts do). `Scenario.history(of:)` hands out a slot's results and `restore(_:to:)` puts them back. A restored slot carries on, and rewinds for edits, exactly as if it had computed them.
 - **Binary, not text:** nobody should edit computed values. Raw doubles keep every value exact, including infinity and NaN. They load at once, and take less than half the space of text. Jupyter notebooks show the cost of the other choice: they keep outputs in the same text file as the code, the diffs get huge, and people strip the outputs before committing.
 - **The fingerprint** says what made the values. It's a SHA-256 hash of:
   - the model's kind and text, and the slot's own values
   - the slot's events and readings
   - the scenario's start and seed
-  - the engine's version, a number raised whenever a change to the engine could change results
-  - for scripts, the library files they loaded (6.4)
-  - the fingerprints of the slots it reads or listens to
-- **Using it:** when a scenario opens, the app works out each slot's fingerprint and uses the cache only if it matches. So an edit made in another editor can never show stale values, and a change to Climate retires EnergyBill's cache too. Caches that no longer match are deleted on the next save.
+  - the engine's version (`Scenario.engineVersion`), a number raised whenever a change to the engine could change results, and the cache format's version
+  - for scripts, every file in the Libraries folder for that language (6.4), since a script might import any of them
+  - the same for the slots it reads or listens to, however far upstream, including loops through `[t-1]`
+
+  Event ids are part of it, since they order events within a step (4.4). So an event added in the app gets the id reading the file would give it.
+- **Using it:** when a scenario opens, the app works out each slot's fingerprint and uses the cache only if it matches. So an edit made in another editor can never show stale values, and a change to Climate retires EnergyBill's cache too. Cache files that no longer match are deleted when the scenario closes.
+- **When:** when the scenario closes: on opening another, or on quitting, which waits up to 5 seconds for it. A file that's already there and still matches isn't written again.
 - **What gets cached:**
-  - Slots that took more than about a second to compute.
+  - Slots that took more than a second to compute. The engine times each slot's steps, not counting the slots it reads; this costs nothing measurable.
   - Remote and plug-in models, whose results may not be reproducible offline.
   - Not formula slots, as a rule: one computes 1,000 years of months in about 40 ms.
   - Not slots that stopped with an error.
-- **Size:** the cache holds what the engine has computed, up to a size limit for each scenario.
+- **Size:** the cache holds what the engine has computed, up to 256 MB for each scenario, costliest slots first.
 - **Leaving it out:** the cache can be left out of git and sync. Each device rebuilds what it needs.
 - **Later:** when only events changed, keep the cache up to the first changed event, the same rule the engine uses for edits (4.3).
 
@@ -904,7 +921,6 @@ CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked fro
 - Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 - Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
-- Where do scenarios live by default, and how does the scenario menu find them?
 
 ## 18. Further reading: FMI and co-simulation
 
@@ -936,7 +952,8 @@ Sources/
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
+  FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, cache files, the scenario folder
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
   etf-script/        runs a script model without the app and prints CSV
@@ -946,9 +963,10 @@ Tests/
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism
   FutureScriptTests/    both languages side by side: results, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
+  FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; cache files; restored results
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents
 scripts/
-  build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched
+  build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, and the .etf document type
   fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
 ```
 

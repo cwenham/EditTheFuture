@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "FutureFormula", targets: ["FutureFormula"]),
         .library(name: "FutureScript", targets: ["FutureScript"]),
         .library(name: "FutureCommands", targets: ["FutureCommands"]),
+        .library(name: "FutureDocument", targets: ["FutureDocument"]),
         .library(name: "FutureUI", targets: ["FutureUI"]),
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
@@ -37,8 +38,11 @@ let package = Package(
         .target(name: "CLua", cSettings: [.headerSearchPath("lua")]),
         .target(name: "FutureScript", dependencies: scriptDependencies),
         .target(name: "FutureCommands"),
-        .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands"]),
-        .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript"]),
+        // Saved scenarios: scenario.md, readings and the cache (docs/DESIGN.md, 15).
+        .target(name: "FutureDocument", dependencies: ["FutureEngine"], linkerSettings: [.linkedLibrary("sqlite3")]),
+        .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument"]),
+        .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
+                                                                    "FutureDocument"]),
         // Runs a script model without the app: swift run etf-script <file>
         .executableTarget(name: "etf-script", dependencies: ["FutureScript", "FutureEngine"]),
         // Performance benchmarks: swift run -c release etf-bench
@@ -47,6 +51,9 @@ let package = Package(
         .testTarget(name: "FutureFormulaTests", dependencies: ["FutureFormula", "FutureEngine"]),
         .testTarget(name: "FutureScriptTests", dependencies: ["FutureScript", "FutureEngine"]),
         .testTarget(name: "FutureCommandsTests", dependencies: ["FutureCommands"]),
-        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands"]),
+        .testTarget(name: "FutureDocumentTests", dependencies: ["FutureDocument", "FutureEngine", "FutureFormula"],
+                    linkerSettings: [.linkedLibrary("sqlite3")]),
+        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
+                                                          "FutureDocument"]),
     ] + pythonTargets
 )

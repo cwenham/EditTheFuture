@@ -18,6 +18,14 @@ protocol AnySlotRunner: AnyObject {
     /// Discards every point at or after `date` and rewinds to the newest checkpoint before it.
     /// Returns the time of the last point kept, or nil if nothing is left.
     func truncate(from date: Date) -> Date?
+
+    /// Everything computed so far, without generated events (the scenario keeps those). nil when
+    /// nothing is computed, or the model can't save its state.
+    func history() -> SlotHistory?
+
+    /// Replaces what's computed with a saved history. False, changing nothing, when it doesn't
+    /// fit this model.
+    func restore(_ history: SlotHistory) -> Bool
 }
 
 extension AnySlotRunner {
@@ -119,5 +127,37 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         times.removeSubrange((checkpoint.index + 1)...)
         values.removeSubrange(((checkpoint.index + 1) * width)...)
         return times.last
+    }
+
+    func history() -> SlotHistory? {
+        guard let current, !times.isEmpty, let currentNumbers = model.savedNumbers(of: current) else { return nil }
+        let stateWidth = currentNumbers.count
+        var states: [Double] = []
+        states.reserveCapacity(checkpoints.count * stateWidth)
+        for checkpoint in checkpoints {
+            guard let numbers = model.savedNumbers(of: checkpoint.state), numbers.count == stateWidth else { return nil }
+            states += numbers
+        }
+        return SlotHistory(columns: descriptor.readable.map(\.name), count: times.count, values: values,
+                           stateWidth: stateWidth, checkpointIndices: checkpoints.map(\.index), checkpointStates: states,
+                           currentState: currentNumbers, generated: [], secondsPerStep: 0)
+    }
+
+    func restore(_ history: SlotHistory) -> Bool {
+        guard history.isWellFormed, history.columns == descriptor.readable.map(\.name),
+              let restoredCurrent = model.restoredState(from: history.currentState) else { return false }
+        let stateWidth = history.stateWidth
+        var restoredCheckpoints: [(index: Int, state: Model.State)] = []
+        restoredCheckpoints.reserveCapacity(history.checkpointIndices.count)
+        for (offset, index) in history.checkpointIndices.enumerated() {
+            let numbers = Array(history.checkpointStates[(offset * stateWidth)..<((offset + 1) * stateWidth)])
+            guard let state = model.restoredState(from: numbers) else { return false }
+            restoredCheckpoints.append((index, state))
+        }
+        times = (0..<history.count).map(grid.point)
+        values = history.values
+        checkpoints = restoredCheckpoints
+        current = restoredCurrent
+        return true
     }
 }

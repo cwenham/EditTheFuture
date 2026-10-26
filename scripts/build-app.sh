@@ -51,6 +51,45 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
             </array>
         </dict>
     </array>
+    <!-- A scenario is a folder with the .etf extension (docs/DESIGN.md, 15.1). Finder shows it as one document. -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.editthefuture.scenario</string>
+            <key>UTTypeDescription</key>
+            <string>Edit The Future scenario</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>com.apple.package</string>
+                <string>public.composite-content</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>etf</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Edit The Future scenario</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSTypeIsPackage</key>
+            <true/>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.editthefuture.scenario</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

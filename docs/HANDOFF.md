@@ -38,7 +38,16 @@ Milestones M0 and M1 from DESIGN.md section 16 are done.
 
 ## What works
 
-The Mac app, with the built-in "Home & money" scenario. It has five slots: Savings, Index fund, Mortgage, Climate and Energy bill, which reads Climate's temperature.
+The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launch writes the built-in "Home & money" scenario to the Scenarios folder. It has five slots: Savings, Index fund, Mortgage, Climate and Energy bill, which reads Climate's temperature.
+
+- **Saving** (DESIGN.md, 15; on `feature/document-format`, not merged yet):
+  - A scenario is a `.etf` folder in `~/Library/Application Support/Edit The Future/Scenarios`, holding `scenario.md` (Markdown in KeybowNotes' style), `readings/` and `cache/`. Finder shows it as one document.
+  - The app opens the scenario used last, and saves changes half a second after they stop.
+  - Edits made to `scenario.md` in another editor show in the panel within a couple of seconds, as one change that ⌘Z takes back. A file that can't be read is reported, and the app doesn't save over it.
+  - Writing back keeps notes, unknown settings and lines with mistakes, and rewrites only the parts whose meaning changed.
+  - Readings: `csv` blocks, linked CSV files, and SQLite databases read through a query (read-only, `ATTACH` and `PRAGMA` refused, 10-second limit), with a CSV copy kept in `readings/`. They reach the models, but nothing uses or draws them yet.
+  - Cache: when a scenario closes, slots that took over a second to compute are saved to `cache/` as binary, with a fingerprint of everything that made them. They're used on the next opening only if it still matches.
+  - Menu bar item: Open Scenario…, Edit scenario.md, Show Scenario in Finder, Open Scenarios Folder.
 
 - **The panel:**
   - Floating `NSPanel`. ⌃⌥Space toggles it, and holding it peeks.
@@ -98,8 +107,12 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 ## Not built yet
 
-- **Saving:** nothing persists. Added events are lost when the app quits. The format is designed (DESIGN.md, 15): a `.etf` folder holding `scenario.md` (Markdown, like KeybowNotes' outline), readings as CSV or read from SQLite, and a binary cache of slow slots' values.
-- **Scenarios:** there's no scenario menu, only the built-in scenario.
+- **More for saving** (DESIGN.md, 15):
+  - A scenario menu in the panel, and New Scenario. For now, Open Scenario… in the menu bar item, and copying folders in Finder.
+  - Remembering where the panel was looking for each scenario.
+  - Drawing readings, and models that use them (assimilation).
+  - Asking before running scripts from a scenario someone else made (DESIGN.md, 17).
+  - Sync, iOS documents, branches, and the sandbox's related-files declaration for SQLite.
 - **More for programming models:** saving a slot's model to the library ("Your models"), and plug-ins. The picker's Plug-ins category is empty until then.
 - **More for scripts** (DESIGN.md, 6.4):
   - An iOS app, and packaging Python's standard library into it (BeeWare's `build/utils.sh`).
@@ -151,7 +164,8 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 | `CLua`, `CPythonBridge` | C: Lua 5.5.1 with `etf_lua.c` (sandboxed state, memory cap, time-limit hook, `require`); `etf_python.c` (CPython start, audit hooks, watchdog). `CPythonBridge` is in the package only when `Vendor/Python` exists. |
 | `FutureFormula` | The formula language (DESIGN.md 6.2): lexer, parser (with `range`, `by`, `label` and `as` options), analyzer, resolution to array positions (`Executable`), evaluator, and `FormulaModel`, which takes a slot's own values and reports its constant defaults. `FormulaTools`: `FormulaVocabulary` (functions and built-ins with descriptions), `FormulaHighlighter`, `FormulaCompleter` and `FormulaDiagnoser`, all working on half-written text. |
 | `FutureCommands` | The `Command` vocabulary, `etf://` parsing, the confirmation policy, MIDI decoding, the controller profile and feedback. |
-| `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). |
+| `FutureDocument` | Saved scenarios (DESIGN.md, 15), with no UI: `ScenarioFormat` reads `scenario.md` into a `ScenarioFile` and writes it back over the text it came from (`ParsedScenario` keeps where each part was). `FileNumber` and `FileDate` write numbers and dates exactly. `EventIdentity` gives events the ids the file would. `ReadingLoader`, `CSVReadings` and `DatabaseReadings` (SQLite) make a `ReadingSet`. `SlotCache` reads and writes cache files; `Fingerprint` hashes. `ScenarioPackage` is the folder. |
+| `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). Saving: `ScenarioDocument` (opens a folder off the main thread, saves after changes, checks the file every second, writes the cache on closing) and `ScenarioLibrary` (the Scenarios folder); `ScenarioFileMapping` turns the store into a `ScenarioFile` and back (`reload(from:)`), and works out fingerprints. |
 | `EditTheFutureMac` | `AppDelegate` (status item and hot-keys), `FloatingPanel`, `PanelController` (hosting, keys, scroll mapping, copy), `CommandRouter` (runs `Command`s, asks for confirmation), `HotKeyCenter` (Carbon hot-keys). |
 | `etf-bench` | Benchmarks that render the real panel. |
 
@@ -159,7 +173,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 180 tests in about 15 seconds.
+- **Tests:** `swift test` runs about 220 tests in about 25 seconds.
   - Store tests must `await store.waitUntilIdle()` before reading results.
   - `PanelViewTests` mounts the real panel in a window. Its `.runaway` scenario makes values huge, infinite and NaN within a few years.
 - **Benchmarks:** `swift run -c release etf-bench [section]`:
@@ -176,6 +190,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
     - Run the command and `await store.waitUntilIdle()`.
     - Lay out, display and run the run loop a few times.
     - Write a PNG with `cacheDisplay(in:to:)`.
+- **Saving:** the app reads and writes `~/Library/Application Support/Edit The Future/Scenarios`. To check outside edits, change `scenario.md` there while the app runs. Delete the folder to start again from the built-in scenario. In tests, `ScenarioDocument.open(_:now:watch: false)` and `checkFile(force: true)` avoid waiting for the timer, and `ScenarioDocument.cacheThreshold = 0` caches every slot.
 - **Crash reports:** `~/Library/Logs/DiagnosticReports/EditTheFuture-*.ips`. Everything after the first line is JSON, and the faulting thread's frames are symbolicated.
 
 ## Lessons learned
@@ -209,6 +224,13 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 - **Removing slots shifts indices.** Undo records refer to slots by their `id`, not their index, and results are remapped by `id` when the list changes.
   - Views must keep a slot's `id` (or the `SlotInfo` itself), never its index, and look the index up when they draw or act (`store.slotIndex(id:)`). After a removal, SwiftUI can draw a child view once more with the inputs its parent gave it last time, before the parent catches up. A chip that kept an index read past the end of `store.slots` and crashed the app when the last slot was removed.
   - The store's slot functions ignore an index with no slot, as a second line of defense.
+
+- **Saved scenarios** (DESIGN.md, 15):
+  - Folder listings give directory URLs a trailing slash, so two URLs for one folder can differ. `ScenarioPackage` normalizes its URL.
+  - JSON writers don't all keep every digit of a `Double`, so the cache writes event times and values as exact text (`FileNumber`).
+  - SQLite stores NaN as null and loses the sign of −0, and its date functions stop at the year 9999. Readings treat null as no reading and compare times as numbers.
+  - The writer compares meaning, not text, before rewriting a part. Comparing text made the first save rewrite `rate: 0.042` as `4.2%`, and drop or add `shows` and `as`.
+  - Event ids order events within a step, so they're part of the fingerprint. Events added in the app get the id reading the file would give them, or the cache would never match after a restart.
 
 ## Working with the user
 

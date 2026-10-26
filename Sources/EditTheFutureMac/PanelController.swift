@@ -86,6 +86,16 @@ final class PanelController {
         panel.orderOut(nil)
     }
 
+    /// Puts the panel away for good, when another scenario opens in its place.
+    func tearDown() {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        eventMonitor = nil
+        panel.orderOut(nil)
+        // Frees the frame's name for the next panel, which remembers the same frame.
+        panel.saveFrame(usingName: "EditTheFuturePanel")
+        panel.setFrameAutosaveName("")
+    }
+
     /// Shows the panel without taking keyboard focus from the app you're working in.
     func beginPeek() {
         isPeeking = true

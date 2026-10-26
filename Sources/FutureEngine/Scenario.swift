@@ -66,6 +66,10 @@ public final class Scenario {
     /// Slots shown together in the UI and on hardware. The engine itself has no limit.
     public static let bankSize = 8
 
+    /// The version of the engine's maths. Raise it whenever a change to the engine could change
+    /// results, so results saved by an older engine aren't used (docs/DESIGN.md, 15.5).
+    public static let engineVersion = 1
+
     public let start: Date
     public let calendar: Calendar
     public let seed: UInt64
@@ -78,11 +82,16 @@ public final class Scenario {
         let runner: any AnySlotRunner
         var authored: [Event]
         var recurring: [RecurringEvent]
+        /// In time order, so a step finds its own by binary search.
         var readings: [Reading]
         /// Events this slot generated, in time order.
         var generated: [Event] = []
         /// Set while the slot is computing a step, to catch same-step loops.
         var isStepping = false
+        /// Time spent in the model's steps, not counting the slots it reads, and how many steps that
+        /// covers. Decides whether the slot's results are worth saving.
+        var stepSeconds = 0.0
+        var timedSteps = 0
 
         init(name: String, runner: any AnySlotRunner, authored: [Event] = [], recurring: [RecurringEvent] = [],
              readings: [Reading] = []) {
@@ -92,6 +101,8 @@ public final class Scenario {
             self.recurring = recurring
             self.readings = readings
         }
+
+        var secondsPerStep: Double? { timedSteps > 0 ? stepSeconds / Double(timedSteps) : nil }
     }
 
     private var slots: [Slot] = []
@@ -107,7 +118,10 @@ public final class Scenario {
     /// All event routes, including ones resolved from subscriptions. Current after `validate()`.
     public private(set) var eventRoutes: [EventRoute] = []
 
-    public init(start: Date, calendar: Calendar = .utcGregorian, seed: UInt64 = 0x5EED_F07E, checkpointInterval: Int = 32) {
+    /// The seed scenarios use unless they choose their own.
+    public static let defaultSeed: UInt64 = 0x5EED_F07E
+
+    public init(start: Date, calendar: Calendar = .utcGregorian, seed: UInt64 = Scenario.defaultSeed, checkpointInterval: Int = 32) {
         self.start = start
         self.calendar = calendar
         self.seed = seed
@@ -214,9 +228,72 @@ public final class Scenario {
         return rule
     }
 
+    public func readings(in slot: SlotID) -> [Reading] { slots[slot.rawValue].readings }
+
     public func add(_ reading: Reading, to slot: SlotID) {
-        slots[slot.rawValue].readings.append(reading)
+        let list = slots[slot.rawValue].readings
+        slots[slot.rawValue].readings.insert(reading, at: Self.firstIndex(in: list, after: reading.time))
         invalidate(slot, from: reading.time)
+    }
+
+    /// Replaces the slot's readings. Results are kept up to the first reading that changed.
+    public func setReadings(_ readings: [Reading], for slot: SlotID) {
+        let old = slots[slot.rawValue].readings
+        let new = readings.sorted { $0.time < $1.time }
+        guard new != old else { return }
+        slots[slot.rawValue].readings = new
+        var index = 0
+        while index < old.count, index < new.count, old[index] == new[index] { index += 1 }
+        let changed = [old.indices.contains(index) ? old[index].time : nil,
+                       new.indices.contains(index) ? new[index].time : nil].compactMap { $0 }.min()
+        if let changed { invalidate(slot, from: changed) }
+    }
+
+    /// The first reading after `date`, by binary search.
+    private static func firstIndex(in readings: [Reading], after date: Date) -> Int {
+        var low = 0, high = readings.count
+        while low < high {
+            let mid = (low + high) / 2
+            if readings[mid].time <= date { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+
+    // MARK: Saved results
+
+    /// Everything the slot has computed, to save. nil when nothing is computed, or its model can't
+    /// save its state (docs/DESIGN.md, 15.5).
+    public func history(of slot: SlotID) -> SlotHistory? {
+        let record = slots[slot.rawValue]
+        guard var history = record.runner.history() else { return nil }
+        history.generated = record.generated
+        history.secondsPerStep = record.secondsPerStep ?? 0
+        return history
+    }
+
+    /// Puts back results saved earlier, so they needn't be computed again. The caller vouches
+    /// that they came from the same model, events, readings and upstream slots. Returns false,
+    /// changing nothing, when they don't fit the slot or don't reach further than what it has.
+    @discardableResult
+    public func restore(_ history: SlotHistory, to slot: SlotID) -> Bool {
+        try? prepareIfNeeded()
+        let record = slots[slot.rawValue]
+        guard history.count > record.runner.computedCount, record.runner.restore(history) else { return false }
+        let last = record.runner.times.last ?? start
+        record.generated = history.generated.filter { $0.time <= last }
+        record.stepSeconds = history.secondsPerStep * Double(history.count)
+        record.timedSteps = history.secondsPerStep > 0 ? history.count : 0
+        return true
+    }
+
+    /// How long one of the slot's steps takes to compute, on average, or nil before any have.
+    public func secondsPerStep(of slot: SlotID) -> Double? {
+        slots[slot.rawValue].secondsPerStep
+    }
+
+    /// Roughly how long the slot's results so far took to compute.
+    public func computeCost(of slot: SlotID) -> Double {
+        (slots[slot.rawValue].secondsPerStep ?? 0) * Double(slots[slot.rawValue].runner.computedCount)
     }
 
     /// Events the slot generated up to `date`, computing as needed.
@@ -511,8 +588,14 @@ public final class Scenario {
                 events += try deliveredEvents(route, index: index, grid: runner.grid)
             }
             if events.count > 1 { events.sort(by: Event.stepOrder) }
-            for reading in slots[id.rawValue].readings where window.contains(reading.time) {
-                readings.append(reading)
+            let all = slots[id.rawValue].readings
+            if !all.isEmpty {
+                var next = Self.firstIndex(in: all, after: window.lower)
+                if window.includesLower { while next > 0 && all[next - 1].time == window.lower { next -= 1 } }
+                while next < all.count, all[next].time <= window.upper {
+                    readings.append(all[next])
+                    next += 1
+                }
             }
         }
 
@@ -520,6 +603,11 @@ public final class Scenario {
         let context = StepContext(index: index, window: window, stepRate: runner.descriptor.stepRate,
                                   scenarioStart: start, inputs: inputs, events: events, readings: readings,
                                   seed: slotSeed, calendar: calendar)
+        let began = DispatchTime.now().uptimeNanoseconds
+        defer {
+            slot.stepSeconds += Double(DispatchTime.now().uptimeNanoseconds &- began) / 1e9
+            slot.timedSteps += 1
+        }
         do {
             if index == 0 {
                 try runner.computeStart(context)

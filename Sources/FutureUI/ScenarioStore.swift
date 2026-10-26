@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import FutureDocument
 import FutureEngine
 import FutureFormula
 import FutureScript
@@ -114,11 +115,13 @@ public final class ScenarioStore {
     /// Slot positions in a bank, as on the chips and hardware.
     public static let bankSize = Scenario.bankSize
 
-    public let name: String
+    public internal(set) var name: String
     /// The slots in position order. Positions can have gaps; `SlotInfo.key` is the position.
     public private(set) var slots: [SlotInfo]
     public let now: Date
-    public let start: Date
+    public private(set) var start: Date
+    /// The scenario's own seed, or nil for the engine's (docs/DESIGN.md, 4.4).
+    public private(set) var seed: UInt64?
     /// Connections and event routes between the slots that run.
     public private(set) var linkCount: Int
 
@@ -198,6 +201,10 @@ public final class ScenarioStore {
     /// Called when the command bar asks for something only the app can do (copying).
     @ObservationIgnored public var onAppAction: ((CommandBarAction) -> Void)?
 
+    /// Called whenever the scenario changes in a way its file records: slots, models, values,
+    /// events. The scenario's document saves then (docs/DESIGN.md, 15).
+    @ObservationIgnored public var onScenarioChange: (() -> Void)?
+
     /// Every slot with its model, values and events, in position order. `slots` is built from these.
     @ObservationIgnored var configs: [SlotConfig]
     @ObservationIgnored private var undoStack: [Change] = []
@@ -213,25 +220,15 @@ public final class ScenarioStore {
     /// Which way the view last scrolled; fetches reach further that way.
     @ObservationIgnored private var scrollDirection = 1.0
 
-    public init(definition: ScenarioDefinition, now: Date = Date()) throws {
-        var configs: [SlotConfig] = []
-        for spec in definition.slots {
-            let taken = Set(configs.map(\.position))
-            guard let position = spec.position.flatMap({ taken.contains($0) ? nil : $0 })
-                    ?? (0..<Self.bankSize).first(where: { !taken.contains($0) }) else { break }
-            configs.append(SlotConfig(position: position, name: spec.name, model: spec.model, kind: spec.kind,
-                                      formula: spec.formula, variable: spec.variable, color: spec.color,
-                                      format: spec.format, values: spec.values))
-        }
-        for event in definition.events {
-            guard let index = configs.firstIndex(where: { $0.name == event.slot }) else { continue }
-            configs[index].events.append(event.event)
-        }
-        configs.sort { $0.position < $1.position }
+    /// - Parameter savedResults: results saved earlier by slot name (docs/DESIGN.md, 15.5), already
+    ///   checked against the slots' fingerprints. They're put back before anything is computed.
+    public init(definition: ScenarioDefinition, now: Date = Date(), savedResults: [String: SlotHistory] = [:]) throws {
+        let configs = Self.configs(from: definition)
         guard !configs.isEmpty else { throw EngineError.invalidSlotName("") }
         let assembly = Self.assemble(configs)
 
-        self.engine = try ScenarioEngine(start: definition.start, layout: assembly.layout)
+        self.engine = try ScenarioEngine(start: definition.start, seed: definition.seed ?? Scenario.defaultSeed,
+                                         layout: assembly.layout)
         self.configs = configs
         self.slots = assembly.slots
         self.linkCount = assembly.linkCount
@@ -239,13 +236,41 @@ public final class ScenarioStore {
         self.computedSlots = assembly.slots.map(\.id)
         self.name = definition.name
         self.start = definition.start
+        self.seed = definition.seed
         self.now = now
-        self.cursor = now
+        self.cursor = max(now, definition.start)
         let year = 365.2425 * 86_400
         let frameStart = max(definition.start, now.addingTimeInterval(-5 * year))
         self.frame = TimeFrame(start: frameStart, end: frameStart.addingTimeInterval(19 * year))
-        self.eventDraft = makeDraft(slotIndex: 0, date: now)
+        self.eventDraft = makeDraft(slotIndex: 0, date: cursor)
+        let restore = Dictionary(uniqueKeysWithValues: configs.enumerated().compactMap { index, config in
+            savedResults[config.name].map { (index, $0) }
+        })
+        if !restore.isEmpty { enqueue(.mutate(.restore(restore))) }
         requestData()
+    }
+
+    /// The slots a definition describes, in position order. A slot without a free position is left out.
+    nonisolated static func configs(from definition: ScenarioDefinition) -> [SlotConfig] {
+        var configs: [SlotConfig] = []
+        for spec in definition.slots {
+            let taken = Set(configs.map(\.position))
+            guard let position = spec.position.flatMap({ taken.contains($0) ? nil : $0 })
+                    ?? (0..<Scenario.bankSize).first(where: { !taken.contains($0) }) else { break }
+            var config = SlotConfig(position: position, name: spec.name, model: spec.model, kind: spec.kind,
+                                    formula: spec.formula, variable: spec.variable, color: spec.color,
+                                    format: spec.format, values: spec.values, events: spec.events, rules: spec.rules)
+            config.readings = spec.readings
+            config.problem = spec.problem
+            config.showsInFile = spec.showsInFile
+            config.formatInFile = spec.formatInFile
+            configs.append(config)
+        }
+        for event in definition.events {
+            guard let index = configs.firstIndex(where: { $0.name == event.slot }) else { continue }
+            configs[index].events.append(event.event)
+        }
+        return configs.sorted { $0.position < $1.position }
     }
 
     public var focused: SlotInfo { slots[focusedIndex] }
@@ -265,6 +290,11 @@ public final class ScenarioStore {
         var models: [(any AuthoredModel)?] = []
         var errors: [Int: String] = [:]
         for (index, config) in configs.enumerated() {
+            if let problem = config.problem {
+                models.append(nil)
+                errors[index] = problem
+                continue
+            }
             do {
                 models.append(try config.makeModel())
             } catch {
@@ -284,7 +314,8 @@ public final class ScenarioStore {
             } : nil)
             slots.append(slotInfo(config, model: model, paused: paused))
         }
-        let layout = ScenarioEngine.Layout(slots: setups, events: configs.map(\.events), rules: configs.map(\.rules))
+        let layout = ScenarioEngine.Layout(slots: setups, events: configs.map(\.events), rules: configs.map(\.rules),
+                                           readings: configs.map(\.readings.set))
         return Assembly(slots: slots, layout: layout, linkCount: report.linkCount, descriptors: models.map { $0?.descriptor })
     }
 
@@ -357,6 +388,7 @@ public final class ScenarioStore {
         enqueue(.mutate(.layout(assembly.layout)))
         requestData()
         updateDraftPreview()
+        onScenarioChange?()
     }
 
     /// Loads every script again with the current files in the Libraries folder.
@@ -470,6 +502,10 @@ public final class ScenarioStore {
 
     public func add(_ event: Event, toSlotAt index: Int) {
         guard configs.indices.contains(index) else { return }
+        // The id reading the scenario's file would give it, so saved results still match (DESIGN.md, 15.2).
+        var event = event
+        event.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(event),
+                                       taken: Set(configs[index].events.map(\.id)))
         configs[index].events.append(event)
         undoStack.append(.addedEvent(slot: configs[index].id, event))
         redoStack.removeAll()
@@ -478,6 +514,9 @@ public final class ScenarioStore {
 
     public func add(_ rule: RecurringEvent, toSlotAt index: Int) {
         guard configs.indices.contains(index) else { return }
+        var rule = rule
+        rule.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(rule),
+                                      taken: Set(configs[index].rules.map(\.id)))
         configs[index].rules.append(rule)
         undoStack.append(.addedRule(slot: configs[index].id, rule))
         redoStack.removeAll()
@@ -535,6 +574,36 @@ public final class ScenarioStore {
         enqueue(.mutate(mutation))
         requestData()
         updateDraftPreview()
+        onScenarioChange?()
+    }
+
+    /// Forgets undo and redo, when the scenario is replaced from its file with a new start or seed.
+    func clearUndo() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+    }
+
+    /// Replaces the scenario's name, start and seed, and its slots, building the engine's scenario
+    /// again. Undo starts afresh.
+    func replaceScenario(name: String, start: Date, seed: UInt64?, configs newConfigs: [SlotConfig], focus: UUID?) {
+        self.name = name
+        self.start = start
+        self.seed = seed
+        configs = newConfigs.sorted { $0.position < $1.position }
+        clearUndo()
+        let assembly = Self.assemble(configs)
+        enqueue(.mutate(.rebuild(start: start, seed: seed ?? Scenario.defaultSeed, layout: assembly.layout)))
+        if cursor < start { cursor = start }
+        if frame.start < start { frame = TimeFrame(start: start, end: start.addingTimeInterval(frame.span)) }
+        refreshSlots(focus: focus)
+    }
+
+    /// Results worth saving (docs/DESIGN.md, 15.5), by slot index in `configs` as it is now. The
+    /// engine answers after everything already queued.
+    func resultsToSave(minimumSeconds: Double) async -> [Int: SlotHistory] {
+        await withCheckedContinuation { reply in
+            enqueue(.export(minimumSeconds: minimumSeconds, reply: reply))
+        }
     }
 
     // MARK: Engine queue
@@ -544,6 +613,7 @@ public final class ScenarioStore {
         case fetch(ScenarioEngine.FetchRequest)
         case preview(ScenarioEngine.PreviewRequest)
         case find(ScenarioEngine.FindRequest)
+        case export(minimumSeconds: Double, reply: CheckedContinuation<[Int: SlotHistory], Never>)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
@@ -570,7 +640,7 @@ public final class ScenarioStore {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
-        case .mutate, .find: break
+        case .mutate, .find, .export: break
         }
         engineQueue.append(operation)
         guard !isDraining else { return }
@@ -587,6 +657,7 @@ public final class ScenarioStore {
                 let result = await engine.preview(request)
                 if case .model = request.change { receiveParameterPreview(result) } else { receive(result) }
             case .find(let request): receive(await engine.find(request))
+            case .export(let minimum, let reply): reply.resume(returning: await engine.resultsToSave(minimumSeconds: minimum))
             }
         }
         isDraining = false

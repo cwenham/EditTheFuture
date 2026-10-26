@@ -222,6 +222,13 @@ public protocol TimelineModel: Sendable {
     /// The same values in `descriptor.readable` order. The engine stores history this way, which is
     /// much faster than a dictionary per step. The default builds it from `values(of:)`.
     func readableValues(of state: State) -> [Double]
+
+    /// The state as numbers, so a slot's results can be saved and loaded again (docs/DESIGN.md,
+    /// 15.5). nil when the model can't save its state, which is the default.
+    func savedNumbers(of state: State) -> [Double]?
+
+    /// The state from `savedNumbers(of:)`, or nil when the numbers don't fit this model.
+    func restoredState(from numbers: [Double]) -> State?
 }
 
 extension TimelineModel {
@@ -229,6 +236,10 @@ extension TimelineModel {
         let values = values(of: state)
         return descriptor.readable.map { values[$0.name] ?? .nan }
     }
+
+    public func savedNumbers(of state: State) -> [Double]? { nil }
+
+    public func restoredState(from numbers: [Double]) -> State? { nil }
 }
 
 /// A small, fast random generator (SplitMix64) seeded per slot and step.

@@ -1,4 +1,5 @@
 import Foundation
+import FutureDocument
 import FutureEngine
 import FutureFormula
 import FutureScript
@@ -24,6 +25,13 @@ struct SlotConfig: Sendable, Equatable {
     var values: [String: Double] = [:]
     var events: [Event] = []
     var rules: [RecurringEvent] = []
+    var readings = SlotReadings.none
+    /// Why the slot can't run, from a mistake in its section of scenario.md, such as a missing model.
+    var problem: String?
+    /// Whether scenario.md says what the graph shows (`shows`) and how (`as`). When it doesn't,
+    /// they're left out while they're still the model's own.
+    var showsInFile = true
+    var formatInFile = false
 
     /// Identifies the model with the slot's values, so the engine can tell what changed.
     var modelKey: String {
@@ -51,6 +59,19 @@ struct SlotConfig: Sendable, Equatable {
         case .plugin, .remote: throw ScriptError("\(kind.title) models can't run yet.")
         }
     }
+}
+
+/// Where a slot's readings come from, and what they say (docs/DESIGN.md, 15.3 and 15.4).
+public struct SlotReadings: Sendable, Equatable {
+    public var sources: [ReadingSource]
+    public var set: ReadingSet
+
+    public init(sources: [ReadingSource], set: ReadingSet) {
+        self.sources = sources
+        self.set = set
+    }
+
+    public static let none = SlotReadings(sources: [], set: .empty)
 }
 
 /// A parameter or starting value as the Slot tab shows it (docs/UI.md, 5.7).

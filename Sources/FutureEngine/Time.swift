@@ -60,6 +60,53 @@ public enum StepRate: Hashable, Sendable, Codable {
     }
 
     var isValid: Bool { calendarStep.count > 0 }
+
+    /// "1 month", "2 weeks": the formula language's step units, as a saved scenario writes them.
+    public var text: String {
+        let (count, unit): (Int, String)
+        switch self {
+        case .seconds(let n): (count, unit) = (n, "second")
+        case .minutes(let n): (count, unit) = (n, "minute")
+        case .hours(let n): (count, unit) = (n, "hour")
+        case .days(let n): (count, unit) = (n, "day")
+        case .weeks(let n): (count, unit) = (n, "week")
+        case .months(let n): (count, unit) = (n, "month")
+        case .quarters(let n): (count, unit) = (n, "quarter")
+        case .years(let n): (count, unit) = (n, "year")
+        }
+        return "\(count) \(unit)\(count == 1 ? "" : "s")"
+    }
+
+    /// Reads "1 month", "2 weeks", "month" or "monthly". nil for anything else.
+    public init?(text: String) {
+        let words = text.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        let adverbs: [String: StepRate] = ["hourly": .hours(1), "daily": .days(1), "weekly": .weeks(1),
+                                           "fortnightly": .weeks(2), "monthly": .months(1), "quarterly": .quarters(1),
+                                           "yearly": .years(1), "annually": .years(1)]
+        if words.count == 1, let rate = adverbs[words[0]] {
+            self = rate
+            return
+        }
+        let count: Int, unit: String
+        switch words.count {
+        case 1: (count, unit) = (1, words[0])
+        case 2:
+            guard let number = Int(words[0]), number > 0, number <= 1_000_000 else { return nil }
+            (count, unit) = (number, words[1])
+        default: return nil
+        }
+        switch unit.hasSuffix("s") ? String(unit.dropLast()) : unit {
+        case "second", "sec": self = .seconds(count)
+        case "minute", "min": self = .minutes(count)
+        case "hour": self = .hours(count)
+        case "day": self = .days(count)
+        case "week": self = .weeks(count)
+        case "month": self = .months(count)
+        case "quarter": self = .quarters(count)
+        case "year": self = .years(count)
+        default: return nil
+        }
+    }
 }
 
 extension Calendar {

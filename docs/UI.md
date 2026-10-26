@@ -330,7 +330,12 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 ## 6. Menu bar item
 
 - **Values:** the current scenario's values now and at a pinned date.
-- **Actions:** Show panel, Copy snapshot, Add event at now, Open scenario.
+- **Actions:** Show panel, Copy snapshot, Add event at now.
+- **Scenarios** (DESIGN.md, 15):
+  - **Open Scenario…** picks a scenario's `.etf` folder, or the `scenario.md` in it. The one open now is saved and closed first.
+  - **Edit scenario.md** opens the file in the Mac's editor for Markdown, or TextEdit when there isn't one. Changes saved there show in the panel within a couple of seconds.
+  - **Show Scenario in Finder** and **Open Scenarios Folder**.
+  - A scenario that can't be opened says why, with Try Again, Edit scenario.md and Cancel (Quit when nothing else is open).
 - **Scripts:** Open Script Libraries Folder (made if it isn't there) and Reload Script Libraries, which loads every script again with the folder's current files.
 - **Status:** controller and paired-device status lines.
 - **Also:** Settings and Quit.
