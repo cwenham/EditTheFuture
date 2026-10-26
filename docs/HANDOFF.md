@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-26, on branch `feature/scripting` (Lua and Python scripts, not committed yet), from `main` at `85d9ac2`.
+Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `6a2875b` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -30,7 +30,9 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `4b7b7de` | Now button, `goto` for values, far-future readout fix |
 | `bc8cc29` | Model library and picker, adding, changing, moving and removing slots, the Slot tab, parameter ranges and labels in formulas, paused slots |
 | `6764b20` | The formula editor: colouring, completion, insert palette, checks with one-click fixes, preview, apply and revert. The wheel moves time only over the graphs. |
-| `feature/scripting` | Lua and Python scripts as models, on the Mac and ready for iOS (DESIGN.md, 6.4). Not committed yet. |
+| `85d9ac2` | New features and fixes start on their own branches. |
+| `7fd8363` | Lua and Python scripts as models, on the Mac and ready for iOS (DESIGN.md, 6.4). |
+| `6a2875b` | The model picker can add script models; `fetch-python.sh` keeps Python in the build. Merged from `feature/scripting`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -211,7 +213,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, merged by fast-forward.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
