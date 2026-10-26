@@ -2,6 +2,7 @@
 import AppKit
 import Carbon
 import FutureCommands
+import FutureScript
 import FutureUI
 
 @MainActor
@@ -13,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Python takes a moment to start, so it starts now, off the main thread (docs/DESIGN.md, 6.4).
+        DispatchQueue.global(qos: .utility).async { ScriptPrograms.prepare(.python) }
         do {
             let store = try ScenarioStore(definition: .homeAndMoney)
             let panel = PanelController(store: store)
@@ -75,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Mouse Has a Horizontal Wheel", action: #selector(toggleHorizontalWheel), keyEquivalent: "").target = self
         menu.addItem(.separator())
+        menu.addItem(withTitle: "Open Script Libraries Folder", action: #selector(openLibraries), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Reload Script Libraries", action: #selector(reloadLibraries), keyEquivalent: "").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Edit The Future", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
         statusItem = item
@@ -87,6 +93,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         panel.addEvent(at: panel.store.now)
     }
     @objc private func copySnapshot() { panel?.copy(.everything) }
+
+    /// Where people put Lua and Python files that scripts can import.
+    @objc private func openLibraries() {
+        do {
+            try ScriptPrograms.createLibrariesFolders()
+            NSWorkspace.shared.open(ScriptPrograms.librariesFolder)
+        } catch {
+            store?.say("Couldn't make the Libraries folder: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    @objc private func reloadLibraries() { store?.reloadScripts() }
 
     /// Overrides the automatic detection: with a horizontal wheel, the vertical wheel zooms.
     @objc private func toggleHorizontalWheel() {

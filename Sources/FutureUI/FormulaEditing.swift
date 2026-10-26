@@ -1,6 +1,7 @@
 import Foundation
 import FutureEngine
 import FutureFormula
+import FutureScript
 
 /// What's wrong with a formula being edited (docs/UI.md, 5.7).
 public struct FormulaCheck: Sendable, Equatable {
@@ -87,12 +88,12 @@ extension ScenarioStore {
     @discardableResult
     public func applyFormula(forSlotAt index: Int) -> Bool {
         guard isSlot(index), let draft = formulaDrafts[configs[index].id] else { return false }
-        let model: FormulaModel
+        let model: any AuthoredModel
         do {
-            model = try FormulaModel(draft, name: configs[index].name)
+            model = try configs[index].makeModel(source: draft)
         } catch {
             updateFormulaCheck(forSlotAt: index)
-            say("Fix the formula's mistakes first.", isError: true)
+            say("Fix the \(slots[index].noun)'s mistakes first.", isError: true)
             return false
         }
         var config = configs[index]
@@ -101,13 +102,13 @@ extension ScenarioStore {
         if !outputs.contains(config.variable) { config.variable = outputs.first ?? model.parameterNames.first ?? config.variable }
         let declared = Set(model.parameterNames + model.startingValueNames)
         config.values = config.values.filter { declared.contains($0.key) }
-        if config.model != "Custom formula" && !config.model.hasSuffix(" (edited)") { config.model += " (edited)" }
+        if !config.model.hasPrefix("Custom ") && !config.model.hasSuffix(" (edited)") { config.model += " (edited)" }
         formulaCheckTask?.cancel()
         formulaDrafts[config.id] = nil
         if previewSlot == config.id { clearSlotPreview() }
         applySlotChange(configs.replacing(index, with: config), focus: config.id)
         updateFormulaCheck(forSlotAt: index)
-        say("Applied the new formula to \(slots[index].title)")
+        say("Applied the new \(slots[index].noun) to \(slots[index].title)")
         return true
     }
 
@@ -117,11 +118,16 @@ extension ScenarioStore {
     public func checkFormula(_ text: String, forSlotAt index: Int) -> FormulaCheck {
         guard isSlot(index) else { return FormulaCheck(text: text, diagnoses: [], compiles: true, runs: true) }
         let config = configs[index]
-        let model: FormulaModel
+        let model: any AuthoredModel
         do {
-            model = try FormulaModel(text, name: config.name, values: config.values)
+            model = try config.makeModel(source: text)
         } catch let error as FormulaError {
             return FormulaCheck(text: text, diagnoses: [FormulaDiagnoser.diagnose(error, in: text)], compiles: false, runs: false)
+        } catch let error as ScriptError {
+            let range = error.line.flatMap { FormulaDiagnoser.lineRange($0, in: text) }
+            return FormulaCheck(text: text, diagnoses: [FormulaDiagnosis(severity: .error, title: Self.sentence(error.message),
+                                                                         line: error.line, range: range)],
+                                compiles: false, runs: false)
         } catch {
             return FormulaCheck(text: text, diagnoses: [FormulaDiagnosis(severity: .error, title: String(describing: error))],
                                 compiles: false, runs: false)
@@ -135,6 +141,13 @@ extension ScenarioStore {
         var diagnoses: [FormulaDiagnosis] = []
         if let problem = after.problems[index] {
             diagnoses.append(diagnose(problem, in: text, slotAt: index))
+        }
+        // An error the applied model raised while running, such as a script's.
+        if text == config.formula, let failure = slotFailures[config.id] {
+            let range = failure.line.flatMap { FormulaDiagnoser.lineRange($0, in: text) }
+            diagnoses.append(FormulaDiagnosis(severity: .error, title: Self.sentence(failure.message),
+                                              detail: "It stopped while working out \(DateText.monthYear(failure.date)).",
+                                              line: failure.line, range: range))
         }
         // Slots that read this one and would stop running.
         for (other, problem) in after.problems.sorted(by: { $0.key < $1.key }) where other != index && before.problems[other] == nil {
@@ -152,9 +165,10 @@ extension ScenarioStore {
             guard let other = configs.firstIndex(where: { $0.name == name }), descriptors.indices.contains(other) else { return nil }
             return descriptors[other]
         }
+        let kind = configs[index].kind
         func fixReferences(from old: String, to new: String, title: String) -> FormulaFix {
-            let tokens = FormulaDiagnoser.references(toSlot: old.components(separatedBy: ".")[0], in: text)
-                .filter { $0.text == old || $0.text.hasPrefix(old + ".") }
+            let tokens = Self.references(toSlot: old.components(separatedBy: ".")[0], in: text, kind: kind)
+                .filter { $0.text == old || $0.text.hasPrefix(old + ".") || $0.text.hasPrefix(old + "[") }
             var source = text
             for token in tokens.sorted(by: { $0.range.location > $1.range.location }) {
                 source = FormulaDiagnoser.replacing([NSRange(location: token.range.location, length: (old as NSString).length)],
@@ -163,7 +177,7 @@ extension ScenarioStore {
             return FormulaFix(title: title, source: source)
         }
         func firstReference(to slot: String) -> NSRange? {
-            FormulaDiagnoser.references(toSlot: slot, in: text).first?.range
+            Self.references(toSlot: slot, in: text, kind: kind).first?.range
         }
 
         switch problem {
@@ -197,8 +211,8 @@ extension ScenarioStore {
             let own = configs[index].name
             let position = names.firstIndex(of: own) ?? 0
             let next = names.indices.contains(position + 1) ? names[position + 1] : names.first ?? own
-            let references = FormulaDiagnoser.references(toSlot: next, in: text)
-                .filter { !text.utf16.dropFirst(NSMaxRange($0.range)).starts(with: "[".utf16) }
+            let references = Self.references(toSlot: next, in: text, kind: kind)
+                .filter { !$0.text.hasSuffix("[t-1]") && !text.utf16.dropFirst(NSMaxRange($0.range)).starts(with: "[".utf16) }
             var fixes: [FormulaFix] = []
             if let reference = references.first {
                 let source = references.sorted { $0.range.location > $1.range.location }
@@ -220,13 +234,45 @@ extension ScenarioStore {
         }
     }
 
+    /// Adds an error the draft raised in the preview to its check: loading a script finds only
+    /// some mistakes, and the rest show up when it runs.
+    func noteDraftFailure(_ failure: ScenarioEngine.SlotFailure, inSlot id: UUID) {
+        guard let index = slotIndex(id: id), formulaDrafts[id] != nil, let check = formulaChecks[id],
+              check.text == formulaText(forSlotAt: index) else { return }
+        let text = check.text
+        let diagnosis = FormulaDiagnosis(severity: .error, title: Self.sentence(failure.message),
+                                         detail: "The preview stopped after \(DateText.monthYear(failure.date)).",
+                                         line: failure.line, range: failure.line.flatMap { FormulaDiagnoser.lineRange($0, in: text) })
+        guard !check.diagnoses.contains(diagnosis) else { return }
+        formulaChecks[id] = FormulaCheck(text: text, diagnoses: [diagnosis] + check.diagnoses, compiles: check.compiles, runs: check.runs)
+    }
+
+    /// Where a formula or script names another slot: `Climate.temp` in a formula, `"Climate.temp"` in a script.
+    nonisolated static func references(toSlot slot: String, in text: String, kind: ModelKind) -> [(range: NSRange, text: String)] {
+        switch kind {
+        case .script(let language): return ScriptCompleter.references(toSlot: slot, in: text, language: language)
+        default: return FormulaDiagnoser.references(toSlot: slot, in: text).map { ($0.range, $0.text) }
+        }
+    }
+
+    /// A message as a sentence: capitalized, ending in a full stop.
+    nonisolated static func sentence(_ message: String) -> String {
+        var text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Names from the code, like s.balance or param, keep their case.
+        let firstWord = text.prefix { !$0.isWhitespace }
+        let isCode = firstWord.contains { ".(_\"[".contains($0) } || ["param", "init", "output", "input", "every", "timeunit",
+                                                                         "emits", "emit", "on", "step", "start"].contains(String(firstWord))
+        if !isCode, let first = text.first, first.isLowercase { text = first.uppercased() + text.dropFirst() }
+        if let last = text.last, !".?!".contains(last) { text += "." }
+        return text
+    }
+
     // MARK: Preview
 
     /// Shows the slot's line with the draft, dashed, when it can run.
     private func previewFormula(_ text: String, forSlotAt index: Int, check: FormulaCheck) {
         let config = configs[index]
-        guard formulaDrafts[config.id] != nil, check.runs,
-              let model = try? FormulaModel(text, name: config.name, values: config.values) else {
+        guard formulaDrafts[config.id] != nil, check.runs, let model = try? config.makeModel(source: text) else {
             if previewSlot == config.id { clearSlotPreview() }
             return
         }

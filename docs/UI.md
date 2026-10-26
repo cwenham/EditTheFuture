@@ -232,19 +232,19 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 **Models and slots are separate things:**
 - A **model** is a reusable definition: a formula, a script or a plug-in. The model library lists them.
 - A **slot** holds one model, with its own name, color, parameter values, events and readings. Two slots can hold the same model, for example two savings accounts.
-- Formulas, and later scripts, are copied into the slot when it's added, so changing one slot never changes another. Plug-ins will be referred to by ID and version, since there's no source to copy.
+- Formulas and scripts are copied into the slot when it's added, so changing one slot never changes another. Plug-ins will be referred to by ID and version, since there's no source to copy.
 - **Slots keep their positions.** Removing one leaves a gap, so the others keep their numbers, colors and hardware buttons. A scenario always keeps at least one slot.
 
 **The model picker** is a popover. It opens from an empty chip or its menu to add a model, and from a chip's Change model… or the Slot tab's Change… to give a slot a different one.
-- A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics, Blank and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). Blank has a small formula to start your own from; adding it opens the Formula tab.
+- A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics, Blank and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). Blank has a small formula, a small Lua script and a small Python script to start your own from; adding one opens the Formula tab.
 - Changing a model starts on the slot's current model.
-- Each model shows its kind (Formula for now; later Lua, Python, Plug-in or Remote) and a one-line description.
+- Each model shows its kind (Formula, Lua or Python; later Plug-in or Remote) and a one-line description. Python models are listed only when the app includes Python (DESIGN.md, 6.4).
 - The detail shows a preview of the model's line over 20 years with its defaults, its parameters and starting values, its step, and the events it handles and sends. The preview is computed off the main thread. A model that reads another slot, like Energy bill, has no preview on its own.
 - **Add to slot N** adds the model with its defaults, focuses the slot and opens the Slot tab. ↩ does the same, and Esc closes the picker.
 - **Changing** a slot's model keeps the slot's name, color, events and readings. Parameter and starting values carry over wherever the new model has one of the same name. The picker says when some of the slot's events won't apply ("2 deposit events won't apply to this model"). They're kept, but ignored.
 
 **The Slot tab** in the side pane (⌘I) shows the focused slot:
-- **Name.** Names start with a letter and can use letters, digits and spaces. Formulas write them without spaces: "Rainy day fund" is `RainyDayFund`. Renaming a slot updates the formulas in other slots that refer to it, so `Climate.temp` becomes `Weather.temp`.
+- **Name.** Names start with a letter and can use letters, digits and spaces. Formulas write them without spaces: "Rainy day fund" is `RainyDayFund`. Renaming a slot updates the formulas and scripts in other slots that refer to it, so `Climate.temp` becomes `Weather.temp`, and `"Climate.temp"` in a script becomes `"Weather.temp"`.
 - **Model:** its name and kind, with Change….
 - **Parameters:** each has its label and value, and a slider when the model gives it a range.
   - These are the values the slot starts with. Changes from a date are events: they're added in the Event tab and listed under the slider ("Changes to 4.0% from Jun 2027"). "Change from a date…" opens the Event tab, ready to set that parameter.
@@ -268,9 +268,16 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 A paused slot shows "Paused" and the reason in place of its line and values, and its chip shows a pause symbol. It never shows stale numbers. It runs again as soon as the problem goes away, for example after undoing a removal.
 
+**Stopped slots:** a script that raises an error while running stops at that step.
+- Its line ends there.
+- The graph shows "Stopped", the line number and the message at its top, and a lane shows them at its right.
+- The footer says when it stopped ("Fails stopped after Jan 2030: line 4: too far").
+- The Formula tab lists the error at its line.
+- Any edit clears it. If the error is still there, the next computation finds it again.
+
 **Command bar:** `add savings account` adds a model to the first free slot, `add loan to 7` to slot 7, and `remove climate` asks to remove a slot in the Slot tab. 1–8 focus by position; an empty position says how to fill it.
 
-**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula. The side pane widens to 480 points while it shows.
+**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula, or its script (Edit script…). The side pane widens to 480 points while it shows.
 - **The editor:** SF Mono with line numbers. Keywords are purple, numbers amber, `[t]` and `[t-1]` green, other slots' values and `event.amount` blue, built-ins cyan, labels green and comments grey.
 - **Completion:** typing a name opens a list under the caret of what fits there.
   - In an expression: this formula's values and parameters, other slots (choosing one goes straight on to its values), functions (the caret lands between the brackets), built-ins and `and`, `or`, `not`.
@@ -286,11 +293,24 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 - **Preview:** while the formula has no mistakes and the slot would run, the graph shows its new line dashed.
 - **Apply** (⌘↩) makes the draft the slot's formula; undo puts the old one back. The model's name gets "(edited)". If the value the graph showed is gone, it shows the formula's first value instead. Mistakes block Apply; warnings don't, and the slots they name pause.
 - **Revert** puts the slot's formula back. A draft is kept per slot until it's applied or reverted, so switching tabs or slots loses nothing; "Not applied" marks one.
+- **Scripts** (Lua and Python, DESIGN.md 6.4) use the same tab, with these differences:
+  - **Colouring by language.** The script API (`every`, `param`, `emit`…) is cyan, the language's own functions and modules pink, keywords purple, and other slots' references inside strings and `s.`, `t.` and `e.` fields blue.
+  - **Completion:**
+    - Inside a string: other slots, then a slot's values and events.
+    - After `s.`: the script's parameters, values and inputs.
+    - After `t.`: the time fields. After `e.`: an event's kind, slot and date.
+    - Elsewhere: the script API, the language's functions and keywords.
+  - **Insert palette:** the script API, inserted as a template in the script's language; `t.` fields; this script's `s.` names; other slots' values and events.
+  - **Checks:**
+    - Loading the script finds syntax errors and mistakes in declarations, at their line.
+    - The dashed preview runs the draft and adds any error it raises, such as "s.wrost isn't declared. … Did you mean s.worst?".
+    - Problems with other slots point inside the reference string, with the same fixes as formulas.
+  - **Applying** a blank model's script keeps its name, such as "Custom Lua script", without "(edited)".
 
 **Planned:**
 - **Variables, Events and Readings** beside the formula, as in the mockup, with each value at the cursor.
 - **Saving to the library:** a slot's model saved as "Your models".
-- **Scripts and plug-ins** in the picker (DESIGN.md, 6).
+- **Plug-ins** in the picker (DESIGN.md, 6).
 - **Links view (⌘L):** slots as nodes, connections as wires.
   - Solid wire: same step. Dashed wire: previous step. Wires in a loop turn red.
   - Dragging from an output to another slot creates a connection, with resampling and timing pickers.
@@ -311,6 +331,7 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 
 - **Values:** the current scenario's values now and at a pinned date.
 - **Actions:** Show panel, Copy snapshot, Add event at now, Open scenario.
+- **Scripts:** Open Script Libraries Folder (made if it isn't there) and Reload Script Libraries, which loads every script again with the folder's current files.
 - **Status:** controller and paired-device status lines.
 - **Also:** Settings and Quit.
 - **Icon:** monochrome, so it works in light and dark menu bars.
@@ -396,7 +417,9 @@ Sections:
   - Before anything reaches the engine, the store compiles each model and checks how the slots read each other (`Wiring.check`, DESIGN.md 5.9). Slots that can't run are paused, not dropped.
   - The engine gets the whole layout. When only models or values changed, it swaps just those models, and only those slots and the slots that read them are recomputed. Adding, removing, moving or renaming rebuilds the scenario.
   - The latest results follow their slots when the list changes, so lines stay on screen until the engine has new ones.
-  - The formula editor is an `NSTextView` (TextKit 1) with an `NSRulerView` for line numbers. `FormulaHighlighter` colours the whole text after each change; formulas are short enough that this costs nothing noticeable.
+  - **Models:** a slot's model is any `AuthoredModel`, a `FormulaModel` or a `ScriptModel`; `SlotConfig.makeModel` builds the right one from its kind.
+  - **Errors while computing:** errors a slot raises come back with each fetch as a `SlotFailure`, and the store keeps them by slot (`slotFailures`). A preview's error comes back with the preview, and the Formula tab adds it to the draft's check.
+  - The formula editor is an `NSTextView` (TextKit 1) with an `NSRulerView` for line numbers. `FormulaHighlighter` colours the whole text after each change, or `ScriptHighlighter` for scripts. Formulas and scripts are short enough that this costs nothing noticeable.
   - The completion list is the app's own SwiftUI overlay, driven by the text view's keys. AppKit's built-in completion puts the selected word in when you type on, and opens on Esc, which isn't what a formula wants.
   - Sliders don't use SwiftUI's `step`: on the Mac it draws a tick mark per step, and a range of 10,000 steps took 16 seconds to draw. The value is snapped to the step instead.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.

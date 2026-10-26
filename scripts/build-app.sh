@@ -55,5 +55,13 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+# Python, when it's in this build (scripts/fetch-python.sh): the framework, with its standard
+# library inside, goes in Contents/Frameworks (docs/DESIGN.md, 6.4).
+if [[ -d "$bin_path/Python.framework" ]]; then
+    mkdir -p "$app/Contents/Frameworks"
+    ditto "$bin_path/Python.framework" "$app/Contents/Frameworks/Python.framework"
+    install_name_tool -add_rpath @executable_path/../Frameworks "$app/Contents/MacOS/EditTheFuture"
+fi
+
 codesign --force --sign - "$app" >/dev/null
 echo "Built $app"

@@ -74,7 +74,7 @@ extension ScenarioStore {
             return false
         }
         let blank = template.category == .blank
-        let config = SlotConfig(position: position, name: uniqueName(template.slotName), model: blank ? "Custom formula" : template.name,
+        let config = SlotConfig(position: position, name: uniqueName(template.slotName), model: template.slotModelName,
                                 kind: template.kind, formula: template.formula, variable: template.variable,
                                 format: template.format)
         closePicker()
@@ -89,8 +89,8 @@ extension ScenarioStore {
     public func changeModel(ofSlotAt index: Int, to template: ModelTemplate) {
         guard isSlot(index) else { return }
         var config = configs[index]
-        let declared = (try? FormulaModel(template.formula)).map { Set($0.parameterNames + $0.startingValueNames) } ?? []
-        config.model = template.category == .blank ? "Custom formula" : template.name
+        let declared = (try? SlotConfig.model(kind: template.kind, source: template.formula)).map { Set($0.parameterNames + $0.startingValueNames) } ?? []
+        config.model = template.slotModelName
         config.kind = template.kind
         config.formula = template.formula
         config.variable = template.variable
@@ -104,7 +104,7 @@ extension ScenarioStore {
     /// Says how many of a slot's events a different model wouldn't handle, or nil when they all apply.
     public func eventsThatWontApply(inSlotAt index: Int, with template: ModelTemplate) -> String? {
         guard isSlot(index) else { return nil }
-        guard let model = try? FormulaModel(template.formula) else { return nil }
+        guard let model = try? SlotConfig.model(kind: template.kind, source: template.formula) else { return nil }
         let kinds = Set(model.handledEventKinds), parameters = Set(model.parameterNames)
         func applies(_ kind: String, _ values: [String: Double]) -> Bool {
             kind == Event.setKind ? values.keys.allSatisfy(parameters.contains) : kinds.contains(kind)

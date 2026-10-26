@@ -61,7 +61,7 @@ struct CommandBarTests {
     @Test("Every library model compiles and declares what the Slot tab needs")
     func library() throws {
         for template in ModelLibrary.all {
-            let model = try FormulaModel(template.formula, name: template.slotName)
+            let model = try SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName)
             #expect(model.descriptor.variable(named: template.variable) != nil, "\(template.name) has no \(template.variable)")
             for parameter in model.descriptor.variables where parameter.causality == .parameter {
                 #expect(parameter.label != nil, "\(template.name).\(parameter.name) has no label")

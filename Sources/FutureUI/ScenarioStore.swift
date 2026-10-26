@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 import FutureEngine
 import FutureFormula
+import FutureScript
 
 /// The app's state for one scenario: its slots, what's focused, the cursor, the visible range, the
 /// side pane, the command bar and undo. Views read `timelineState()`, `cursorState()` and
@@ -51,6 +52,14 @@ public final class ScenarioStore {
 
         public var color: Color { Color(hex: colorHex) }
         public var isPaused: Bool { pausedReason != nil }
+
+        public var isScript: Bool {
+            if case .script = kind { return true }
+            return false
+        }
+
+        /// What the slot's text is: "formula" or "script".
+        public var noun: String { isScript ? "script" : "formula" }
     }
 
     /// The side pane's tabs (docs/UI.md, section 3).
@@ -172,6 +181,8 @@ public final class ScenarioStore {
 
     /// The latest results from the engine. Everything on screen is drawn from these.
     var computed: ScenarioEngine.FetchResult?
+    /// Errors slots raised while computing, such as a script's, by slot.
+    var slotFailures: [UUID: ScenarioEngine.SlotFailure] = [:]
     /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
     @ObservationIgnored private var computedSlots: [UUID] = []
 
@@ -208,7 +219,7 @@ public final class ScenarioStore {
             let taken = Set(configs.map(\.position))
             guard let position = spec.position.flatMap({ taken.contains($0) ? nil : $0 })
                     ?? (0..<Self.bankSize).first(where: { !taken.contains($0) }) else { break }
-            configs.append(SlotConfig(position: position, name: spec.name, model: spec.model, kind: .formula,
+            configs.append(SlotConfig(position: position, name: spec.name, model: spec.model, kind: spec.kind,
                                       formula: spec.formula, variable: spec.variable, color: spec.color,
                                       format: spec.format, values: spec.values))
         }
@@ -251,7 +262,7 @@ public final class ScenarioStore {
     /// Compiles each slot's model, checks how the slots read each other, and describes the result
     /// for the views and the engine. Slots that can't run are paused, not dropped.
     nonisolated static func assemble(_ configs: [SlotConfig]) -> Assembly {
-        var models: [FormulaModel?] = []
+        var models: [(any AuthoredModel)?] = []
         var errors: [Int: String] = [:]
         for (index, config) in configs.enumerated() {
             do {
@@ -277,7 +288,7 @@ public final class ScenarioStore {
         return Assembly(slots: slots, layout: layout, linkCount: report.linkCount, descriptors: models.map { $0?.descriptor })
     }
 
-    nonisolated private static func slotInfo(_ config: SlotConfig, model: FormulaModel?, paused: String?) -> SlotInfo {
+    nonisolated private static func slotInfo(_ config: SlotConfig, model: (any AuthoredModel)?, paused: String?) -> SlotInfo {
         let descriptor = model?.descriptor
         let reads = descriptor?.inputs.compactMap { $0.source?.text } ?? []
         func value(_ variable: Variable) -> SlotValue {
@@ -328,7 +339,7 @@ public final class ScenarioStore {
                 version: computed.version, generation: computed.generation, from: computed.from, through: computed.through,
                 series: pick(computed.series, empty: []), generated: pick(computed.generated, empty: []),
                 computedThrough: computed.computedThrough, parameters: pick(computed.parameters, empty: [:]),
-                parameterDate: computed.parameterDate)
+                parameterDate: computed.parameterDate, failures: pick(computed.failures, empty: nil))
         }
         computedSlots = order
         descriptors = assembly.descriptors
@@ -346,6 +357,14 @@ public final class ScenarioStore {
         enqueue(.mutate(.layout(assembly.layout)))
         requestData()
         updateDraftPreview()
+    }
+
+    /// Loads every script again with the current files in the Libraries folder.
+    public func reloadScripts() {
+        ScriptPrograms.reloadLibraries()
+        refreshSlots(focus: nil)
+        if slots.indices.contains(focusedIndex), sidePane == .formula { updateFormulaCheck(forSlotAt: focusedIndex) }
+        say("Reloaded the script libraries")
     }
 
     // MARK: Navigation
@@ -601,7 +620,24 @@ public final class ScenarioStore {
         guard result.version == revision else { return }  // an edit came after this was asked for
         if let computed, computed.version == revision, computed.generation > result.generation { return }
         computed = result
+        noteFailures(result.failures)
         requestData()  // the view may have moved on, or this fetch was cut short
+    }
+
+    /// Keeps the errors slots raised while computing, and says so when one first appears.
+    private func noteFailures(_ list: [ScenarioEngine.SlotFailure?]) {
+        var failures: [UUID: ScenarioEngine.SlotFailure] = [:]
+        for (index, failure) in list.enumerated() where computedSlots.indices.contains(index) {
+            if let failure { failures[computedSlots[index]] = failure }
+        }
+        guard failures != slotFailures else { return }
+        let new = failures.filter { slotFailures[$0.key] != $0.value }
+        slotFailures = failures
+        for (id, failure) in new {
+            guard let index = slotIndex(id: id) else { continue }
+            say("\(slots[index].title) stopped after \(DateText.monthYear(failure.date)): \(failure.text)", isError: true)
+        }
+        if slots.indices.contains(focusedIndex), sidePane == .formula { updateFormulaCheck(forSlotAt: focusedIndex) }
     }
 
     func requestPreview(_ request: ScenarioEngine.PreviewRequest) {
@@ -614,8 +650,9 @@ public final class ScenarioStore {
     }
 
     private func receiveParameterPreview(_ result: ScenarioEngine.PreviewResult) {
-        guard previewSlot != nil, result.sequence == parameterPreviewSequence, result.version == revision else { return }
+        guard let id = previewSlot, result.sequence == parameterPreviewSequence, result.version == revision else { return }
         parameterPreview = result.samples
+        if let failure = result.failure { noteDraftFailure(failure, inSlot: id) }
     }
 
     // MARK: Command bar
@@ -858,14 +895,15 @@ public final class ScenarioStore {
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: dragging ? nil : draftOnFocus?.date,
-            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex), pausedReason: focusSlot.pausedReason)
+            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex), pausedReason: focusSlot.pausedReason,
+            stoppedReason: slotFailures[focusSlot.id]?.text)
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)
             let bounds = range(list) ?? (0, 1)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
                              yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads,
-                             pausedReason: slot.pausedReason)
+                             pausedReason: slot.pausedReason, stoppedReason: slotFailures[slot.id]?.text)
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, focus: focus, lanes: lanes,

@@ -129,8 +129,8 @@ private struct SlotSettings: View {
                     Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                if slot.kind == .formula {
-                    Button("Edit formula…") { store.showFormulaEditor() }
+                if slot.kind == .formula || slot.isScript {
+                    Button(slot.isScript ? "Edit script…" : "Edit formula…") { store.showFormulaEditor() }
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.proposal)

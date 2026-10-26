@@ -13,7 +13,7 @@ import FutureEngine
 ///
 /// Each step: `set` events update parameters, differential equations are integrated,
 /// definitions are evaluated in dependency order, `on` handlers run, then `when` triggers fire.
-public struct FormulaModel: TimelineModel {
+public struct FormulaModel: AuthoredModel {
     /// Parameter and variable values by position (see `Executable`), so steps use arrays, not dictionaries.
     public struct State: Sendable {
         var parameters: [Double]

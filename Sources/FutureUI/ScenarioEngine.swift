@@ -1,6 +1,7 @@
 import Foundation
 import FutureEngine
 import FutureFormula
+import FutureScript
 
 /// Owns the scenario and does all of its computing on a thread of its own, so the main thread
 /// never waits for the engine (docs/DESIGN.md, 4.8).
@@ -15,7 +16,7 @@ actor ScenarioEngine {
     struct SlotSetup: Sendable {
         let name: String
         let variable: String
-        let model: FormulaModel
+        let model: any AuthoredModel
         /// Identifies the model and the slot's values for it. When only this changes, the slot's
         /// model is swapped without rebuilding the rest of the scenario.
         let key: String
@@ -49,6 +50,17 @@ actor ScenarioEngine {
         let parameterDate: Date
     }
 
+    /// An error a slot's model raised while computing, such as a script's, and how far it got.
+    struct SlotFailure: Sendable, Equatable {
+        let message: String
+        /// The line in the slot's formula or script, when it's known.
+        let line: Int?
+        /// The last point computed before it failed.
+        let date: Date
+
+        var text: String { (line.map { "line \($0): " } ?? "") + message }
+    }
+
     struct FetchResult: Sendable {
         let version: Int
         let generation: Int
@@ -63,6 +75,8 @@ actor ScenarioEngine {
         /// Each slot's parameter values at `parameterDate`.
         let parameters: [[String: Double]]
         let parameterDate: Date
+        /// Each slot's error while computing, by slot index.
+        let failures: [SlotFailure?]
     }
 
     /// What a preview tries out.
@@ -87,6 +101,8 @@ actor ScenarioEngine {
         let sequence: Int
         let samples: [Sample]
         let through: Date
+        /// The error a previewed model raised, such as a draft script's. The samples stop there.
+        var failure: SlotFailure? = nil
     }
 
     struct FindRequest: Sendable {
@@ -135,6 +151,8 @@ actor ScenarioEngine {
     private var setups: [SlotSetup?]
     /// Each store slot's place in the scenario, or nil while it's paused.
     private var ids: [SlotID?]
+    /// Errors slots raised while computing, by slot name. Edits clear them; computing again finds them again.
+    private var failures: [String: SlotFailure] = [:]
     nonisolated let latestGeneration = Generation()
 
     /// How far each chunk of a fetch computes before checking whether it's been superseded.
@@ -161,6 +179,7 @@ actor ScenarioEngine {
     }
 
     func apply(_ mutation: Mutation) {
+        failures.removeAll()
         switch mutation {
         case .addEvent(let slot, let event): if let id = ids[slot] { scenario.add(event, to: id) }
         case .removeEvent(let slot, let eventID): if let id = ids[slot] { scenario.removeEvent(id: eventID, from: id) }
@@ -207,7 +226,11 @@ actor ScenarioEngine {
         while reached < request.through {
             let computed = running.compactMap { scenario.computedThrough($0) }.min() ?? scenario.start
             reached = min(request.through, max(reached, computed).addingTimeInterval(Self.chunk))
-            try? scenario.ensureAll(through: reached)
+            do {
+                try scenario.ensureAll(through: reached)
+            } catch {
+                record(error)
+            }
             if latestGeneration.value > request.generation { break }
         }
         let through = max(reached, request.from)
@@ -222,8 +245,10 @@ actor ScenarioEngine {
                 parameters.append([:])
                 continue
             }
-            series.append((try? scenario.series(setup.variable, of: id, from: request.from, through: through)) ?? [])
-            let events = (try? scenario.generatedEvents(in: id, through: through)) ?? []
+            // A slot that failed partway shows what it computed before the error.
+            let reach = failures[setup.name] == nil ? through : min(through, scenario.computedThrough(id) ?? scenario.start)
+            series.append((try? scenario.series(setup.variable, of: id, from: request.from, through: reach)) ?? [])
+            let events = (try? scenario.generatedEvents(in: id, through: reach)) ?? []
             generated.append(events.filter { $0.time >= request.from })
             var values: [String: Double] = [:]
             for variable in scenario.descriptor(of: id).variables where variable.causality == .parameter {
@@ -234,7 +259,30 @@ actor ScenarioEngine {
         return FetchResult(version: request.version, generation: request.generation, from: request.from, through: through,
                            series: series, generated: generated,
                            computedThrough: running.compactMap { scenario.computedThrough($0) }.min(),
-                           parameters: parameters, parameterDate: request.parameterDate)
+                           parameters: parameters, parameterDate: request.parameterDate,
+                           failures: setups.map { $0.flatMap { failures[$0.name] } })
+    }
+
+    /// Remembers which slot failed and why.
+    private func record(_ error: Error) {
+        guard let (name, failure) = Self.failure(error, in: scenario) else { return }
+        failures[name] = failure
+    }
+
+    /// The slot an error came from, and what to show for it.
+    private static func failure(_ error: Error, in scenario: Scenario) -> (name: String, failure: SlotFailure)? {
+        let name: String, message: String, line: Int?
+        switch error {
+        case let error as ScriptError:
+            guard let slot = error.slot else { return nil }
+            (name, message, line) = (slot, error.message, error.line)
+        case EngineError.modelFailed(let slot, let text):
+            (name, message, line) = (slot, text, nil)
+        default:
+            return nil
+        }
+        guard let id = scenario.slotID(named: name) else { return nil }
+        return (name, SlotFailure(message: message, line: line, date: scenario.computedThrough(id) ?? scenario.start))
     }
 
     /// How much of the line a search reads at a time.
@@ -269,6 +317,7 @@ actor ScenarioEngine {
             return PreviewResult(version: request.version, sequence: request.sequence, samples: [], through: request.through)
         }
         var samples: [Sample] = []
+        var failure: SlotFailure?
         switch request.change {
         case .event(.event(let event)):
             scenario.add(event, to: id)
@@ -282,10 +331,17 @@ actor ScenarioEngine {
             // Only this slot and what it reads are computed for the line; putting the model back
             // leaves this slot and those downstream to be recomputed by the next fetch.
             if (try? scenario.replaceModel(of: id, with: setup.model)) != nil {
-                samples = (try? scenario.series(setup.variable, of: id, from: request.from, through: request.through)) ?? []
+                do {
+                    samples = try scenario.series(setup.variable, of: id, from: request.from, through: request.through)
+                } catch {
+                    failure = Self.failure(error, in: scenario)?.failure
+                    let reached = min(request.through, scenario.computedThrough(id) ?? scenario.start)
+                    samples = (try? scenario.series(setup.variable, of: id, from: request.from, through: reached)) ?? []
+                }
                 try? scenario.replaceModel(of: id, with: original.model)
             }
         }
-        return PreviewResult(version: request.version, sequence: request.sequence, samples: samples, through: request.through)
+        return PreviewResult(version: request.version, sequence: request.sequence, samples: samples, through: request.through,
+                             failure: failure)
     }
 }

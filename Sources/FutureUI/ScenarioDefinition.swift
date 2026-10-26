@@ -6,6 +6,9 @@ public struct SlotSpec: Sendable {
     public var name: String
     /// The model's name, as the library calls it, e.g. "Savings account".
     public var model: String
+    /// A formula or a script.
+    public var kind: ModelKind
+    /// The formula's or script's text.
     public var formula: String
     /// The variable drawn on the graph.
     public var variable: String
@@ -17,10 +20,11 @@ public struct SlotSpec: Sendable {
     /// The slot's own parameter and starting values, by name, in place of the formula's defaults.
     public var values: [String: Double]
 
-    public init(name: String, model: String = "Custom formula", formula: String, variable: String, color: String? = nil,
-                format: ValueFormat, position: Int? = nil, values: [String: Double] = [:]) {
+    public init(name: String, model: String = "Custom formula", kind: ModelKind = .formula, formula: String, variable: String,
+                color: String? = nil, format: ValueFormat, position: Int? = nil, values: [String: Double] = [:]) {
         self.name = name
         self.model = model
+        self.kind = kind
         self.formula = formula
         self.variable = variable
         self.color = color

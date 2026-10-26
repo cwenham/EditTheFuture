@@ -2,11 +2,14 @@
 import AppKit
 import SwiftUI
 import FutureFormula
+import FutureScript
 
 /// The formula editor (docs/UI.md, 5.7): an AppKit text view with line numbers, colouring,
 /// underlined mistakes and a completion list that follows the caret.
 struct FormulaEditor: View {
     let text: String
+    /// A formula, or a script in one of the script languages: it decides the colouring.
+    var language: ModelKind = .formula
     /// The text `diagnoses` were worked out for. They're only drawn while it's still the text.
     let diagnosedText: String?
     let diagnoses: [FormulaDiagnosis]
@@ -19,7 +22,7 @@ struct FormulaEditor: View {
 
     var body: some View {
         GeometryReader { geometry in
-            FormulaTextArea(text: text, diagnosedText: diagnosedText, diagnoses: diagnoses, completions: completions,
+            FormulaTextArea(text: text, language: language, diagnosedText: diagnosedText, diagnoses: diagnoses, completions: completions,
                             insertRequest: insertRequest, completion: completion, onChange: onChange, onApply: onApply)
                 .overlay(alignment: .topLeading) {
                     if completion.isVisible {
@@ -33,7 +36,7 @@ struct FormulaEditor: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Formula")
+        .accessibilityLabel(language == .formula ? "Formula" : "\(language.title) script")
     }
 }
 
@@ -90,6 +93,21 @@ enum FormulaColors {
         case .lag: return NSColor(hex: "#4FD1A5")
         case .name: return plain
         case .symbol: return NSColor(hex: "#A3A9B1")
+        }
+    }
+
+    /// Scripts use the formula colours: the API like built-ins, the language's own functions like functions.
+    static func scriptColor(_ kind: ScriptTokenKind) -> NSColor {
+        switch kind {
+        case .keyword: return color(FormulaTokenKind.keyword)
+        case .number: return color(FormulaTokenKind.number)
+        case .string: return color(FormulaTokenKind.string)
+        case .comment: return color(FormulaTokenKind.comment)
+        case .api: return color(FormulaTokenKind.builtin)
+        case .library: return NSColor(hex: "#E8A0D0")
+        case .reference, .field: return color(FormulaTokenKind.reference)
+        case .name: return plain
+        case .symbol: return color(FormulaTokenKind.symbol)
         }
     }
 }
@@ -167,6 +185,7 @@ private struct CompletionList: View {
 
 private struct FormulaTextArea: NSViewRepresentable {
     let text: String
+    let language: ModelKind
     let diagnosedText: String?
     let diagnoses: [FormulaDiagnosis]
     let completions: (String, Int) -> (range: NSRange, items: [FormulaCompletion])
@@ -181,6 +200,7 @@ private struct FormulaTextArea: NSViewRepresentable {
         let container = FormulaEditorContainer()
         let textView = container.textView
         textView.delegate = context.coordinator
+        textView.language = language
         textView.string = text
         context.coordinator.attach(container)
         context.coordinator.update(self)
@@ -232,6 +252,10 @@ private struct FormulaTextArea: NSViewRepresentable {
             self.parent = parent
             guard let container else { return }
             let textView = container.textView
+            if textView.language != parent.language {
+                textView.language = parent.language
+                textView.needsHighlight = true
+            }
             textView.completion = parent.completion
             textView.completionSource = parent.completions
             textView.onApply = parent.onApply
@@ -312,6 +336,8 @@ final class FormulaTextView: NSTextView {
     static let lineHeight: CGFloat = 20
 
     var completion: FormulaCompletionState?
+    /// What the text is written in, for colouring.
+    var language: ModelKind = .formula
     var completionSource: ((String, Int) -> (range: NSRange, items: [FormulaCompletion]))?
     var onApply: (() -> Void)?
     /// Set when the text was replaced without a change notification.
@@ -371,8 +397,15 @@ final class FormulaTextView: NSTextView {
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
         storage.setAttributes([.font: Self.font, .foregroundColor: FormulaColors.plain, .paragraphStyle: Self.paragraphStyle], range: full)
-        for token in FormulaHighlighter.tokens(in: storage.string) where NSMaxRange(token.range) <= storage.length {
-            storage.addAttribute(.foregroundColor, value: FormulaColors.color(token.kind), range: token.range)
+        switch language {
+        case .script(let script):
+            for token in ScriptHighlighter.tokens(in: storage.string, language: script) where NSMaxRange(token.range) <= storage.length {
+                storage.addAttribute(.foregroundColor, value: FormulaColors.scriptColor(token.kind), range: token.range)
+            }
+        default:
+            for token in FormulaHighlighter.tokens(in: storage.string) where NSMaxRange(token.range) <= storage.length {
+                storage.addAttribute(.foregroundColor, value: FormulaColors.color(token.kind), range: token.range)
+            }
         }
         for diagnosis in diagnoses {
             guard let range = diagnosis.range, range.length > 0, NSMaxRange(range) <= storage.length else { continue }

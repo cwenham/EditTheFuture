@@ -9,6 +9,8 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 - Build: `swift build`
 - Test: `swift test` (Swift Testing)
 - Benchmarks: `swift run -c release etf-bench [engine|state|frames|flick|far|loop|engine-loop|cursor-loop]`
+- Python for scripts: `scripts/fetch-python.sh` once per checkout (into `Vendor/Python`, not in git). Without it, Python slots pause.
+- A script without the app: `swift run etf-script model.lua --through 2040-01-01`
 - App: `scripts/build-app.sh`, then `open .build/EditTheFuture.app`. It's a menu bar app; show the panel with ⌃⌥Space or `open "etf://show?timeline=savings&at=2060-01"`.
 
 ## Rules
@@ -23,3 +25,4 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
   - Build ranges with `niceTicks` or `ScenarioStore.laneDomain`.
   - Never convert a model value to `Int`, or build a `ClosedRange` from unchecked numbers.
 - **Far-future dates:** compare `Date`s directly. A microsecond nudge is lost past about 2150.
+- **Scripts** (DESIGN.md 6.4): keep Lua and Python's APIs the same, and test both languages side by side. Nothing may download or install code (no pip), so the app stays within App Store rules.

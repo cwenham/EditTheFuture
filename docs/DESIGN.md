@@ -214,10 +214,13 @@ Hosts:
 
 1. **Built-in Swift models**: conform to `TimelineModel` directly.
 2. **Formula models**: typed into the UI (6.2).
-3. **WebAssembly**: the main cross-platform plug-in format. Run in WasmKit, a WebAssembly runtime written in Swift that ships with the Swift 6.2 toolchain. Sandboxed by default (no file or network access unless granted). Plug-ins can be written in Swift, Rust, C or anything else that compiles to WebAssembly. Interpreted, so slower than native. For heavy plug-ins on iOS, a hidden WKWebView offers JIT-compiled WebAssembly.
-4. **Native binaries (Mac only)**: out-of-process via ExtensionKit or an XPC service, so a crashing plug-in can't take the app down.
-5. **Remote hosts**: a server, or a paired device (section 7), using the same messages over the network.
-6. **FMUs (later, Mac)**: imported through the same interface.
+3. **Scripts**: Lua and Python, typed into the UI too (6.4).
+4. **WebAssembly**: the main cross-platform plug-in format. Run in WasmKit, a WebAssembly runtime written in Swift that ships with the Swift 6.2 toolchain. Sandboxed by default (no file or network access unless granted). Plug-ins can be written in Swift, Rust, C or anything else that compiles to WebAssembly. Interpreted, so slower than native. For heavy plug-ins on iOS, a hidden WKWebView offers JIT-compiled WebAssembly.
+5. **Native binaries (Mac only)**: out-of-process via ExtensionKit or an XPC service, so a crashing plug-in can't take the app down.
+6. **Remote hosts**: a server, or a paired device (section 7), using the same messages over the network.
+7. **FMUs (later, Mac)**: imported through the same interface.
+
+Formulas and scripts both conform to `AuthoredModel` (`TimelineModel` plus what the Slot tab shows), so the app builds, checks and edits them the same way.
 
 Plug-ins never talk to each other. The scenario passes every input and event, which keeps them sandboxed and reproducible.
 
@@ -305,6 +308,180 @@ Findings from October 2026:
 - **ExtensionKit's API exists on iOS 26**, but Apple's developer support says iOS apps can only host extensions they ship themselves. Third-party extensions are Mac-only.
 - **The Mac App Store allows** hosting plug-ins enabled by other means (guideline 3.1.1).
 - **Remote plug-ins** are always allowed.
+
+### 6.4 Scripts: Lua and Python
+
+Decided in October 2026. Scripts are models written in Lua or Python, edited in the Formula tab like formulas. Everything here has to work in apps sold through the Mac App Store and the iOS App Store.
+
+| | Mac | iPhone and iPad |
+|---|---|---|
+| Lua 5.5 | Built into the app | The same |
+| Lua libraries | Pure Lua files the user adds | The same |
+| Python 3.14 | Bundled CPython, in the app's process | Embedded CPython, in the app's process |
+| Python's standard library | Bundled | Bundled |
+| Pure-Python libraries | Files and folders the user adds | The same |
+| Native Python packages (numpy and the like) | Only ones the app ships with. None yet. | The same |
+| pip, ensurepip, venv, LuaRocks | Not supported | Not supported |
+
+**Where the interpreters come from:**
+- **Lua** is compiled from source into the `CLua` target. Its `os`, `io`, `package` and `debug` libraries aren't built at all, which also keeps iOS-only restrictions (no `system`) out of the way.
+- **Python** is BeeWare's [Python-Apple-support](https://github.com/beeware/Python-apple-support) build of CPython 3.14: a `Python.xcframework` with a Mac slice and iOS device and simulator slices. `scripts/fetch-python.sh` downloads it into `Vendor/Python` (not in git) and checks its checksum. The package links Python only when that folder exists, so a build without it still works, and Python slots pause with a note saying Python isn't in this build.
+- **Packaging for the stores:**
+  - On the Mac, `Python.framework`, with its standard library inside, goes in the app's `Contents/Frameworks`.
+  - On iOS, the standard library goes in the app's `python` folder, and each compiled module becomes a framework of its own, as Apple requires. BeeWare's `build/utils.sh` does this when an iOS app target exists.
+  - `fetch-python.sh` takes out `ensurepip` (which carries a pip wheel), `venv`, `idlelib`, the test suite, `tkinter` and the `python3` binary. So neither bundle can install packages.
+
+**Why no pip:** App Store guideline 2.5.2 forbids downloading code that changes what an app does. Users can still add their own libraries: plain Lua and Python source files in the Libraries folder, the same way they type scripts. That's what Pythonista and Scriptable do.
+
+**Third-party libraries:**
+- **The Libraries folder** is `Libraries/lua` and `Libraries/python` in the app's Application Support folder. On iOS, it's in Documents, so the Files app can reach it.
+  - `require "name"` in Lua loads `name.lua` or `name/init.lua` from there.
+  - Python adds the folder to `sys.path`, so modules and packages import as usual.
+  - After changing files there, scripts load again once Reload Script Libraries is chosen in the menu bar item (`ScriptPrograms.reloadLibraries()`). Open Script Libraries Folder makes the folders and opens them.
+  - Python imports library modules afresh for each script, so two scripts never share a module's variables.
+- **Native Python packages** have to be compiled for each platform and signed into the app. So they're a list the app chooses and tests. numpy is the first candidate: it now publishes iOS builds. Each one makes the app bigger.
+
+#### The script API
+
+Lua and Python get the same API. A script declares its parameters, state and inputs when it loads, then defines `step(s, t)`:
+
+```lua
+every "1 month"
+param("rate", "4.5%", { range = {"0%", "15%"}, by = "0.1%", label = "Interest rate" })
+param("monthly", 400, { range = {0, 5000}, by = 50, label = "Monthly deposit", as = "currency" })
+init("balance", 18000, { label = "Balance", as = "currency" })
+output("interest", { as = "currency" })
+emits "Millionaire"
+
+function step(s, t)
+  s.interest = s.balance * s.rate / 12
+  s.balance = s.balance + s.interest + s.monthly
+  if s.balance >= 1e6 then emit("Millionaire") end
+end
+
+on("deposit", function(s, e, t) s.balance = s.balance + e.amount end)
+```
+
+```python
+every("1 month")
+param("rate", "4.5%", range=("0%", "15%"), by="0.1%", label="Interest rate")
+param("monthly", 400, range=(0, 5000), by=50, label="Monthly deposit", as_="currency")
+init("balance", 18000, label="Balance", as_="currency")
+output("interest", as_="currency")
+emits("Millionaire")
+
+def step(s, t):
+    s.interest = s.balance * s.rate / 12
+    s.balance += s.interest + s.monthly
+    if s.balance >= 1e6:
+        emit("Millionaire")
+
+@on("deposit")
+def deposit(s, e, t):
+    s.balance += e.amount
+```
+
+| Declaration | Meaning |
+|---|---|
+| `every "1 month"` | The step rate, as in the formula language's `step`. Required. |
+| `timeunit "year"` | The unit for `t.dt`. Defaults to the step's unit. |
+| `param(name, value, options)` | A parameter. `set` events change it. |
+| `init(name, value, options)` | A state variable and its starting value. |
+| `output(name, options)` | A value the script works out each step. It starts at 0 unless `start = x` says otherwise. |
+| `input(name, "Slot.value.mean[t-1]")` | Another slot's value, read as `s.name`. The reference works as it does in formulas. |
+| `emits "Kind"` | An event kind the script can send. |
+| `on("kind", fn)` | Runs `fn(s, e, t)` for each event of that kind in the step. `"Slot.Kind"` or `"Slot.Kind[t-1]"` listens to another slot's events. |
+| `start(s, t)` | Optional. Runs once at the start, after the starting values are set. |
+
+The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
+
+What a step sees:
+- **`s`** holds the parameters, state variables and outputs, which it can change, and the inputs, which it can only read. A name that isn't declared is an error, so typos don't go unnoticed.
+- **`t`** holds the time:
+  - `t.index` (the formula language's `step`), `t.year` (fractional), `t.month`, `t.day`, `t.dayOfYear`, `t.days` and `t.dt`.
+  - `t.date`, as text like "2031-06-01".
+  - `t.events`: the step's events.
+  - `t.random()` and `t.normal(mean, sd)`.
+  - `t.emit(kind, fields)`, the same as `emit`.
+- **Events** have `kind`, `slot` (for another slot's events) and `date`, plus their fields: `e.amount`.
+
+Order within a step, as for formulas: `set` events change parameters, `step` runs, then the `on` handlers run in event order.
+
+#### ETF keeps the state
+
+The engine copies a slot's state for checkpoints every 32 steps, for undo, previews and goal seek (4.3). So a script's state is the list of numbers it declared, and the app keeps it, not the interpreter. Each step, the app hands the numbers in and reads them back. This keeps scripts reproducible, and the same script could run on another machine (5.6).
+
+Hidden state would break this, so the app guards against it:
+- **Lua:** globals can't be changed once the script has loaded. Assigning one says to use `local`, or to declare the value with `init`.
+- **Python** can't be stopped from keeping values in module variables. The docs and errors say not to.
+- **Randomness** is seeded for each slot and step. Lua's `math.random` and Python's `random` module are seeded before every call, as well as `t.random`.
+
+#### Safety
+
+Scripts are the user's own code, or libraries the user added, so they run in the app's process, with guard rails rather than a full sandbox:
+- **Time limits:** each call into a script stops after a time limit, which catches endless loops. Lua counts instructions and checks the clock. Python raises an exception in the script's thread from a watchdog; it can't interrupt long-running native code.
+- **Lua's memory** is capped for each script, 64 MB by default.
+- **Lua's `load`** takes text only, never bytecode, so a script can't load hand-made bytecode.
+- **Python audit hooks** (PEP 578), installed in C so scripts can't remove them, block:
+  - network connections;
+  - starting or signalling processes;
+  - importing `ctypes`, which reaches raw memory. Its own import catches the error from loading a library, so the import itself is blocked.
+  - writing, deleting or renaming files.
+
+  `os._exit` and `os.abort` are replaced, so a script can't end the app.
+
+  Reading files is allowed. This is about keeping scripts reproducible, and about App Store guideline 4.7.2.
+- **Crash isolation:** a crash in a native package, or memory growing without limit in Python, would take the app down. On the Mac, a later step can move Python into a sandboxed XPC service inside the app bundle, which the Mac App Store allows. iOS has no such option, so the list of native packages stays small and tested.
+
+#### Threads and speed
+
+- **Each script loads once** and is shared by every model built from the same text (`ScriptPrograms`). A lock lets one call in at a time.
+- **Python has one interpreter** with the GIL. Python slots in different slot groups take turns, while formula and Lua slots still run on other cores. Sub-interpreters with their own GIL would lift this, but numpy and most native packages don't support them yet.
+- **Loading scripts:** building a slot's model loads the script to read its declarations, as compiling a formula does. Lua loads in well under a millisecond. Python's interpreter takes a moment to start the first time, so the Mac app starts it on a background thread at launch.
+- **Speed**, measured through the engine on the 2017 iMac Pro:
+
+  | Model | Per step |
+  |---|---|
+  | Formula | 3 µs |
+  | Lua | 8 µs |
+  | Python | 13 µs |
+
+  - **Lua:** most of the time goes on handing the state over and building `s` and `t`. The time-limit hook costs about 0.9 µs.
+  - **Formatting dates:** `String(format:)` cost more than a Lua step, so dates are formatted by hand.
+  - **Batches:** a later step can hand a script many steps per call when nothing else reads it within the step (5.6).
+
+#### Errors while running
+
+- **The error stops the slot:** a script that raises an error stops at that step. `ScriptError` conforms to `ModelFailure`, so the engine passes it on with its slot and line, rather than wrapping it.
+- **What's kept:** the slot keeps what it computed before the error. The engine remembers the failure (`SlotFailure`) until the next edit, and every fetch reports it.
+- **What the app shows:**
+  - The graph shows "Stopped" and the message where the line ends.
+  - The footer says when it stopped.
+  - The Formula tab lists the error at its line.
+- **Drafts:** loading a script only finds some mistakes, such as syntax errors and bad declarations. Others, like a misspelt `s.balnce`, only show up when a step runs. So the dashed preview, which runs the draft in the background anyway, reports its error to the Formula tab too.
+
+#### The editor
+
+The Formula tab edits scripts too:
+- **Highlighting:** colours for each language.
+- **Completion:** the script API, `s.` names and other slots' values.
+- **Checks:** loading the script reports syntax errors, mistakes in declarations, and errors raised while it runs, with their line numbers. Wiring problems with other slots are reported as they are for formulas.
+- **Preview, Apply and Revert** work as they do for formulas.
+
+#### Running scripts without the app
+
+`swift run etf-script model.lua --through 2040-01-01 --set rate=0.04` runs a script model on its own and prints its values as CSV. It's a start on the headless runtime.
+
+**iOS:** FutureScript builds for iOS devices and the simulator, with `swift build --triple arm64-apple-ios17.0 --sdk $(xcrun --sdk iphoneos --show-sdk-path)`. The same `etf-script`, built for the simulator, runs Lua and Python scripts inside it:
+- `xcrun simctl spawn <device> .build/ios-sim/debug/etf-script model.py`
+- `SIMCTL_CHILD_ETF_PYTHON_HOME` points at `Vendor/Python/iOS/Python.xcframework`.
+- `SIMCTL_CHILD_ETF_PYTHON_PATHS` points at the simulator slice's `lib-dynload`.
+
+There's no iOS app yet, so packaging Python's standard library into one is still to do.
+
+#### Remote runtimes (later)
+
+The headless ETF runtime (5.6, 7) will run whole slot groups on the user's Mac or a server, for iOS devices that need a library the app doesn't ship. A server for many users is wanted, but it's deferred until the app's main features are settled.
 
 ## 7. Capability borrowing (paired devices)
 
@@ -493,8 +670,9 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 2. **XPC (CLI):** the app's Mach service accepts only clients signed by the same team (`setCodeSigningRequirement`).
 3. **Network:** off by default and used only for paired devices. Explicit pairing, TLS-PSK, permissions per capability, revocable. No anonymous HTTP server.
 4. **Plug-ins** are sandboxed: WebAssembly gets no file or network access by default, and native plug-ins run in a separate sandboxed process. Data reaches a plug-in only through connections the user created.
-5. **Hardware** can send only commands from the vocabulary. Destructive edits (delete) always need on-screen confirmation.
-6. **Siri and Shortcuts** go through App Intents, which have system-level consent. Editing intents ask for confirmation.
+5. **Scripts** are the user's own code, so they run in the app's process with guard rails: time and memory limits, Lua without its `os`, `io` and `debug` libraries, and audit hooks that keep Python off the network and from writing files (6.4).
+6. **Hardware** can send only commands from the vocabulary. Destructive edits (delete) always need on-screen confirmation.
+7. **Siri and Shortcuts** go through App Intents, which have system-level consent. Editing intents ask for confirmation.
 
 ## 14. Sources of readings
 
@@ -516,6 +694,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 |---|---|
 | M0 (this scaffold) | Engine package: time grids, events, checkpoints, coordinator with connections, event routes and same-step loop checks, goal seek, formula language, command vocabulary, URL scheme, MIDI decoding and profile, tests |
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
+| Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
 | M3 | Drag the future UI; readings import; drift alerts |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
@@ -558,17 +737,24 @@ Package.swift
 Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
+  FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
+  CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
+  CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
   FutureUI/          ScenarioStore, ScenarioEngine (background actor), model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
+  etf-script/        runs a script model without the app and prints CSV
+Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism
+  FutureScriptTests/    both languages side by side: results, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
-  FutureUITests/        store, slot editing, formula editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
 scripts/
-  build-app.sh       builds .build/EditTheFuture.app
+  build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched
+  fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
 ```
 
 Run the tests with `swift test`.

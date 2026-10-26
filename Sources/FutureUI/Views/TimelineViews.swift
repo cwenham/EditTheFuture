@@ -44,6 +44,11 @@ struct TimelineRows: View {
                     .overlay {
                         if let reason = timeline.focus.pausedReason { PausedNote(reason: reason, large: true) }
                     }
+                    .overlay(alignment: .top) {
+                        if timeline.focus.pausedReason == nil, let reason = timeline.focus.stoppedReason {
+                            PausedNote(reason: reason, large: true, stopped: true).padding(.top, 8)
+                        }
+                    }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
                         interactions?.pickDate(Double(location.x / plotWidth))
@@ -334,6 +339,9 @@ struct LaneRow: View {
                 .overlay(alignment: .leading) {
                     if let reason = lane.pausedReason { PausedNote(reason: reason, large: false) }
                 }
+                .overlay(alignment: .trailing) {
+                    if lane.pausedReason == nil, let reason = lane.stoppedReason { PausedNote(reason: reason, large: false, stopped: true) }
+                }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 1, coordinateSpace: .local) { location in
                     interactions?.pickDateOnLane(lane.id, Double(location.x / plotWidth))
@@ -353,12 +361,15 @@ struct LaneRow: View {
 struct PausedNote: View {
     let reason: String
     let large: Bool
+    /// Stopped partway by an error, rather than paused.
+    var stopped = false
 
     var body: some View {
+        let title = stopped ? "Stopped" : "Paused"
         HStack(spacing: 8) {
-            Image(systemName: "pause.circle")
+            Image(systemName: stopped ? "exclamationmark.octagon" : "pause.circle")
                 .font(.system(size: large ? 15 : 12))
-            Text(large ? "Paused" : "Paused · " + reason)
+            Text(large ? title : title + " · " + reason)
                 .font(.system(size: large ? 15 : 12, weight: .semibold))
                 .lineLimit(1)
             if large {
@@ -368,10 +379,10 @@ struct PausedNote: View {
                     .lineLimit(2)
             }
         }
-        .foregroundStyle(Theme.warning)
+        .foregroundStyle(stopped ? Theme.error : Theme.warning)
         .padding(.horizontal, large ? 14 : 8)
         .padding(.vertical, large ? 10 : 3)
-        .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background((stopped ? Theme.error : Theme.warning).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         .help(reason)
         .accessibilityElement(children: .combine)
     }

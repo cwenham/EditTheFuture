@@ -1,11 +1,12 @@
 import Foundation
 import FutureEngine
+import FutureScript
 
-/// Where a model comes from (docs/DESIGN.md, 6.1). Only formulas run so far.
+/// Where a model comes from (docs/DESIGN.md, 6.1). Formulas and scripts run so far.
 public enum ModelKind: Hashable, Sendable {
     case formula
-    /// A script, e.g. Lua or Python. Planned.
-    case script(language: String)
+    /// A Lua or Python script (docs/DESIGN.md, 6.4).
+    case script(ScriptLanguage)
     /// A WebAssembly or native plug-in. Planned.
     case plugin
     /// A model on a server or a paired device. Planned.
@@ -14,7 +15,7 @@ public enum ModelKind: Hashable, Sendable {
     public var title: String {
         switch self {
         case .formula: return "Formula"
-        case .script(let language): return language
+        case .script(let language): return language.title
         case .plugin: return "Plug-in"
         case .remote: return "Remote"
         }
@@ -70,8 +71,17 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
 
     /// The template as a slot of a scenario definition.
     public func slot(named name: String? = nil, values: [String: Double] = [:], position: Int? = nil) -> SlotSpec {
-        SlotSpec(name: name ?? slotName, model: self.name, formula: formula, variable: variable, format: format,
+        SlotSpec(name: name ?? slotName, model: self.name, kind: kind, formula: formula, variable: variable, format: format,
                  position: position, values: values)
+    }
+
+    /// What a slot's model is called when it starts from this template: blank ones are the slot's own.
+    var slotModelName: String {
+        guard category == .blank else { return name }
+        switch kind {
+        case .script(let language): return "Custom \(language.title) script"
+        default: return "Custom formula"
+        }
     }
 }
 
@@ -83,8 +93,9 @@ public enum ModelLibrary {
         seasonalTemperature, energyBill,
         bodyWeight,
         radioactiveDecay, batteryCapacity,
-        blankFormula,
-    ]
+        predatorPrey,
+        blankFormula, blankLua,
+    ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : [])
 
     public static func template(id: String) -> ModelTemplate? {
         all.first { $0.id == id }
@@ -275,4 +286,89 @@ public enum ModelLibrary {
             capacity[t] = capacity[t-1] * (1 - perCycle * cycles) * (1 - perYear) ^ (7 / 365.2425)
             when capacity < 80% emit WornOut
             """, variable: "capacity", format: .percent)
+
+    // MARK: Scripts
+
+    /// A Lua script with a loop inside each step.
+    public static let predatorPrey = ModelTemplate(
+        id: "predator-prey", name: "Predator and prey", category: .growth, kind: .script(.lua),
+        summary: "Foxes and rabbits rise and fall in turn", slotName: "Rabbits", formula: """
+            -- Foxes and rabbits (Lotka-Volterra), worked out in small steps within each month.
+            every "1 month"
+            timeunit "year"
+            param("birth", 1.1, { range = {0, 3}, by = 0.05, label = "Rabbit births per year" })
+            param("predation", 0.004, { range = {0, 0.02}, by = 0.0005, label = "Rabbits eaten per fox per year" })
+            param("efficiency", 0.0015, { range = {0, 0.01}, by = 0.0001, label = "Foxes born per rabbit eaten" })
+            param("death", 0.6, { range = {0, 3}, by = 0.05, label = "Fox deaths per year" })
+            init("rabbits", 400, { label = "Rabbits" })
+            init("foxes", 60, { label = "Foxes" })
+
+            function step(s, t)
+              local substeps = 30
+              local h = t.dt / substeps
+              local r, f = s.rabbits, s.foxes
+              for _ = 1, substeps do
+                local dr = s.birth * r - s.predation * r * f
+                local df = s.efficiency * r * f - s.death * f
+                r, f = math.max(0, r + h * dr), math.max(0, f + h * df)
+              end
+              s.rabbits, s.foxes = r, f
+            end
+            """, variable: "rabbits", format: .number)
+
+    /// A Python script with randomness: the same scenario always draws the same numbers.
+    public static let marketSwings = ModelTemplate(
+        id: "market-swings", name: "Market with ups and downs", category: .money, kind: .script(.python),
+        summary: "Monthly returns drawn at random around an average", slotName: "Portfolio", formula: """
+            # An investment whose monthly return is drawn at random, so the line wobbles.
+            # The same scenario always draws the same numbers.
+            import math
+
+            every("1 month")
+            param("growth", "6%", range=("-5%", "15%"), by="0.1%", label="Average growth per year")
+            param("volatility", "15%", range=("0%", "40%"), by="0.5%", label="Volatility per year")
+            param("contribution", 300, range=(0, 5000), by=50, label="Monthly contribution", as_="currency")
+            init("value", 25000, label="Value", as_="currency")
+            output("worst", label="Worst month so far", as_="percent")
+
+            def step(s, t):
+                monthly = t.normal(s.growth / 12, s.volatility / math.sqrt(12))
+                s.value = max(0, s.value * (1 + monthly) + s.contribution)
+                s.worst = min(s.worst, monthly)
+
+            @on("deposit")
+            def deposit(s, e, t):
+                s.value += e.amount
+
+            @on("withdraw")
+            def withdraw(s, e, t):
+                s.value = max(0, s.value - e.amount)
+            """, variable: "value", format: .currency)
+
+    /// A small Lua script to write your own from. Adding it opens the editor.
+    public static let blankLua = ModelTemplate(
+        id: "blank-lua", name: "Blank Lua script", category: .blank, kind: .script(.lua),
+        summary: "A small Lua script to start your own from", slotName: "Script", formula: """
+            -- Write your own model in Lua. It's checked as you type.
+            every "1 month"
+            param("growth", "2%", { range = {"-20%", "20%"}, by = "0.1%", label = "Growth per year" })
+            init("value", 100, { label = "Value" })
+
+            function step(s, t)
+              s.value = s.value * (1 + s.growth / 12)
+            end
+            """, variable: "value", format: .number)
+
+    /// A small Python script to write your own from. Adding it opens the editor.
+    public static let blankPython = ModelTemplate(
+        id: "blank-python", name: "Blank Python script", category: .blank, kind: .script(.python),
+        summary: "A small Python script to start your own from", slotName: "Script", formula: """
+            # Write your own model in Python. It's checked as you type.
+            every("1 month")
+            param("growth", "2%", range=("-20%", "20%"), by="0.1%", label="Growth per year")
+            init("value", 100, label="Value")
+
+            def step(s, t):
+                s.value = s.value * (1 + s.growth / 12)
+            """, variable: "value", format: .number)
 }

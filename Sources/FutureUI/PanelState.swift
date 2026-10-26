@@ -52,6 +52,8 @@ public struct FocusedSlotState: Sendable {
     public let events: [EventMarker]
     /// Why the slot can't run, shown in place of its line.
     public let pausedReason: String?
+    /// The error that stopped the slot partway, such as a script's.
+    public let stoppedReason: String?
 }
 
 public struct LaneState: Identifiable, Sendable {
@@ -65,6 +67,8 @@ public struct LaneState: Identifiable, Sendable {
     public let reads: String?
     /// Why the slot can't run, shown in place of its sparkline.
     public let pausedReason: String?
+    /// The error that stopped the slot partway, such as a script's.
+    public let stoppedReason: String?
 }
 
 public struct YearTick: Identifiable, Hashable, Sendable {

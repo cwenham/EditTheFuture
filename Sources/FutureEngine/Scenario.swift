@@ -533,6 +533,8 @@ public final class Scenario {
             }
         } catch let error as EngineError {
             throw error
+        } catch let error as ModelFailure {
+            throw error
         } catch {
             throw EngineError.modelFailed(slot: slotName, message: String(describing: error))
         }

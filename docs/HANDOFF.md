@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `6764b20`.
+Where the work stands, for the next Claude session. Last updated 2026-10-26, on branch `feature/scripting` (Lua and Python scripts, not committed yet), from `main` at `85d9ac2`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -30,6 +30,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `4b7b7de` | Now button, `goto` for values, far-future readout fix |
 | `bc8cc29` | Model library and picker, adding, changing, moving and removing slots, the Slot tab, parameter ranges and labels in formulas, paused slots |
 | `6764b20` | The formula editor: colouring, completion, insert palette, checks with one-click fixes, preview, apply and revert. The wheel moves time only over the graphs. |
+| `feature/scripting` | Lua and Python scripts as models, on the Mac and ready for iOS (DESIGN.md, 6.4). Not committed yet. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -68,6 +69,15 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
   - **Formula** (⌥⌘I, UI.md 5.7): the formula editor. Line numbers and colouring; a completion list as you type; a palette of functions, built-ins and other slots' values to click in; checks 300 ms after typing stops, with underlines and one-click fixes; a dashed preview; Apply (⌘↩, undoable) and Revert. Drafts are kept per slot.
   - **Event:** adding events, below.
 - **Blank formula** in the picker starts a small formula and opens the Formula tab.
+- **Scripts** (DESIGN.md 6.4, UI.md 5.7):
+  - Lua 5.5 and Python 3.14 models, with the same API in both. A script declares `every`, `param`, `init`, `output`, `input`, `emits` and `on`, and a `step(s, t)` function. The app keeps the state as numbers.
+  - Lua is compiled in (`CLua`). Python is BeeWare's CPython framework, bundled in the app by `scripts/build-app.sh`. Neither has pip.
+  - Library models: Predator and prey (Lua), Market with ups and downs (Python), and blank Lua and Python scripts.
+  - The Formula tab edits scripts: colouring, completion, the insert palette, checks with lines (including errors the preview raises), wiring fixes inside reference strings, apply and revert.
+  - A script that errors while running stops there, with "Stopped" on the graph and the error in the footer and the Formula tab.
+  - Guard rails: time limits on every call, Lua's memory cap and missing `os`, `io` and `debug` libraries, and Python audit hooks against the network, processes, `ctypes` and writing files.
+  - Libraries: Lua and Python files in the Libraries folder, opened and reloaded from the menu bar item.
+  - `swift run etf-script model.lua` runs a script model on its own and prints CSV.
 - **Add-event pane (the Event tab):**
   - The date defaults to now, and clicking the graph picks a date.
   - Deposit, withdraw or set a parameter, once or repeating.
@@ -88,7 +98,13 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 - **Saving:** nothing persists. Added events are lost when the app quits (DESIGN.md, 15).
 - **Scenarios:** there's no scenario menu, only the built-in scenario.
-- **More for programming models:** saving a slot's model to the library ("Your models"), scripts (Lua, Python) and plug-ins. The picker's Plug-ins category is empty until then.
+- **More for programming models:** saving a slot's model to the library ("Your models"), and plug-ins. The picker's Plug-ins category is empty until then.
+- **More for scripts** (DESIGN.md, 6.4):
+  - An iOS app, and packaging Python's standard library into it (BeeWare's `build/utils.sh`).
+  - Native Python packages such as numpy, bundled and tested for each platform.
+  - Python in a sandboxed XPC service on the Mac, so a crash in native code can't take the app down.
+  - Several steps per call, for speed.
+  - The headless runtime and remote slot groups. A server for many users is deferred.
 - **From the slot inspector mockup:** Variables, Events and Readings beside the formula, with values at the cursor, and the links view.
 - **Panel features from UI.md:**
   - Editing or moving existing events (5.4).
@@ -115,12 +131,22 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 - The engine keeps every step from the scenario's start. Memory grows with distance: about 100 MB at the year 31,000, engine only.
 - Each fetch filters all of a slot's generated events from the start. That's fine at today's sizes.
 - DESIGN.md 4.8 lists engine work not done yet: pipelining inside a slot group, and remote and WebAssembly models off the main actor.
+- **Scripts:**
+  - Not checked by hand in the app: typing a script, its completion list and palette clicks. The panel was rendered offscreen with Lua and Python scripts in the Formula tab, and the app was checked to load the bundled Python.
+  - Building a slot's model loads its script on the main thread, as compiling a formula does. That's well under a millisecond for Lua, but Python's first start takes a moment. The Mac app starts Python on a background thread at launch to hide it.
+  - Python slots take turns on the GIL, while formula and Lua slots still run on other cores.
+  - A script's state is numbers only. Lists of numbers in the state would need the history and checkpoints to handle them.
+  - The time limit counts wall time, so a very busy Mac could stop a slow script call early. One test hit the default 2 seconds while a first-time `import` ran under full load; that test now has a longer limit.
+  - `FutureUI` imports AppKit, so only `FutureEngine`, `FutureFormula` and `FutureScript` build for iOS so far.
+  - Python's bundled packages are the standard library only.
 
 ## How the code fits together
 
 | Module | Key parts |
 |---|---|
 | `FutureEngine` | `Wiring.check` decides which slots can run before a scenario is built. `Scenario`, the coordinator. It evaluates lazily, keeps checkpoints every 32 steps, invalidates downstream, and checks connections for same-step loops (`[t-1]` lags allow feedback). It resamples between step rates, routes events, and runs independent slot groups concurrently in `ensureAll`. Also `SlotRunner` (flat history arrays), `TimeGrid` and `CivilDate` (fast UTC Gregorian maths), and `GoalSeek`. |
+| `FutureScript` | Lua and Python scripts (DESIGN.md 6.4). `ScriptModel` (an `AuthoredModel`) keeps the state as numbers. `ScriptPrograms` loads each script once and shares it, behind a lock. `LuaRuntime` and `PythonRuntime` drive the interpreters through `CLua` and `CPythonBridge`. `LuaPrelude` and `PythonPrelude` implement the script API and report declarations as JSON (`ScriptDescription`, checked into a `ScriptShape`). `ScriptTools`: `ScriptHighlighter`, `ScriptCompleter` and `ScriptVocabulary`. |
+| `CLua`, `CPythonBridge` | C: Lua 5.5.1 with `etf_lua.c` (sandboxed state, memory cap, time-limit hook, `require`); `etf_python.c` (CPython start, audit hooks, watchdog). `CPythonBridge` is in the package only when `Vendor/Python` exists. |
 | `FutureFormula` | The formula language (DESIGN.md 6.2): lexer, parser (with `range`, `by`, `label` and `as` options), analyzer, resolution to array positions (`Executable`), evaluator, and `FormulaModel`, which takes a slot's own values and reports its constant defaults. `FormulaTools`: `FormulaVocabulary` (functions and built-ins with descriptions), `FormulaHighlighter`, `FormulaCompleter` and `FormulaDiagnoser`, all working on half-written text. |
 | `FutureCommands` | The `Command` vocabulary, `etf://` parsing, the confirmation policy, MIDI decoding, the controller profile and feedback. |
 | `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). |
@@ -129,7 +155,9 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 ## Checking your work
 
-- **Tests:** `swift test` runs about 145 tests in about 15 seconds.
+- **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout.
+- **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
+- **Tests:** `swift test` runs about 180 tests in about 15 seconds.
   - Store tests must `await store.waitUntilIdle()` before reading results.
   - `PanelViewTests` mounts the real panel in a window. Its `.runaway` scenario makes values huge, infinite and NaN within a few years.
 - **Benchmarks:** `swift run -c release etf-bench [section]`:
@@ -166,6 +194,11 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 - **SwiftUI sliders with `step`** draw a tick mark per step on the Mac. A 10,000-step range took 16 seconds of main-thread time. Snap the value yourself instead (`SlotValue.snapped`).
 - **The formula editor's completion list is the app's own,** not AppKit's: AppKit's inserts the selected word when you type on and opens on Esc. `FormulaTextView` handles ↑ ↓ ↩ Tab and Esc while the list shows. To test it, put a `FormulaEditorContainer` in a window and call `insertText` and `accept` on its text view.
 - **Checks belong to the text they checked** (`FormulaCheck.text`). The pane says "Checking…" and draws no underlines until the check for the current text arrives.
+- **Lua's count hook** makes the VM check on every instruction, which costs about 0.9 µs a step. It's what stops endless loops, so it stays.
+- **`String(format:)`** took longer than a whole Lua step. Format hot-path text by hand.
+- **Freezing Lua's globals:** `__newindex` only fires for keys that aren't there, so the globals move to a backing table. Keep a local reference to `_G` while doing it: clearing the `_G` key mid-loop made the global lookup return nil.
+- **Python audit hooks** run during CPython's own start, when it opens its output streams for writing, so the hook only applies once the start is done. `import ctypes` catches the `PermissionError` from loading a library (it's an `OSError`), so the import itself has to be blocked.
+- **A Python time limit** is an async exception set from a watchdog thread, holding the GIL. One that never got raised is cleared at the end of the call, so it can't leak into the next call on that thread.
 - **Writing Swift with Python:** a `"\n"` in a Python string becomes a real line break in the Swift file. Use a raw string or `\\n`.
 - **SwiftUI's global coordinates start at the window's top,** not the hosting view's: in a window with a title bar they're 28 points lower. Measure in a space named on the panel's root (`PanelView.panelSpace`), which matches `hosting.convert(event.locationInWindow, from: nil)`.
 - **Popovers from the panel:** a SwiftUI `.popover` works from the non-activating `NSPanel`. To check one in a test, put the view in an on-screen `NSPanel` (`orderFrontRegardless`) and look for an `_NSPopoverWindow` in `NSApp.windows`; offscreen windows don't show popovers.

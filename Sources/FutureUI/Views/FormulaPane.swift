@@ -1,6 +1,7 @@
 #if os(macOS)
 import SwiftUI
 import FutureFormula
+import FutureScript
 
 /// The side pane's Formula tab (docs/UI.md, 5.7): the focused slot's formula, checked as you
 /// type, with fixes for its mistakes and a palette of functions and other slots' values.
@@ -37,8 +38,8 @@ struct FormulaPane: View {
             }
 
             FormulaEditor(
-                text: text, diagnosedText: check?.text, diagnoses: check?.diagnoses ?? [],
-                completions: { source, cursor in FormulaCompleter.complete(source, at: cursor, slots: summaries, ownName: slot.name) },
+                text: text, language: slot.kind, diagnosedText: check?.text, diagnoses: check?.diagnoses ?? [],
+                completions: { source, cursor in Self.complete(source, at: cursor, kind: slot.kind, slots: summaries, ownName: slot.name) },
                 insertRequest: insertRequest,
                 onChange: { new in act(slot.id) { store.editFormula(new, forSlotAt: $0) } },
                 onApply: { act(slot.id) { store.applyFormula(forSlotAt: $0) } })
@@ -50,7 +51,7 @@ struct FormulaPane: View {
             HStack {
                 Button("Revert") { act(slot.id) { store.revertFormula(forSlotAt: $0) } }
                     .disabled(!drafted)
-                    .help("Put back the slot's formula")
+                    .help("Put back the slot's \(slot.noun)")
                 Spacer()
                 Button("Apply") { act(slot.id) { store.applyFormula(forSlotAt: $0) } }
                     .keyboardShortcut(.return, modifiers: .command)
@@ -58,18 +59,51 @@ struct FormulaPane: View {
                     .tint(Theme.proposal.opacity(0.85))
                     .foregroundStyle(Color(hex: "#14161B"))
                     .disabled(!drafted || current?.compiles == false)
-                    .help("Use this formula (Command-Return). Undo puts the old one back.")
+                    .help("Use this \(slot.noun) (Command-Return). Undo puts the old one back.")
             }
             .controlSize(.small)
 
-            InsertPalette(text: text, slots: summaries, titles: titles) { insertText, caretBack in
-                insertCount += 1
-                insertRequest = FormulaInsertRequest(id: insertCount, text: insertText, caretBack: caretBack)
+            Group {
+                if case .script(let language) = slot.kind {
+                    ScriptPalette(text: text, language: language, slots: summaries, titles: titles, insert: insert)
+                } else {
+                    InsertPalette(text: text, slots: summaries, titles: titles, insert: insert)
+                }
             }
             .frame(height: 200)
         }
         .onAppear { store.updateFormulaCheck(forSlotAt: index) }
         .onChange(of: slot.id) { act(slot.id) { store.updateFormulaCheck(forSlotAt: $0) } }
+    }
+
+    private func insert(_ text: String, caretBack: Int) {
+        insertCount += 1
+        insertRequest = FormulaInsertRequest(id: insertCount, text: text, caretBack: caretBack)
+    }
+
+    /// Completion for a formula, or for a script in its language.
+    static func complete(_ source: String, at cursor: Int, kind: ModelKind, slots: [FormulaSlotSummary],
+                         ownName: String) -> (range: NSRange, items: [FormulaCompletion]) {
+        guard case .script(let language) = kind else {
+            return FormulaCompleter.complete(source, at: cursor, slots: slots, ownName: ownName)
+        }
+        let summaries = slots.map { ScriptSlotSummary(name: $0.name, values: $0.values.map(\.name), events: $0.events) }
+        let (range, items) = ScriptCompleter.complete(source, at: cursor, language: language, slots: summaries)
+        return (range, items.map { item in
+            let kind: FormulaCompletion.Kind
+            switch item.kind {
+            case .parameter: kind = .parameter
+            case .variable, .input: kind = .variable
+            case .field: kind = .eventField
+            case .slot: kind = .slot
+            case .slotValue: kind = .slotValue
+            case .slotEvent: kind = .slotEvent
+            case .api: kind = .builtin
+            case .library: kind = .function
+            case .keyword: kind = .keyword
+            }
+            return FormulaCompletion(text: item.text, label: item.label, detail: item.detail, kind: kind, caretBack: item.caretBack)
+        })
     }
 
     /// Runs an action on the slot wherever it is now (never an index kept from an earlier drawing).
@@ -82,8 +116,8 @@ struct FormulaPane: View {
         let diagnoses = check?.diagnoses ?? []
         if diagnoses.isEmpty {
             Text(drafted
-                 ? (check?.compiles == true ? "No mistakes. The dashed line shows the new formula; ⌘↩ applies it." : "Checking…")
-                 : "Type to change the formula. The graph previews it as you go, and nothing changes until you apply it.")
+                 ? (check?.compiles == true ? "No mistakes. The dashed line shows the new \(slot.noun); ⌘↩ applies it." : "Checking…")
+                 : "Type to change the \(slot.noun). The graph previews it as you go, and nothing changes until you apply it.")
                 .font(.system(size: 11))
                 .foregroundStyle(drafted && check?.compiles == true ? Theme.success : Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -131,7 +165,7 @@ private struct ProblemBox: View {
                         Button(fix.title) { useFix(fix) }
                             .controlSize(.small)
                             .buttonStyle(.bordered)
-                            .help("Change the formula: \(fix.title)")
+                            .help("Make the change: \(fix.title)")
                     }
                 }
                 .padding(.leading, 21)
@@ -187,6 +221,94 @@ private struct InsertPalette: View {
                         }
                         ForEach(slot.events, id: \.self) { event in
                             chip(event, color: FormulaColors.color(.keyword), help: "An event \(slot.name) sends. Use it in on \(slot.name).\(event): …") {
+                                insert("\(slot.name).\(event)", 0)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.trailing, 6)
+        }
+        .accessibilityLabel("Insert")
+    }
+
+    private func section<Content: View>(_ title: String, color: Color? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if let color { Circle().fill(color).frame(width: 7, height: 7) }
+                Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            }
+            FlowLayout(spacing: 4) { content() }
+        }
+    }
+
+    private func chip(_ label: String, color: NSColor, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(Color(nsColor: color))
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.hairline))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel("Insert \(label)")
+    }
+}
+
+/// The script API, the time, the script's own values and other slots' values, each a click away.
+private struct ScriptPalette: View {
+    let text: String
+    let language: ScriptLanguage
+    let slots: [FormulaSlotSummary]
+    let titles: [String: (title: String, color: Color, key: Int)]
+    let insert: (String, Int) -> Void
+
+    var body: some View {
+        let declared = ScriptCompleter.declaredNames(in: text, language: language)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                section("Script") {
+                    ForEach(ScriptVocabulary.declarations) { entry in
+                        chip(entry.name, color: FormulaColors.scriptColor(ScriptTokenKind.api), help: entry.summary) {
+                            let insertion = entry.insertion(language)
+                            insert(insertion.text, insertion.caretBack)
+                        }
+                    }
+                }
+                section("Time: t") {
+                    ForEach(ScriptVocabulary.time, id: \.name) { field in
+                        chip("t." + field.name, color: FormulaColors.scriptColor(ScriptTokenKind.field), help: field.summary) {
+                            let call = ["random", "normal", "emit"].contains(field.name)
+                            insert("t." + field.name + (call ? "()" : ""), call ? 1 : 0)
+                        }
+                    }
+                }
+                let own = declared.parameters + declared.variables + declared.inputs
+                if !own.isEmpty {
+                    section("This script: s") {
+                        ForEach(own, id: \.self) { name in
+                            let help = declared.parameters.contains(name) ? "Parameter"
+                                : declared.inputs.contains(name) ? "Input from another slot" : "Value in this script"
+                            chip("s." + name, color: FormulaColors.plain, help: help) { insert("s." + name, 0) }
+                        }
+                    }
+                }
+                ForEach(slots, id: \.name) { slot in
+                    let info = titles[slot.name]
+                    section(info.map { "\($0.title) · slot \($0.key)" } ?? slot.name, color: info?.color) {
+                        ForEach(slot.values, id: \.name) { value in
+                            chip(value.name, color: FormulaColors.scriptColor(ScriptTokenKind.reference),
+                                 help: "\(slot.name).\(value.name): \(value.label). Read it with input(\"name\", \"\(slot.name).\(value.name)\"); add [t-1] for the step before.") {
+                                insert("\(slot.name).\(value.name)", 0)
+                            }
+                        }
+                        ForEach(slot.events, id: \.self) { event in
+                            chip(event, color: FormulaColors.scriptColor(ScriptTokenKind.keyword),
+                                 help: "An event \(slot.name) sends. Listen with on(\"\(slot.name).\(event)\", …)") {
                                 insert("\(slot.name).\(event)", 0)
                             }
                         }

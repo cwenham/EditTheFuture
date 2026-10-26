@@ -1,6 +1,7 @@
 import Foundation
 import FutureEngine
 import FutureFormula
+import FutureScript
 
 /// One slot as the store keeps it: everything needed to build it again. Changes to slots replace
 /// the whole list, so undo just puts the old list back.
@@ -27,11 +28,28 @@ struct SlotConfig: Sendable, Equatable {
     /// Identifies the model with the slot's values, so the engine can tell what changed.
     var modelKey: String {
         let values = self.values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value.bitPattern)" }.joined(separator: ",")
-        return formula + "\u{1}" + values
+        var key = formula + "\u{1}" + values
+        // Reloading libraries makes scripts load again.
+        if case .script(let language) = kind { key += "\u{1}\(language.rawValue)\u{1}\(ScriptPrograms.generation)" }
+        return key
     }
 
-    func makeModel(values: [String: Double]? = nil) throws -> FormulaModel {
-        try FormulaModel(formula, name: name, values: values ?? self.values)
+    func makeModel(values: [String: Double]? = nil) throws -> any AuthoredModel {
+        try Self.model(kind: kind, source: formula, name: name, values: values ?? self.values)
+    }
+
+    /// The slot's model built from other text, such as a draft in the editor.
+    func makeModel(source: String) throws -> any AuthoredModel {
+        try Self.model(kind: kind, source: source, name: name, values: values)
+    }
+
+    /// A formula or script model.
+    static func model(kind: ModelKind, source: String, name: String = "Model", values: [String: Double] = [:]) throws -> any AuthoredModel {
+        switch kind {
+        case .formula: return try FormulaModel(source, name: name, values: values)
+        case .script(let language): return try ScriptModel(source, language: language, name: name, values: values)
+        case .plugin, .remote: throw ScriptError("\(kind.title) models can't run yet.")
+        }
     }
 }
 
