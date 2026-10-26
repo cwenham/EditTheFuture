@@ -673,10 +673,12 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 5. **Scripts** are the user's own code, so they run in the app's process with guard rails: time and memory limits, Lua without its `os`, `io` and `debug` libraries, and audit hooks that keep Python off the network and from writing files (6.4).
 6. **Hardware** can send only commands from the vocabulary. Destructive edits (delete) always need on-screen confirmation.
 7. **Siri and Shortcuts** go through App Intents, which have system-level consent. Editing intents ask for confirmation.
+8. **Saved scenarios** can come from other people. Opening one runs its scripts (15.1). Its readings can name a database, which the app opens read-only, and only once the user has picked it (15.4).
 
 ## 14. Sources of readings
 
 - CSV or clipboard import; a Shortcuts "Add reading" action
+- SQLite databases, read through a query (15.4)
 - HealthKit (weight, for a body-weight model). The data lives on the iPhone, so it can be borrowed through section 7.
 - WeatherKit historical weather
 - FinanceKit (Apple Card, Apple Cash, Savings; US only, needs an entitlement)
@@ -685,8 +687,199 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 
 ## 15. Persistence and sync
 
-- **Document per scenario:** a package containing slots, model sources or references, authored events, recurring rules, readings, connections and branches, as Codable JSON. Cached computed values stay out of the document and can always be regenerated.
-- **Sync:** CloudKit across Mac, iPad and iPhone.
+Decided in October 2026. Nothing is built yet.
+
+A scenario is saved as plain text that people can read, edit in any editor and keep in git, the way [KeybowNotes](https://github.com/cwenham/KeybowNotes) keeps its key trees in a Markdown outline. Values the models computed are saved beside it, so slow models don't have to run again.
+
+### 15.1 The scenario folder
+
+Each scenario is a folder with the extension `.etf`. The Mac and iOS show it as one document (a package). Terminal, text editors and git see an ordinary folder.
+
+```
+Home & money.etf/
+  scenario.md       everything a person writes (15.2)
+  readings/         imported history as CSV, and copies of readings from databases (15.3, 15.4)
+    sp500.csv
+  cache/            values the models computed; safe to delete (15.5)
+    Market.etfcache
+```
+
+- `scenario.md` is the source of truth. Everything else is either linked from it or can be rebuilt.
+- One folder holds one scenario: one group of linked slots.
+- The app watches `scenario.md`. When another editor saves it, the app reloads it within a couple of seconds. Reloading goes through the same path as editing slots (4.8, "Slot layouts"), so only the slots that changed compute again. If the app has unsaved changes as well, it asks which to keep.
+- Where the panel was looking (the focused slot, the zoom, the cursor) isn't part of the scenario. The app remembers it for each scenario in its own settings.
+- A scenario from someone else holds their scripts, and opening it runs them. Scripts run with guard rails, not a full sandbox (6.4), so this needs a decision (17).
+
+### 15.2 scenario.md
+
+````markdown
+# Home & money [start: 2022-01-01, seed: 0x5EEDF07E]
+
+Notes can go anywhere, as ordinary text. The rates are the bank's quote from October 2026.
+
+## 1. Savings [Savings account, shows: balance]
+
+```etf
+step 1 month
+param rate = 4.5% range 0%..15% label "Interest rate"
+param monthly = 400 range 0..5000 by 50 label "Monthly deposit" as currency
+init balance = 18000 label "Balance" as currency
+balance[t] = balance[t-1] * (1 + rate / 12) + monthly
+on deposit: balance += event.amount
+on withdraw: balance -= event.amount
+```
+
+### Values
+- monthly: 650
+
+### Events
+- 2028-08-01 withdraw [amount: 6000]
+- 2030-01-01 set [rate: 3.5%]
+- 2027-03-01 deposit [amount: 500, every: 1 month, until: 2035-12-01]
+
+## 2. Market [Market with ups and downs, shows: price, color: FF9F43]
+
+```python
+every("1 month")
+param("drift", "6%", range=("-10%", "20%"))
+init("price", 100)
+
+def step(s, t):
+    s.price *= 1 + s.drift / 12 + t.normal(0, 0.04)
+```
+
+### Readings
+- [S&P 500 monthly closes](readings/sp500.csv)
+
+## 5. Kitchen [Room cooling, shows: temp]
+
+```lua
+every "1 hour"
+param("outside", 10, { label = "Outside", as = "temperature" })
+init("temp", 20, { label = "Temperature", as = "temperature" })
+
+function step(s, t)
+  s.temp = s.temp + (s.outside - s.temp) * 0.05
+end
+```
+
+### Readings
+- [Kitchen sensor](~/Data/sensors.sqlite)
+
+```sql
+select ts as date, temp_c as temp from readings where sensor = 'kitchen'
+```
+````
+
+| Part | How it's written |
+|---|---|
+| The scenario | The first heading: the scenario's name, then its settings in brackets. `start` is required. `seed` defaults to the engine's own. |
+| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8) and 9–16 the second. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`) and `color` (hex). |
+| The model | The fenced block under the slot's heading, exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). |
+| The slot's own values | `### Values`: one `- name: value` line for each parameter or starting value that differs from the model's default (6.2). |
+| Events | `### Events`: one line per event or recurring rule. |
+| Readings | `### Readings`: a `csv` block, a link to a CSV file (15.3), or a link to a SQLite database followed by a `sql` block (15.4). |
+| Links between slots | Nothing extra. They're in the formulas and scripts already (`Climate.temp`). |
+| Notes | Any other text, kept as written. |
+
+Branches (5.7) aren't in the format yet. One possibility is a section that lists only what the branch changes, under the same headings (17).
+
+**Brackets** follow KeybowNotes' rules. The final group in square brackets holds the settings, separated by commas. A setting is a `name: value` pair or a single word. Text with commas or brackets in it goes in double quotes, and numbers in brackets have no thousands separators.
+
+**Events:**
+- Each line is the date, the event's kind, then its fields in brackets: `- 2028-08-01 withdraw [amount: 6000]`.
+- `set` events change parameters: `- 2030-01-01 set [rate: 3.5%]`.
+- Recurring rules add `every`, in the formula language's step units (`1 month`, `2 weeks`), and can add `until` (inclusive) or `count`.
+- The app writes events in date order, but any order reads.
+- Generated events aren't written. They're results, kept in the cache (15.5).
+
+**Numbers:**
+- A value is written in its quantity: `4.5%` for a percent, a plain number otherwise. Values are read with the command bar's rules, so `1.5k` and `$1200` work too.
+- The app writes each number so that it reads back as exactly the same value. When the short form doesn't (0.1 + 0.2), it writes every digit needed: `0.30000000000000004`.
+- `inf`, `-inf` and `nan` are allowed, since values can be extreme.
+
+**Dates** are ISO 8601, in UTC like the engine (4.2): `2028-08-01`, `2028-08`, or `2028-08-01T09:30` for steps shorter than a day. Years past 9999 take a sign and more digits, as ISO 8601 allows: `+31000-01-01`.
+
+**Event IDs** aren't written. The engine orders events within a step by their IDs (4.4), so the app derives each one from its slot and its line: the date, kind and fields, and how many identical lines come before it. The same file always gives the same results, and adding notes or moving lines changes nothing.
+
+**Writing back:**
+- The app keeps what it doesn't understand: notes, other headings, blank lines.
+- An edit in the app rewrites only the parts it changed, in one consistent form: a slot's heading, model, values, events or readings. New slots go in position order.
+
+**Mistakes** are reported with their line, and only affect what they're in:
+- A mistake in a slot's section pauses that slot, with the reason, as slots that can't run are paused now (5.9). The other slots run.
+- An event line that can't be read is skipped and listed.
+- A scenario whose first heading or start date can't be read doesn't open, and the app says why.
+
+### 15.3 Readings from CSV
+
+- The first column is the date. The others are named after the slot's variables: `date,price`. The header line is required.
+- An empty cell means no reading.
+- Dates are written as in `scenario.md`.
+- Small sets go in a `csv` block under `### Readings`. When importing, the app writes sets of more than about 100 rows to a file in `readings/` and links to it.
+- The link's text says where the readings came from.
+
+### 15.4 Readings from SQLite
+
+Readings can come straight from a SQLite database, such as a sensor logger's, Home Assistant's or an export. SQLite is part of macOS and iOS (`import SQLite3`), so this needs no extra package.
+
+- **The link and the query:** a link to the database, then a `sql` block. The query's columns follow the CSV rule: `date` first, then the slot's variable names.
+- **Times:** `date` can be ISO text or seconds since 1970. Other forms are converted in the query, such as `ts / 1000.0 as date` for milliseconds. The app compares times as numbers, because SQLite's own date functions stop at the year 9999.
+- **Values:** null means no reading. SQLite can't store NaN (it stores null instead), and −0 loses its sign. Neither matters for readings.
+- **Read-only:** the app opens the database read-only and refuses `ATTACH`, through an authorizer. Loading extensions stays off. A query has a time limit, as scripts do. So a query can only read that one database.
+- **Paths** are relative to the scenario folder, and `~` is the home folder.
+- **A copy travels with the scenario:** the app keeps a CSV copy of what it last read in `readings/`, and updates it when the database changes. A scenario opened without the database, on another device or by someone else, uses the copy.
+- **The sandbox.** iOS apps are always sandboxed, and the Mac App Store app will be too (the Mac app isn't yet). Then:
+  - The user picks the database once. That gives the app access to it, and it's also consent: a scenario from someone else can't read a database on your device without asking. The app keeps that access (a security-scoped bookmark) in its own settings, not in the scenario.
+  - SQLite makes `-wal`, `-shm` or `-journal` files beside a database, which the sandbox blocks. On the Mac, the app declares them as related files (`NSIsRelatedItemType` in its Info.plist). Otherwise it opens the database with `immutable=1` when it won't change while open, or imports a copy.
+- **Large sets inside the scenario:** a set too big for CSV (millions of rows) can be a `.sqlite` file in `readings/`. It's read-only once imported.
+- **Why CSV stays the default:**
+  - A database isn't text. It can't be read or edited in a text editor, and git can't merge it. A `sqlite3 .dump` diff driver makes git's diffs readable, but that's all.
+  - SQLite changes its file in place, while document saving (autosave, Versions, Save As) and iCloud Drive copy whole files. Syncing a database while it's open, or without its `-wal` file, can lose data.
+
+  Reading databases avoids both problems. Writing them by default would bring them in.
+
+### 15.5 The cache
+
+Some models take a long time to compute: ensembles (4.6), slow scripts, and remote and plug-in models. Their values are saved in `cache/`, so opening the scenario doesn't run them again.
+
+- **What's kept for each slot:**
+  - Its computed values: every column its history keeps (4.8).
+  - Its checkpoints (4.3), which let the engine carry on from the end of the cache, or rewind to just before an edit, instead of starting over. A script's state is a list of numbers (6.4), so it saves as easily as a formula's. Plug-ins save theirs through `getState` (6.1).
+  - Its generated events.
+- **Format:** one file per slot.
+  - The first line is a text header in JSON: the file format's version, the fingerprint, the column names, the step rate and start, the number of points, and where the checkpoints and events begin.
+  - Then the values and the checkpoints, as little-endian doubles, followed by the generated events. Times aren't stored, because point *i* is start + *i* × step rate (4.2).
+  - The app maps the file into memory instead of reading it.
+- **Binary, not text:** nobody should edit computed values. Raw doubles keep every value exact, including infinity and NaN. They load at once, and take less than half the space of text. Jupyter notebooks show the cost of the other choice: they keep outputs in the same text file as the code, the diffs get huge, and people strip the outputs before committing.
+- **The fingerprint** says what made the values. It's a SHA-256 hash of:
+  - the model's kind and text, and the slot's own values
+  - the slot's events and readings
+  - the scenario's start and seed
+  - the engine's version, a number raised whenever a change to the engine could change results
+  - for scripts, the library files they loaded (6.4)
+  - the fingerprints of the slots it reads or listens to
+- **Using it:** when a scenario opens, the app works out each slot's fingerprint and uses the cache only if it matches. So an edit made in another editor can never show stale values, and a change to Climate retires EnergyBill's cache too. Caches that no longer match are deleted on the next save.
+- **What gets cached:**
+  - Slots that took more than about a second to compute.
+  - Remote and plug-in models, whose results may not be reproducible offline.
+  - Not formula slots, as a rule: one computes 1,000 years of months in about 40 ms.
+  - Not slots that stopped with an error.
+- **Size:** the cache holds what the engine has computed, up to a size limit for each scenario.
+- **Leaving it out:** the cache can be left out of git and sync. Each device rebuilds what it needs.
+- **Later:** when only events changed, keep the cache up to the first changed event, the same rule the engine uses for edits (4.3).
+
+### 15.6 Why Markdown
+
+- **Most of a scenario is code.** Fenced blocks hold formulas and scripts exactly as typed, and GitHub, VS Code and Markdown viewers colour them. In YAML they'd be indented strings: a pasted Python script would need re-indenting, and a stray tab breaks the whole file.
+- **People type the values.** YAML guesses types from how values look (its "Norway problem", where `NO` becomes false). ETF reads values with the command bar's rules, as it does everywhere else.
+- **There's room for notes.** The reasons behind a scenario's assumptions can sit right next to them.
+- **It follows KeybowNotes:** headings are sections, numbers are positions, and settings go in a final pair of square brackets. KeybowNotes' parser is shaped around key trees, so ETF needs its own small one.
+- **No extra package.** Swift has no YAML parser built in.
+
+### 15.7 Sync
+
+CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked from a database on one Mac reach other devices through their CSV copy (15.4).
 
 ## 16. Roadmap
 
@@ -708,8 +901,10 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 - How should pinned and suppressed generated events be stored so they survive model edits?
 - Ensemble size and progressive refinement budget per frame.
 - Market data provider and licensing.
-- Branch storage: copy-on-write event lists vs a diff log.
+- Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
+- Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
+- Where do scenarios live by default, and how does the scenario menu find them?
 
 ## 18. Further reading: FMI and co-simulation
 

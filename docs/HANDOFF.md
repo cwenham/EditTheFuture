@@ -98,7 +98,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 ## Not built yet
 
-- **Saving:** nothing persists. Added events are lost when the app quits (DESIGN.md, 15).
+- **Saving:** nothing persists. Added events are lost when the app quits. The format is designed (DESIGN.md, 15): a `.etf` folder holding `scenario.md` (Markdown, like KeybowNotes' outline), readings as CSV or read from SQLite, and a binary cache of slow slots' values.
 - **Scenarios:** there's no scenario menu, only the built-in scenario.
 - **More for programming models:** saving a slot's model to the library ("Your models"), and plug-ins. The picker's Plug-ins category is empty until then.
 - **More for scripts** (DESIGN.md, 6.4):
