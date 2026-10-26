@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `6a2875b` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `8e68250` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -33,6 +33,8 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `85d9ac2` | New features and fixes start on their own branches. |
 | `7fd8363` | Lua and Python scripts as models, on the Mac and ready for iOS (DESIGN.md, 6.4). |
 | `6a2875b` | The model picker can add script models; `fetch-python.sh` keeps Python in the build. Merged from `feature/scripting`. |
+| `8f551cf` | The save format designed: Markdown scenarios, CSV or SQLite readings, a binary cache (DESIGN.md, 15). |
+| `8e68250` | Saving built: `.etf` scenario folders with `scenario.md`, outside edits loaded as they're saved, readings from CSV and SQLite, and a cache of slow slots. Merged from `feature/document-format`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -40,7 +42,7 @@ Milestones M0 and M1 from DESIGN.md section 16 are done.
 
 The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launch writes the built-in "Home & money" scenario to the Scenarios folder. It has five slots: Savings, Index fund, Mortgage, Climate and Energy bill, which reads Climate's temperature.
 
-- **Saving** (DESIGN.md, 15; on `feature/document-format`, not merged yet):
+- **Saving** (DESIGN.md, 15):
   - A scenario is a `.etf` folder in `~/Library/Application Support/Edit The Future/Scenarios`, holding `scenario.md` (Markdown in KeybowNotes' style), `readings/` and `cache/`. Finder shows it as one document.
   - The app opens the scenario used last, and saves changes half a second after they stop.
   - Edits made to `scenario.md` in another editor show in the panel within a couple of seconds, as one change that ⌘Z takes back. A file that can't be read is reported, and the app doesn't save over it.
@@ -235,7 +237,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, merged by fast-forward.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, and `feature/document-format` the second, both merged by fast-forward.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
