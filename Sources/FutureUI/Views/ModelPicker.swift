@@ -105,7 +105,7 @@ struct ModelPicker: View {
             VStack(alignment: .leading, spacing: 2) {
                 if templates.isEmpty {
                     Text(query.isEmpty && category == .plugins
-                         ? "Plug-ins will appear here once the WebAssembly host is built (milestone M4). Lua and Python scripts will follow."
+                         ? "Plug-ins will appear here once the WebAssembly host is built (milestone M4). Lua and Python scripts are in the other categories."
                          : "No models match “\(query)”.")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.secondary)
@@ -243,6 +243,10 @@ private struct TemplateDetail: View {
             if let warning {
                 Text(warning).font(.system(size: 11)).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
             }
+            if let error = facts.error {
+                Text("This model can't be added: \(error)")
+                    .font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button(actionTitle, action: action)
@@ -317,9 +321,9 @@ struct TemplateFacts {
     }
 
     private static func make(_ template: ModelTemplate) -> TemplateFacts {
-        let model: FormulaModel
+        let model: any AuthoredModel
         do {
-            model = try FormulaModel(template.formula, name: template.slotName)
+            model = try SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName)
         } catch {
             return TemplateFacts(line: template.kind.title, reads: nil, parameters: [], starting: [], error: String(describing: error))
         }
@@ -347,7 +351,7 @@ struct TemplateFacts {
 enum TemplatePreview {
     static func samples(for template: ModelTemplate, start: Date, years: Int = 20) async -> [Sample] {
         await Task.detached(priority: .userInitiated) {
-            guard let model = try? FormulaModel(template.formula, name: template.slotName),
+            guard let model = try? SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName),
                   model.descriptor.inputs.isEmpty, model.descriptor.subscriptions.isEmpty else { return [Sample]() }
             let scenario = Scenario(start: start)
             guard let id = try? scenario.addSlot(template.slotName, model: model) else { return [] }

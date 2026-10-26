@@ -152,7 +152,7 @@ final class PythonRuntime: ScriptRuntime {
     let descriptionJSON = "{}"
 
     init(source: String, libraries: [URL], limits: ScriptLimits) throws {
-        throw ScriptError("Python isn't included in this build. Run scripts/fetch-python.sh, then build again.")
+        throw ScriptError("Python isn't included in this build. Run scripts/fetch-python.sh (again, if Vendor/Python is already there), then build again.")
     }
 
     static func prepare() {}

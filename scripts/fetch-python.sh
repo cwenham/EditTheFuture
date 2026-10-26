@@ -5,6 +5,7 @@
 # and iOS apps. Checksums are pinned; a mismatch stops the script. The Mac and iOS frameworks
 # are merged into Vendor/Python/Python.xcframework, which Package.swift links when it exists.
 # pip, ensurepip, venv, idlelib and the test suite are removed (docs/DESIGN.md, 6.4).
+# Run it again if a build leaves Python out although Vendor/Python is there.
 #
 # Usage: scripts/fetch-python.sh
 set -euo pipefail
@@ -19,8 +20,21 @@ sums[iOS]=ce1c68affa1cbd9c5611a0f4a013e412f14a760cf22c6bb58cfb4d893073bd45
 
 vendor=Vendor/Python
 stamp="$version-$build"
+
+# Package.swift links Python only when Vendor/Python exists, but SwiftPM caches the evaluated
+# manifest, and the build plan made from it, without knowing that. So a build from before the
+# fetch would keep leaving Python out. Clearing the manifest cache (only a cache: the next build
+# makes it again) and touching Package.swift make the next build look again. This runs even when
+# Python is already here, so running the script always fixes it.
+forget_manifest() {
+    rm -rf "$HOME/Library/Caches/org.swift.swiftpm/manifests"
+    touch Package.swift
+    echo "Cleared SwiftPM's caches of Package.swift, so the next build includes Python"
+}
+
 if [[ -f $vendor/.fetched && $(cat $vendor/.fetched) == "$stamp" && -d $vendor/Python.xcframework ]]; then
     echo "Python $stamp is already in $vendor"
+    forget_manifest
     exit 0
 fi
 
@@ -62,3 +76,4 @@ rm -rf "$vendor/macOS"
 
 echo "$stamp" > "$vendor/.fetched"
 echo "Python $stamp is in $vendor"
+forget_manifest

@@ -155,7 +155,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 
 ## Checking your work
 
-- **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout.
+- **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
 - **Tests:** `swift test` runs about 180 tests in about 15 seconds.
   - Store tests must `await store.waitUntilIdle()` before reading results.
@@ -194,6 +194,8 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 - **SwiftUI sliders with `step`** draw a tick mark per step on the Mac. A 10,000-step range took 16 seconds of main-thread time. Snap the value yourself instead (`SlotValue.snapped`).
 - **The formula editor's completion list is the app's own,** not AppKit's: AppKit's inserts the selected word when you type on and opens on Esc. `FormulaTextView` handles ↑ ↓ ↩ Tab and Esc while the list shows. To test it, put a `FormulaEditorContainer` in a window and call `insertText` and `accept` on its text view.
 - **Checks belong to the text they checked** (`FormulaCheck.text`). The pane says "Checking…" and draws no underlines until the check for the current text arrives.
+- **SwiftPM caches the evaluated `Package.swift`,** and the build plan made from it, without knowing that the manifest checks for `Vendor/Python`. After a build without the folder, later builds kept leaving Python out, and Python's tests were silently skipped. `fetch-python.sh` clears the manifest cache and touches `Package.swift`. Check that Python's tests ran, not just that the run passed.
+- **The model picker** builds each library model to show its details, and disables Add when that fails. It built every model as a formula, so script models couldn't be added. It now builds them by kind, and says why when a model can't be added.
 - **Lua's count hook** makes the VM check on every instruction, which costs about 0.9 µs a step. It's what stops endless loops, so it stays.
 - **`String(format:)`** took longer than a whole Lua step. Format hot-path text by hand.
 - **Freezing Lua's globals:** `__newindex` only fires for keys that aren't there, so the globals move to a backing table. Keep a local reference to `_G` while doing it: clearing the `_G` key mid-loop made the global lookup return nil.

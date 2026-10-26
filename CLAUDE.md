@@ -9,7 +9,7 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 - Build: `swift build`
 - Test: `swift test` (Swift Testing)
 - Benchmarks: `swift run -c release etf-bench [engine|state|frames|flick|far|loop|engine-loop|cursor-loop]`
-- Python for scripts: `scripts/fetch-python.sh` once per checkout (into `Vendor/Python`, not in git). Without it, Python slots pause.
+- Python for scripts: `scripts/fetch-python.sh` once per checkout (into `Vendor/Python`, not in git). Without it, Python slots pause. Run it again if Python's tests show as skipped: SwiftPM caches whether the folder was there.
 - A script without the app: `swift run etf-script model.lua --through 2040-01-01`
 - App: `scripts/build-app.sh`, then `open .build/EditTheFuture.app`. It's a menu bar app; show the panel with ⌃⌥Space or `open "etf://show?timeline=savings&at=2060-01"`.
 

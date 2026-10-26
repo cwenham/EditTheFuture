@@ -36,6 +36,20 @@ struct ScriptSlotTests {
         #expect(store.slotFailures.isEmpty)
     }
 
+    @Test("The picker can add every library model, scripts included, and previews the ones that stand alone")
+    func pickerFacts() async throws {
+        for template in ModelLibrary.all {
+            let facts = TemplateFacts.of(template)
+            #expect(facts.error == nil, "\(template.name): \(facts.error ?? "")")
+            #expect(!facts.parameters.isEmpty, "\(template.name) shows no parameters")
+            #expect(facts.line.hasPrefix(template.kind.title), "\(template.name): \(facts.line)")
+            if facts.reads == nil {
+                let preview = await TemplatePreview.samples(for: template, start: utc(2026, 1, 1))
+                #expect(preview.count > 20, "\(template.name) has no preview")
+            }
+        }
+    }
+
     @Test("Script slots read formula slots, and formulas read scripts")
     func mixedWiring() async throws {
         let store = try await makeStore()
