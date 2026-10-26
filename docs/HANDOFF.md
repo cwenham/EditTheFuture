@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-26, in the commit that added the formula editor (the one after `bc8cc29`).
+Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `6764b20`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -29,7 +29,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `022704c` | Computing moved to a background actor; crash fixes for huge values |
 | `4b7b7de` | Now button, `goto` for values, far-future readout fix |
 | `bc8cc29` | Model library and picker, adding, changing, moving and removing slots, the Slot tab, parameter ranges and labels in formulas, paused slots |
-| after `bc8cc29` | The formula editor: colouring, completion, insert palette, checks with one-click fixes, preview, apply and revert |
+| `6764b20` | The formula editor: colouring, completion, insert palette, checks with one-click fixes, preview, apply and revert. The wheel moves time only over the graphs. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -176,7 +176,7 @@ The Mac app, with the built-in "Home & money" scenario. It has five slots: Savin
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - Commits go straight to `main`; there's no remote.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
