@@ -73,12 +73,13 @@ extension ScenarioStore {
             say("All \(Self.bankSize) slots are full. Remove one first.", isError: true)
             return false
         }
-        let config = SlotConfig(position: position, name: uniqueName(template.slotName), model: template.name,
+        let blank = template.category == .blank
+        let config = SlotConfig(position: position, name: uniqueName(template.slotName), model: blank ? "Custom formula" : template.name,
                                 kind: template.kind, formula: template.formula, variable: template.variable,
                                 format: template.format)
         closePicker()
         applySlotChange(configs + [config], focus: config.id)
-        showSlotSettings()
+        if blank { showFormulaEditor() } else { showSlotSettings() }
         say("Added \(template.name) to slot \(position + 1) as \(displayName(config.name))")
         return true
     }
@@ -89,7 +90,7 @@ extension ScenarioStore {
         guard isSlot(index) else { return }
         var config = configs[index]
         let declared = (try? FormulaModel(template.formula)).map { Set($0.parameterNames + $0.startingValueNames) } ?? []
-        config.model = template.name
+        config.model = template.category == .blank ? "Custom formula" : template.name
         config.kind = template.kind
         config.formula = template.formula
         config.variable = template.variable
@@ -337,6 +338,7 @@ extension ScenarioStore {
         guard isSlot(index) else { return }
         let config = configs[index]
         parameterDrag = ParameterDrag(slot: config.id, name: name, value: value)
+        previewSlot = config.id
         guard value.isFinite, !slots[index].isPaused else { return }
         var values = config.values
         values[name] = value
@@ -353,8 +355,7 @@ extension ScenarioStore {
     public func endStartingValuePreview(commit: Bool) {
         let drag = parameterDrag
         parameterDrag = nil
-        parameterPreviewSequence += 1
-        if !parameterPreview.isEmpty { parameterPreview = [] }
+        clearSlotPreview()
         guard commit, let drag, let index = configs.firstIndex(where: { $0.id == drag.slot }) else { return }
         setStartingValue(drag.name, to: drag.value, inSlotAt: index)
     }

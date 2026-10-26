@@ -8,6 +8,8 @@ import FutureUI
 final class PanelController {
     let store: ScenarioStore
     let panel: FloatingPanel
+    /// The panel's SwiftUI content, for placing the pointer in the panel's top-left coordinates.
+    private weak var hosting: NSView?
     private var peekGesture = PeekGesture()
     private(set) var isPeeking = false
     private var eventMonitor: Any?
@@ -40,6 +42,7 @@ final class PanelController {
             hosting.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
         ])
         panel.contentView = blur
+        self.hosting = hosting
         panel.setFrameAutosaveName("EditTheFuturePanel")
         if !panel.setFrameUsingName("EditTheFuturePanel") { panel.center() }
 
@@ -49,6 +52,7 @@ final class PanelController {
         panel.onUndo = { [weak self] in self?.store.undo() }
         panel.onRedo = { [weak self] in self?.store.redo() }
         panel.onToggleSlotSettings = { [weak self] in self?.store.toggleSlotSettings() }
+        panel.onShowFormula = { [weak self] in self?.store.showFormulaEditor() }
         panel.onHide = { [weak self] in self?.hide() }
         panel.onKey = { [weak self] event in self?.handleKey(event) ?? false }
 
@@ -134,6 +138,9 @@ final class PanelController {
             store.zoom(by: 1 - event.magnification)
             return true
         case .scrollWheel:
+            // Over anything but the graphs and lanes, the wheel scrolls what's under the pointer:
+            // the formula editor, the insert palette, the Slot tab.
+            guard let hosting, store.isOverTimeline(hosting.convert(event.locationInWindow, from: nil)) else { return false }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let (action, found) = scrollMapper.map(ScrollMapper.Input(
                 dx: Double(event.scrollingDeltaX), dy: Double(event.scrollingDeltaY),

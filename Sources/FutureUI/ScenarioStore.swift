@@ -56,6 +56,8 @@ public final class ScenarioStore {
     /// The side pane's tabs (docs/UI.md, section 3).
     public enum SidePaneTab: String, Sendable {
         case event, slot
+        /// The focused slot's formula editor (docs/UI.md, 5.7).
+        case formula
     }
 
     /// Which model picker is open (docs/UI.md, 5.7).
@@ -152,15 +154,35 @@ public final class ScenarioStore {
     /// Identifies the newest preview request; older results are dropped.
     @ObservationIgnored var previewSequence = 0
 
-    /// The focused slot's line while a parameter's slider is dragged, drawn dashed.
+    /// The focused slot's line while a parameter's slider is dragged, or with the formula being
+    /// edited, drawn dashed.
     public internal(set) var parameterPreview: [Sample] = []
     @ObservationIgnored var parameterDrag: ParameterDrag?
     @ObservationIgnored var parameterPreviewSequence = 0
+    /// The slot `parameterPreview` belongs to, while a slider is dragged or a formula edited.
+    @ObservationIgnored var previewSlot: UUID?
+
+    /// Formulas being edited and not yet applied, by slot id.
+    public internal(set) var formulaDrafts: [UUID: String] = [:]
+    /// What's wrong with each slot's formula as it's being edited, worked out shortly after typing stops.
+    public internal(set) var formulaChecks: [UUID: FormulaCheck] = [:]
+    @ObservationIgnored var formulaCheckTask: Task<Void, Never>?
+    /// Each slot's model descriptor from the last time slots were built (nil when its formula failed).
+    @ObservationIgnored var descriptors: [ModelDescriptor?] = []
 
     /// The latest results from the engine. Everything on screen is drawn from these.
     var computed: ScenarioEngine.FetchResult?
     /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
     @ObservationIgnored private var computedSlots: [UUID] = []
+
+    /// Where the graphs and lanes are, in the panel's top-left coordinates (the hosting view's). The mouse wheel moves
+    /// time only over them; elsewhere it scrolls what's under the pointer, like the formula editor.
+    @ObservationIgnored public internal(set) var timelineFrame = CGRect.zero
+
+    /// Whether a point in the panel (top-left coordinates) is over the graphs and lanes.
+    public func isOverTimeline(_ point: CGPoint) -> Bool {
+        timelineFrame.contains(point)
+    }
 
     /// Called when the command bar asks for something only the app can do (copying).
     @ObservationIgnored public var onAppAction: ((CommandBarAction) -> Void)?
@@ -202,6 +224,7 @@ public final class ScenarioStore {
         self.configs = configs
         self.slots = assembly.slots
         self.linkCount = assembly.linkCount
+        self.descriptors = assembly.descriptors
         self.computedSlots = assembly.slots.map(\.id)
         self.name = definition.name
         self.start = definition.start
@@ -222,6 +245,7 @@ public final class ScenarioStore {
         let slots: [SlotInfo]
         let layout: ScenarioEngine.Layout
         let linkCount: Int
+        let descriptors: [ModelDescriptor?]
     }
 
     /// Compiles each slot's model, checks how the slots read each other, and describes the result
@@ -250,7 +274,7 @@ public final class ScenarioStore {
             slots.append(slotInfo(config, model: model, paused: paused))
         }
         let layout = ScenarioEngine.Layout(slots: setups, events: configs.map(\.events), rules: configs.map(\.rules))
-        return Assembly(slots: slots, layout: layout, linkCount: report.linkCount)
+        return Assembly(slots: slots, layout: layout, linkCount: report.linkCount, descriptors: models.map { $0?.descriptor })
     }
 
     nonisolated private static func slotInfo(_ config: SlotConfig, model: FormulaModel?, paused: String?) -> SlotInfo {
@@ -307,7 +331,11 @@ public final class ScenarioStore {
                 parameterDate: computed.parameterDate)
         }
         computedSlots = order
+        descriptors = assembly.descriptors
         slots = assembly.slots
+        let ids = Set(order)
+        if formulaDrafts.keys.contains(where: { !ids.contains($0) }) { formulaDrafts = formulaDrafts.filter { ids.contains($0.key) } }
+        if formulaChecks.keys.contains(where: { !ids.contains($0) }) { formulaChecks = formulaChecks.filter { ids.contains($0.key) } }
         if linkCount != assembly.linkCount { linkCount = assembly.linkCount }
         let index = slots.firstIndex { $0.id == wanted } ?? min(focusedIndex, slots.count - 1)
         if focusedIndex != index { focusedIndex = index }
@@ -586,7 +614,7 @@ public final class ScenarioStore {
     }
 
     private func receiveParameterPreview(_ result: ScenarioEngine.PreviewResult) {
-        guard parameterDrag != nil, result.sequence == parameterPreviewSequence, result.version == revision else { return }
+        guard previewSlot != nil, result.sequence == parameterPreviewSequence, result.version == revision else { return }
         parameterPreview = result.samples
     }
 
@@ -821,7 +849,7 @@ public final class ScenarioStore {
         let focusSlot = focused
         let focusSamples = samples(focusedIndex)
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
-        let dragging = parameterDrag?.slot == focusSlot.id && !parameterPreview.isEmpty
+        let dragging = previewSlot == focusSlot.id && !parameterPreview.isEmpty
         let preview = dragging ? parameterPreview : draftOnFocus == nil ? [] : draftPreview
         let lineRange = range(focusSamples), previewRange = range(preview)
         let low = min(lineRange?.low ?? 0, previewRange?.low ?? .infinity)

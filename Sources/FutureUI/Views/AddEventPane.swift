@@ -186,6 +186,7 @@ struct EffectBox: View {
 /// The two places the pane can be dropped while it's being dragged.
 struct DockZones: View {
     let highlighted: PaneSide
+    let width: CGFloat
 
     var body: some View {
         HStack {
@@ -203,6 +204,6 @@ struct DockZones: View {
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Theme.proposal.opacity(active ? 0.9 : 0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
             .overlay(Text("Dock \(side.rawValue)").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.proposal))
-            .frame(width: SidePane.width)
+            .frame(width: width)
     }
 }

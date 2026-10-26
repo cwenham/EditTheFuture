@@ -99,9 +99,10 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Events strip:** one row under the time axis for the focused slot. Its label reads "click to pick a date".
 
-**Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. It has two tabs:
+**Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. It has three tabs:
 - **Event:** adds events to the focused slot (5.3).
 - **Slot:** the focused slot's name, model, parameters, starting values and display settings (5.7).
+- **Formula:** the focused slot's formula editor (5.7). The pane is wider while it shows.
 
 **Lanes:** one per other slot in the bank. Each lane has:
 - the slot number, color bar and name
@@ -141,9 +142,13 @@ Clicking a lane's name focuses that slot.
 | ⌘C / ⇧⌘C | Copy snapshot / copy data |
 | ⌘K | Command bar |
 | ⌘I | The side pane's Slot tab for the focused slot (pressed again, back to Event) |
+| ⌥⌘I | The side pane's Formula tab for the focused slot |
+| ⌘↩ | In the Formula tab: apply the formula |
 | ⌘L | Links view (planned) |
 | Right-click a slot chip | The chip's menu (5.7) |
 | Esc | Cancel the current gesture, then leave the field being edited, then hide the panel |
+
+**Where the wheel works:** the wheel and trackpad swipes move time only while the pointer is over the graphs and lanes. Anywhere else they scroll what's under the pointer, such as the formula editor, the insert palette or the Slot tab. Pinching zooms time anywhere in the panel.
 
 **Mouse wheels:** macOS doesn't report how many wheels a mouse has, so the app watches for one. The first wheel event with a horizontal movement and no Shift held can only come from a horizontal wheel. From then on the vertical wheel zooms, and the app says so in the status line. (macOS turns Shift + vertical wheel into horizontal movement, so those events don't count.) The finding is remembered, and the menu bar item has a "Mouse Has a Horizontal Wheel" toggle to override it. Zooming centres on the pointer.
 
@@ -231,7 +236,7 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 - **Slots keep their positions.** Removing one leaves a gap, so the others keep their numbers, colors and hardware buttons. A scenario always keeps at least one slot.
 
 **The model picker** is a popover. It opens from an empty chip or its menu to add a model, and from a chip's Change model… or the Slot tab's Change… to give a slot a different one.
-- A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). A Blank formula comes with the formula editor.
+- A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics, Blank and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). Blank has a small formula to start your own from; adding it opens the Formula tab.
 - Changing a model starts on the slot's current model.
 - Each model shows its kind (Formula for now; later Lua, Python, Plug-in or Remote) and a one-line description.
 - The detail shows a preview of the model's line over 20 years with its defaults, its parameters and starting values, its step, and the events it handles and sends. The preview is computed off the main thread. A model that reads another slot, like Energy bill, has no preview on its own.
@@ -265,8 +270,25 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 
 **Command bar:** `add savings account` adds a model to the first free slot, `add loan to 7` to slot 7, and `remove climate` asks to remove a slot in the Slot tab. 1–8 focus by position; an empty position says how to fill it.
 
+**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula. The side pane widens to 480 points while it shows.
+- **The editor:** SF Mono with line numbers. Keywords are purple, numbers amber, `[t]` and `[t-1]` green, other slots' values and `event.amount` blue, built-ins cyan, labels green and comments grey.
+- **Completion:** typing a name opens a list under the caret of what fits there.
+  - In an expression: this formula's values and parameters, other slots (choosing one goes straight on to its values), functions (the caret lands between the brackets), built-ins and `and`, `or`, `not`.
+  - After `Climate.temp.`, the resampling rules. At the start of a line, the statements. After `step 1`, time units. After `as`, kinds of value. After `on Climate.`, its events too.
+  - ↑ and ↓ choose, ↩ or Tab puts the choice in, and Esc closes the list. A second Esc leaves the editor. Nothing is offered inside comments or labels.
+- **Insert palette**, under the editor: functions, time and constants, this formula's names, and each other slot's values and events, as chips. Clicking one puts it at the caret, and hovering explains it.
+- **Checking:** 300 ms after typing stops, the formula is checked. A mistake gets a dotted underline on the word (or the line), a faint band on its line, and a red line number. A box under the editor explains up to three problems, with their lines, and offers fixes as buttons:
+  - a misspelt name or function: "Use rate"
+  - a value that uses itself, or two values that use each other, within the same step: "Use balance[t-1]"
+  - another slot, value or event that isn't there: "Use Climate.temp"
+  - a same-step loop with another slot: "Use EnergyBill.bill[t-1]"
+  - taking away a value another slot reads: "Energy bill would pause", as a warning.
+- **Preview:** while the formula has no mistakes and the slot would run, the graph shows its new line dashed.
+- **Apply** (⌘↩) makes the draft the slot's formula; undo puts the old one back. The model's name gets "(edited)". If the value the graph showed is gone, it shows the formula's first value instead. Mistakes block Apply; warnings don't, and the slots they name pause.
+- **Revert** puts the slot's formula back. A draft is kept per slot until it's applied or reverted, so switching tabs or slots loses nothing; "Not applied" marks one.
+
 **Planned:**
-- **The formula editor:** checks the formula as you type (debounced 300 ms) and shows errors inline, with quick fixes. Example: "Use FireRisk.OverCapacity[t-1]". Slots affected by an error pause, as above.
+- **Variables, Events and Readings** beside the formula, as in the mockup, with each value at the cursor.
 - **Saving to the library:** a slot's model saved as "Your models".
 - **Scripts and plug-ins** in the picker (DESIGN.md, 6).
 - **Links view (⌘L):** slots as nodes, connections as wires.
@@ -374,6 +396,8 @@ Sections:
   - Before anything reaches the engine, the store compiles each model and checks how the slots read each other (`Wiring.check`, DESIGN.md 5.9). Slots that can't run are paused, not dropped.
   - The engine gets the whole layout. When only models or values changed, it swaps just those models, and only those slots and the slots that read them are recomputed. Adding, removing, moving or renaming rebuilds the scenario.
   - The latest results follow their slots when the list changes, so lines stay on screen until the engine has new ones.
+  - The formula editor is an `NSTextView` (TextKit 1) with an `NSRulerView` for line numbers. `FormulaHighlighter` colours the whole text after each change; formulas are short enough that this costs nothing noticeable.
+  - The completion list is the app's own SwiftUI overlay, driven by the text view's keys. AppKit's built-in completion puts the selected word in when you type on, and opens on Esc, which isn't what a formula wants.
   - Sliders don't use SwiftUI's `step`: on the Mac it draws a tick mark per step, and a range of 10,000 steps took 16 seconds to draw. The value is snapped to the step instead.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**

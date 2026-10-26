@@ -10,6 +10,7 @@ final class FloatingPanel: NSPanel {
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
     var onToggleSlotSettings: (() -> Void)?
+    var onShowFormula: (() -> Void)?
     var onHide: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
 
@@ -49,6 +50,10 @@ final class FloatingPanel: NSPanel {
         }
         if flags == .command && key == "i" {
             onToggleSlotSettings?()
+            return true
+        }
+        if flags == [.command, .option] && key == "i" {
+            onShowFormula?()
             return true
         }
         if !isEditingText {

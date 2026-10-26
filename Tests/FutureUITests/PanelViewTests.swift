@@ -121,6 +121,60 @@ struct PanelViewTests {
         #expect(store.slots.count == 6)
     }
 
+    @Test("The Formula tab draws while editing, checking, fixing and applying")
+    func formulaTab() async throws {
+        let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        store.showFormulaEditor()
+        settle(view)
+        let text = store.formulaText(forSlotAt: 0)
+        store.editFormula(text.replacingOccurrences(of: "rate / 12", with: "rat / 12"), forSlotAt: 0)
+        store.updateFormulaCheck(forSlotAt: 0)
+        settle(view)
+        let fix = try #require(store.formulaChecks[store.slots[0].id]?.diagnoses.first?.fixes.first)
+        store.useFormulaFix(fix, forSlotAt: 0)
+        settle(view)
+        store.editFormula(text + "\n# more", forSlotAt: 0)
+        store.updateFormulaCheck(forSlotAt: 0)
+        await store.waitUntilIdle()
+        settle(view)
+        #expect(store.applyFormula(forSlotAt: 0))
+        settle(view)
+        store.focus(index: 4)
+        settle(view)
+        store.addModel(ModelLibrary.blankFormula, atPosition: 6)
+        settle(view)
+        store.removeSlot(at: store.focusedIndex)
+        settle(view)
+        #expect(store.slots.count == 5)
+    }
+
+    @Test("The mouse wheel moves time only over the graphs and lanes")
+    func wheelArea() async throws {
+        let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+        // The app places the pointer in the hosting view's coordinates, which are top-left like SwiftUI's.
+        #expect(view.isFlipped)
+        let frame = store.timelineFrame
+        #expect(abs(frame.minY - 110) < 6)  // below the header (56), padding (14) and slot title (40)
+        #expect(frame.maxY > 600)           // down through the lanes
+        #expect(frame.maxY < 820 - 52)      // above the command bar
+        #expect(frame.width > 700 && frame.width < 1400 - 300)  // not the side pane
+        #expect(store.isOverTimeline(CGPoint(x: frame.midX, y: frame.midY)))
+        #expect(!store.isOverTimeline(CGPoint(x: 5, y: 400)) || !store.isOverTimeline(CGPoint(x: 1395, y: 400)))
+        #expect(!store.isOverTimeline(CGPoint(x: frame.midX, y: 30)))
+
+        // The wider Formula tab leaves less room for the graphs.
+        store.showFormulaEditor()
+        settle(view)
+        #expect(abs((frame.width - store.timelineFrame.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+    }
+
     @Test("Values too big for whole numbers, infinite or NaN still draw, focused or in a lane")
     func runawayValues() async throws {
         let store = try ScenarioStore(definition: .runaway, now: utc(2026, 10, 25))

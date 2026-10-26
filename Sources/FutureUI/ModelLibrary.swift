@@ -25,7 +25,7 @@ public enum ModelKind: Hashable, Sendable {
 /// (docs/UI.md, 5.7).
 public struct ModelTemplate: Identifiable, Hashable, Sendable {
     public enum Category: String, CaseIterable, Identifiable, Sendable {
-        case money, growth, climate, health, physics, plugins
+        case money, growth, climate, health, physics, blank, plugins
 
         public var id: String { rawValue }
 
@@ -36,6 +36,7 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
             case .climate: return "Climate"
             case .health: return "Health"
             case .physics: return "Physics"
+            case .blank: return "Blank"
             case .plugins: return "Plug-ins"
             }
         }
@@ -82,6 +83,7 @@ public enum ModelLibrary {
         seasonalTemperature, energyBill,
         bodyWeight,
         radioactiveDecay, batteryCapacity,
+        blankFormula,
     ]
 
     public static func template(id: String) -> ModelTemplate? {
@@ -236,6 +238,19 @@ public enum ModelLibrary {
             init weight = 82 label "Weight in kg"
             weight[t] = weight[t-1] + (intake - burnPerKg * weight[t-1]) * 7 / 7700
             """, variable: "weight", format: .number)
+
+    // MARK: Blank
+
+    /// A small formula to write your own from. Adding it opens the formula editor.
+    public static let blankFormula = ModelTemplate(
+        id: "blank-formula", name: "Blank formula", category: .blank,
+        summary: "A small formula to start your own from", slotName: "Formula", formula: """
+            # Write your own model. Each line is checked as you type.
+            step 1 month
+            param growth = 2% range -20%..20% by 0.1% label "Growth per year"
+            init value = 100 label "Value"
+            value[t] = value[t-1] * (1 + growth / 12)
+            """, variable: "value", format: .number)
 
     // MARK: Physics
 

@@ -10,6 +10,12 @@ struct SidePane: View {
     var onDragEnded: (DragGesture.Value) -> Void
 
     static let width: CGFloat = 300
+    /// The Formula tab is wider, so lines of formula fit.
+    static let formulaWidth: CGFloat = 480
+
+    static func width(for tab: ScenarioStore.SidePaneTab) -> CGFloat {
+        tab == .formula ? formulaWidth : width
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -17,10 +23,16 @@ struct SidePane: View {
             switch store.sidePane {
             case .event: AddEventPane(store: store)
             case .slot: SlotPane(store: store)
+            case .formula:
+                #if os(macOS)
+                FormulaPane(store: store)
+                #else
+                SlotPane(store: store)
+                #endif
             }
         }
         .padding(16)
-        .frame(width: Self.width)
+        .frame(width: Self.width(for: store.sidePane))
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline))
@@ -36,6 +48,7 @@ struct SidePane: View {
             HStack(spacing: 2) {
                 tab(.event, "Event", help: "Add an event  E")
                 tab(.slot, "Slot", help: "The focused slot's model and values  ⌘I")
+                tab(.formula, "Formula", help: "Edit the focused slot's formula  ⌥⌘I")
             }
             .padding(2)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
@@ -67,7 +80,11 @@ struct SidePane: View {
     private func tab(_ tab: ScenarioStore.SidePaneTab, _ title: String, help: String) -> some View {
         let selected = store.sidePane == tab
         return Button {
-            if store.sidePane != tab { store.sidePane = tab }
+            if tab == .formula {
+                store.showFormulaEditor()
+            } else if store.sidePane != tab {
+                store.sidePane = tab
+            }
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))

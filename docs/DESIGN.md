@@ -557,16 +557,16 @@ docs/
 Package.swift
 Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek
-  FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel
+  FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), model library, slot editing, panel views, Canvas plots, side pane (Event and Slot tabs), model picker, command bar, snapshots, scroll mapping
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
-  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, savings maths, ODEs, coupled scenarios, goal seek, determinism
+  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
-  FutureUITests/        store, slot editing, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
+  FutureUITests/        store, slot editing, formula editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel
 scripts/
   build-app.sh       builds .build/EditTheFuture.app
 ```

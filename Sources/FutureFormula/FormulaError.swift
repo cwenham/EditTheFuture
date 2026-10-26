@@ -35,3 +35,23 @@ public enum FormulaError: Error, Equatable, CustomStringConvertible {
         }
     }
 }
+
+extension FormulaError {
+    /// The line the mistake is on, when there is one.
+    public var line: Int? {
+        switch self {
+        case .syntax(let line, _), .unknownName(_, let line), .duplicateName(_, let line), .reservedName(_, let line),
+             .unknownFunction(_, let line), .wrongArgumentCount(_, _, let line), .invalid(let line, _):
+            return line
+        case .sameStepLoop, .missingEventField:
+            return nil
+        }
+    }
+
+    /// The description without its "Line 3: " prefix, for showing next to the line.
+    public var message: String {
+        let text = description
+        guard let line, text.hasPrefix("Line \(line): ") else { return text }
+        return String(text.dropFirst("Line \(line): ".count))
+    }
+}

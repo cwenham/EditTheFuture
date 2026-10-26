@@ -22,6 +22,9 @@ public struct PanelView: View {
 
     /// Coordinate space of the area under the header, used to drag the add-event pane.
     static let bodySpace = "panelBody"
+    /// The whole panel, top left at 0, 0: the hosting view's own coordinates. (SwiftUI's global
+    /// space starts at the window's top, which is lower down when the window has a title bar.)
+    static let panelSpace = "panel"
     static let paneGap: CGFloat = 16
 
     public init(store: ScenarioStore, actions: PanelActions) {
@@ -43,7 +46,8 @@ public struct PanelView: View {
                 }
                 .overlay {
                     if let location = paneDragLocation {
-                        DockZones(highlighted: location.x < area.size.width / 2 ? .left : .right)
+                        DockZones(highlighted: location.x < area.size.width / 2 ? .left : .right,
+                                  width: SidePane.width(for: store.sidePane))
                     }
                 }
             }
@@ -56,6 +60,7 @@ public struct PanelView: View {
         }
         .foregroundStyle(Theme.text)
         .background(Theme.panel.opacity(store.opacity))
+        .coordinateSpace(name: Self.panelSpace)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.commandBarFocusRequest) { commandFocused = true }
     }
@@ -113,6 +118,8 @@ struct TimelineArea: View {
                         }
                     }
             }
+            // The app sends the mouse wheel to time only over this area.
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelView.panelSpace)) } action: { store.timelineFrame = $0 }
         }
     }
 }

@@ -124,8 +124,18 @@ private struct SlotSettings: View {
                         ModelPicker(store: store, request: .change(slot: slot.id))
                     }
             }
-            if let reads = slot.reads {
-                Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            HStack {
+                if let reads = slot.reads {
+                    Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if slot.kind == .formula {
+                    Button("Edit formula…") { store.showFormulaEditor() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.proposal)
+                        .help("Open the Formula tab  ⌥⌘I")
+                }
             }
         }
     }
