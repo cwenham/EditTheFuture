@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-26, at commit `8e68250` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-27, at commit `b6d51e4` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -35,6 +35,8 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `6a2875b` | The model picker can add script models; `fetch-python.sh` keeps Python in the build. Merged from `feature/scripting`. |
 | `8f551cf` | The save format designed: Markdown scenarios, CSV or SQLite readings, a binary cache (DESIGN.md, 15). |
 | `8e68250` | Saving built: `.etf` scenario folders with `scenario.md`, outside edits loaded as they're saved, readings from CSV and SQLite, and a cache of slow slots. Merged from `feature/document-format`. |
+| `2f244a9` | Python scripts load one at a time, which fixed a flaky libraries test: loads on different threads raced on `sys.path`. |
+| `b6d51e4` | Clicking an event's diamond edits it in the Event tab, with Save, Cancel and Delete (UI.md, 5.4). Merged from `feature/edit-events`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
