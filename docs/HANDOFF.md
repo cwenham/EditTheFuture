@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-27, on the branch `feature/data-feeds` (data feeds), from commit `66f0ddf` on `main`. The branch isn't merged yet.
+Where the work stands, for the next Claude session. Last updated 2026-10-27, at commit `500e406` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -37,7 +37,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `8e68250` | Saving built: `.etf` scenario folders with `scenario.md`, outside edits loaded as they're saved, readings from CSV and SQLite, and a cache of slow slots. Merged from `feature/document-format`. |
 | `2f244a9` | Python scripts load one at a time, which fixed a flaky libraries test: loads on different threads raced on `sys.path`. |
 | `b6d51e4` | Clicking an event's diamond edits it in the Event tab, with Save, Cancel and Delete (UI.md, 5.4). Merged from `feature/edit-events`. |
-| `feature/data-feeds` | Data feeds: readings fetched from public sources and kept up to date, with sign-ins in the Keychain and a setup screen (DESIGN.md 15.8, UI.md 5.10). Readings now correct formulas and scripts (DESIGN.md 4.6) and show on the focused graph. On its branch, not merged yet. |
+| `500e406` | Data feeds: readings fetched from public sources and kept up to date, with sign-ins in the Keychain and a setup screen (DESIGN.md 15.8, UI.md 5.10). Readings now correct formulas and scripts (DESIGN.md 4.6) and show on the focused graph. Merged from `feature/data-feeds`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -283,7 +283,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, and `feature/document-format` the second, both merged by fast-forward.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events` and `feature/data-feeds`, all merged by fast-forward.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
