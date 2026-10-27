@@ -104,6 +104,10 @@ extension ScenarioStore {
     /// Points the draft at the focused slot, keeping the amount, date and repeat where they still make sense.
     /// `force` checks it again even when the index is the same, for after slots were added or removed.
     func retargetDraft(force: Bool = false) {
+        if editingEvent != nil {
+            followEditedEvent()
+            return
+        }
         guard force || eventDraft.slotIndex != focusedIndex else { return }
         let slot = slots[focusedIndex]
         var draft = eventDraft
@@ -173,10 +177,11 @@ extension ScenarioStore {
         eventDraft = draft
     }
 
-    /// Adds the drafted event and clears the pane for the next one. Returns false and sets
-    /// `draftError` when the draft isn't complete.
+    /// Adds the drafted event and clears the pane for the next one, or saves the event being
+    /// edited. Returns false and sets `draftError` when the draft isn't complete.
     @discardableResult
     public func commitEvent() -> Bool {
+        if editingEvent != nil { return saveEditedEvent() }
         let draft = eventDraft
         switch draft.build() {
         case .failure(let problem):
@@ -212,8 +217,15 @@ extension ScenarioStore {
         let through = frame.end.addingTimeInterval(frame.span)
         previewThrough = through
         requestPreview(ScenarioEngine.PreviewRequest(version: revision, sequence: previewSequence, slot: eventDraft.slotIndex,
-                                                     change: .event(built), from: eventDraft.date.addingTimeInterval(-margin),
-                                                     through: through.addingTimeInterval(margin)))
+                                                     change: .event(built), from: effectStart.addingTimeInterval(-margin),
+                                                     through: through.addingTimeInterval(margin), replacing: editingEvent?.event.id))
+    }
+
+    /// Where the draft starts to make a difference: its date, or the edited event's own date when
+    /// that's earlier (moving an event later changes the line from where it was).
+    var effectStart: Date {
+        guard let editing = editingEvent else { return eventDraft.date }
+        return min(eventDraft.date, editing.event.time)
     }
 
     /// Asks again when the view has scrolled past what the preview covers.
@@ -227,9 +239,10 @@ extension ScenarioStore {
         let index = eventDraft.slotIndex
         guard !draftPreview.isEmpty, let computed, computed.series.indices.contains(index) else { return nil }
         let slot = slots[index]
+        let effectStart = self.effectStart
         func effect(at date: Date) -> String {
             guard date <= computed.through else { return "…" }
-            guard date >= start, date >= eventDraft.date,
+            guard date >= start, date >= effectStart,
                   let before = Self.held(computed.series[index], at: date),
                   let after = Self.held(draftPreview, at: date) else {
                 return "No change yet"

@@ -50,6 +50,8 @@ public struct FocusedSlotState: Sendable {
     public let yDomain: ClosedRange<Double>
     public let yTicks: [Double]
     public let events: [EventMarker]
+    /// The one-off event the add-event pane is editing, drawn picked out (docs/UI.md, 5.4).
+    public let editingEventID: UUID?
     /// Why the slot can't run, shown in place of its line.
     public let pausedReason: String?
     /// The error that stopped the slot partway, such as a script's.

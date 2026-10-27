@@ -8,6 +8,8 @@ struct TimelineInteractions {
     var pickDate: (Double) -> Void
     /// A click on a lane picks the date and switches the pane to that lane's slot.
     var pickDateOnLane: (Int, Double) -> Void
+    /// A click on a one-off event's diamond loads it into the add-event pane (docs/UI.md, 5.4).
+    var editEvent: (UUID) -> Void
 }
 
 /// Where cursor-dependent views get their values: the live store (so only they redraw when the
@@ -68,18 +70,36 @@ struct TimelineRows: View {
                 VStack(alignment: .trailing, spacing: 1) {
                     Text("Events").font(.system(size: 12)).foregroundStyle(Theme.secondary)
                     if interactions != nil {
-                        Text("click to pick a date").font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                        Text("click a date or an event").font(.system(size: 10)).foregroundStyle(Theme.secondary)
                     }
                 }
                 .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
                 .padding(.trailing, 8)
                 .padding(.top, 2)
                 EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: timeline.focus.color,
-                            draftDate: timeline.focus.draftDate)
+                            draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
                     .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
+                    .overlay(alignment: .topLeading) {
+                        if interactions != nil {
+                            DiamondHotspots(diamonds: EventsStrip.diamonds(markers: timeline.focus.events, frame: timeline.frame,
+                                                                           width: plotWidth))
+                        }
+                    }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                        interactions?.pickDate(Double(location.x / plotWidth))
+                        if let id = EventsStrip.editableEvent(atX: location.x, markers: timeline.focus.events,
+                                                              frame: timeline.frame, width: plotWidth) {
+                            interactions?.editEvent(id)
+                        } else {
+                            interactions?.pickDate(Double(location.x / plotWidth))
+                        }
+                    }
+                    .accessibilityActions {
+                        if let interactions {
+                            ForEach(timeline.focus.events.filter { $0.kind == .oneOff && timeline.frame.contains($0.date) }) { marker in
+                                Button("Edit \(marker.label), \(DateText.monthYear(marker.date))") { interactions.editEvent(marker.id) }
+                            }
+                        }
                     }
                 Color.clear.frame(width: TimelineLayout.valueWidth)
             }
@@ -250,6 +270,33 @@ struct EventsStrip: View {
     let frame: TimeFrame
     let color: Color
     var draftDate: Date?
+    /// The one-off event being edited in the add-event pane.
+    var editingID: UUID?
+
+    /// How far from a diamond's centre a click still lands on it, in points.
+    static let hitSlop: CGFloat = 8
+
+    /// Where the one-off events' diamonds are in a strip `width` points wide: the ones a click can edit.
+    static func diamonds(markers: [EventMarker], frame: TimeFrame, width: CGFloat) -> [Diamond] {
+        markers.filter { $0.kind == .oneOff && frame.contains($0.date) }
+            .map { Diamond(id: $0.id, x: frame.x($0.date, width: width)) }
+    }
+
+    struct Diamond: Identifiable, Equatable {
+        let id: UUID
+        let x: CGFloat
+    }
+
+    /// The one-off event whose diamond is at `x` in a strip `width` points wide: the nearest within
+    /// `hitSlop`, so the small diamonds are easy to hit.
+    static func editableEvent(atX x: CGFloat, markers: [EventMarker], frame: TimeFrame, width: CGFloat) -> UUID? {
+        var best: (id: UUID, distance: CGFloat)?
+        for diamond in diamonds(markers: markers, frame: frame, width: width) {
+            let distance = abs(diamond.x - x)
+            if distance <= hitSlop, distance < (best?.distance ?? .infinity) { best = (diamond.id, distance) }
+        }
+        return best?.id
+    }
 
     /// Drawn in one Canvas instead of a few views per marker, which kept SwiftUI busy on every scroll.
     var body: some View {
@@ -268,7 +315,13 @@ struct EventsStrip: View {
                     context.draw(label, at: CGPoint(x: startX, y: 10), anchor: .leading)
                 case .oneOff:
                     guard x >= 0 && x <= width else { continue }
-                    context.fill(Self.diamond(at: CGPoint(x: x, y: 25), size: 9), with: .color(color))
+                    let editing = marker.id == editingID
+                    // Being edited: ringed, and faint once the draft moves it to another date.
+                    let moved = editing && draftDate != marker.date
+                    context.fill(Self.diamond(at: CGPoint(x: x, y: 25), size: 9), with: .color(color.opacity(moved ? 0.35 : 1)))
+                    if editing {
+                        context.stroke(Self.diamond(at: CGPoint(x: x, y: 25), size: 12), with: .color(Theme.proposal), lineWidth: 1.5)
+                    }
                     let label = context.resolve(Text(marker.label).font(.system(size: 11)).foregroundStyle(Theme.text))
                     context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
                 case .generated:
@@ -278,7 +331,8 @@ struct EventsStrip: View {
                     context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
                 }
             }
-            if let draftDate, frame.contains(draftDate) {
+            let editedDate = markers.first { $0.id == editingID }?.date
+            if let draftDate, frame.contains(draftDate), draftDate != editedDate {
                 context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: 25), size: 10),
                                with: .color(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
             }
@@ -296,6 +350,46 @@ struct EventsStrip: View {
         path.addLine(to: CGPoint(x: center.x - half, y: center.y))
         path.closeSubpath()
         return path
+    }
+}
+
+/// Clear areas over the diamonds, so the pointer turns into a hand over them as it does over a
+/// link. Clicks go on to the strip's own tap.
+///
+/// SwiftUI's hosting view sets the pointer itself as the mouse moves, so setting `NSCursor`
+/// from a hover handler flickered between the hand and the arrow. A pointer style on a view is
+/// SwiftUI's own way, and stays steady.
+struct DiamondHotspots: View {
+    let diamonds: [EventsStrip.Diamond]
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(diamonds) { diamond in
+                Color.clear
+                    .frame(width: EventsStrip.hitSlop * 2, height: TimelineLayout.eventsHeight)
+                    .contentShape(Rectangle())
+                    .linkPointer()
+                    .offset(x: diamond.x - EventsStrip.hitSlop)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+extension View {
+    /// The pointing hand while the pointer is over this view.
+    @ViewBuilder func linkPointer() -> some View {
+        #if os(macOS)
+        if #available(macOS 15, *) {
+            pointerStyle(.link)
+        } else {
+            onHover { inside in
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+        #else
+        self
+        #endif
     }
 }
 

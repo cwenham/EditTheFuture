@@ -8,7 +8,8 @@ public enum PaneSide: String, Sendable {
 }
 
 /// The side pane's Event tab (docs/UI.md, 5.3): always visible, docked on one side, so the
-/// timeline can be scrolled freely to watch the draft's effect play out.
+/// timeline can be scrolled freely to watch the draft's effect play out. Clicking an event's
+/// diamond loads it here to be changed or deleted (5.4).
 struct AddEventPane: View {
     @Bindable var store: ScenarioStore
 
@@ -20,6 +21,7 @@ struct AddEventPane: View {
         store.slots.indices.contains(draft.slotIndex) ? store.slots[draft.slotIndex] : store.focused
     }
     private var isSetParameter: Bool { draft.kind == .setParameter }
+    private var isEditing: Bool { store.editingEvent != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -27,9 +29,15 @@ struct AddEventPane: View {
                 Circle().fill(slot.color).frame(width: 9, height: 9)
                 Text(slot.title).font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Text("1–8 or click a lane to change")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondary)
+                if isEditing {
+                    Text("Editing an event")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.proposal)
+                } else {
+                    Text("1–8 or click a lane to change")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondary)
+                }
             }
 
             if kindOptions.count > 1 {
@@ -43,7 +51,7 @@ struct AddEventPane: View {
             if isSetParameter {
                 field("Parameter") {
                     Picker("Parameter", selection: $store.eventDraft.parameter) {
-                        ForEach(slot.parameters, id: \.self) { Text($0).tag($0) }
+                        ForEach(parameterOptions, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden()
                 }
@@ -77,7 +85,7 @@ struct AddEventPane: View {
                     Button("Now") { store.resetEventDate() }
                         .disabled(store.eventDateIsNow)
                 }
-                Text(store.eventDateIsNow ? "Click the graph to pick another date" : "Picked on the graph · Now resets it")
+                Text(dateHint)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.secondary)
             }
@@ -88,13 +96,25 @@ struct AddEventPane: View {
                 Text(error).font(.system(size: 12)).foregroundStyle(Theme.error)
             }
 
-            HStack {
-                Button("Clear") { store.clearEvent() }
-                Spacer()
-                Button("Add event") { store.commitEvent() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.proposal.opacity(0.85))
-                    .foregroundStyle(Color(hex: "#14161B"))
+            if store.confirmingEventDeletion {
+                deletionQuestion
+            } else if isEditing {
+                HStack {
+                    Button("Delete…") { store.requestEventDeletion() }
+                        .foregroundStyle(Theme.error)
+                        .help("Delete this event")
+                    Spacer()
+                    Button("Cancel") { store.stopEditingEvent() }
+                        .keyboardShortcut(.cancelAction)
+                        .help("Leave the event as it was  Esc")
+                    saveButton("Save")
+                }
+            } else {
+                HStack {
+                    Button("Clear") { store.clearEvent() }
+                    Spacer()
+                    saveButton("Add event")
+                }
             }
 
             Spacer(minLength: 0)
@@ -116,6 +136,37 @@ struct AddEventPane: View {
         }
     }
 
+    private func saveButton(_ title: String) -> some View {
+        Button(title) { store.commitEvent() }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.proposal.opacity(0.85))
+            .foregroundStyle(Color(hex: "#14161B"))
+    }
+
+    /// Asked before the event being edited is deleted (docs/DESIGN.md, 13).
+    private var deletionQuestion: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(store.eventDeletionQuestion)
+                .font(.system(size: 12))
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel") { store.cancelEventDeletion() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Delete", role: .destructive) { store.deleteEditedEvent() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(12)
+        .background(Theme.error.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.error.opacity(0.4)))
+    }
+
+    private var dateHint: String {
+        if isEditing { return "Click the graph to move it" }
+        return store.eventDateIsNow ? "Click the graph to pick another date" : "Picked on the graph · Now resets it"
+    }
+
     /// "Now 0.045", from the latest results, or an example until they arrive.
     private var currentValueHint: String {
         store.currentValue(ofParameter: draft.parameter).map { "Now " + String(format: "%g", $0) } ?? "e.g. 4% or 650"
@@ -127,9 +178,18 @@ struct AddEventPane: View {
     }
 
     private var kindOptions: [KindOption] {
-        var options = slot.eventKinds.map { KindOption(kind: .event($0), title: EventDraft.title(forKind: $0)) }
-        if !slot.parameters.isEmpty { options.append(KindOption(kind: .setParameter, title: "Set parameter")) }
+        var kinds = slot.eventKinds
+        // An event being edited keeps its kind, even one the slot's model no longer handles (or a paused slot's).
+        if case .event(let kind) = draft.kind, !kinds.contains(kind) { kinds.append(kind) }
+        var options = kinds.map { KindOption(kind: .event($0), title: EventDraft.title(forKind: $0)) }
+        if !slot.parameters.isEmpty || isSetParameter { options.append(KindOption(kind: .setParameter, title: "Set parameter")) }
         return options
+    }
+
+    /// The slot's parameters, and the edited event's own when the slot no longer has it.
+    private var parameterOptions: [String] {
+        guard !draft.parameter.isEmpty, !slot.parameters.contains(draft.parameter) else { return slot.parameters }
+        return slot.parameters + [draft.parameter]
     }
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {

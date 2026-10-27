@@ -49,6 +49,39 @@ struct PanelViewTests {
         #expect(store.eventDraft.amountText.isEmpty)
     }
 
+    @Test("Editing, moving and deleting an event in the pane doesn't crash")
+    func editFlow() async throws {
+        let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+        let (window, view) = mount(store)
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+
+        let event = try #require(store.configs[0].events.first)
+        store.editEvent(id: event.id)
+        settle(view)
+        store.eventDraft.date = utc(2030, 2)
+        store.eventDraft.amountText = "9000"
+        await store.waitUntilIdle()
+        settle(view)
+        #expect(store.commitEvent())
+        settle(view)
+
+        let edited = try #require(store.configs[0].events.first)
+        store.editEvent(id: edited.id)
+        store.requestEventDeletion()
+        settle(view)
+        store.deleteEditedEvent()
+        await store.waitUntilIdle()
+        settle(view)
+        store.undo()
+        store.editEvent(id: edited.id)
+        settle(view)
+        store.focus(index: 2)
+        settle(view)
+        #expect(store.editingEvent == nil)
+    }
+
     @Test("The Slot tab, picker and slot changes draw without crashing")
     func slotFlow() async throws {
         let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))

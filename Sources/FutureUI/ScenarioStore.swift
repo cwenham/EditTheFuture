@@ -81,6 +81,9 @@ public final class ScenarioStore {
     private enum Change {
         case addedEvent(slot: UUID, Event)
         case addedRule(slot: UUID, RecurringEvent)
+        /// An authored event was changed in the add-event pane (`new`), or deleted (nil). `at` is
+        /// where it was in its slot's list.
+        case changedEvent(slot: UUID, old: Event, at: Int, new: EventDraft.Built?)
         /// Slots were added, removed, moved or changed. Undo puts the old list back.
         case slots(before: [SlotConfig], after: [SlotConfig], focusBefore: UUID?, focusAfter: UUID?)
     }
@@ -157,6 +160,10 @@ public final class ScenarioStore {
     /// The draft slot's line with the draft event applied, for the dashed preview. Empty until the draft is complete.
     public internal(set) var draftPreview: [Sample] = []
     public internal(set) var draftError: String?
+    /// The authored event the add-event pane is changing, after its marker was clicked (docs/UI.md, 5.4).
+    public internal(set) var editingEvent: EditedEvent?
+    /// Whether the pane is asking to confirm deleting the event being edited.
+    public internal(set) var confirmingEventDeletion = false
     /// Incremented to ask the pane to focus its amount field.
     public internal(set) var eventFieldFocusRequest = 0
     /// Set when the Event tab should focus its field as soon as it appears.
@@ -523,6 +530,39 @@ public final class ScenarioStore {
         send(.addRule(slot: index, rule))
     }
 
+    /// Replaces an authored event with `new` (an event or a rule), or deletes it when `new` is nil,
+    /// as one change that undo takes back. Returns false when the event isn't there.
+    @discardableResult
+    func changeEvent(id: UUID, inSlotAt index: Int, to new: EventDraft.Built?) -> Bool {
+        guard configs.indices.contains(index), let position = configs[index].events.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        let old = configs[index].events.remove(at: position)
+        var change: EventDraft.Built?
+        var mutations: [ScenarioEngine.Mutation] = [.removeEvent(slot: index, id: old.id)]
+        switch new {
+        case .event(var event)?:
+            // The id reading the scenario's file would give it, as for a new event (DESIGN.md, 15.2).
+            event.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(event),
+                                           taken: Set(configs[index].events.map(\.id)))
+            configs[index].events.insert(event, at: position)
+            change = .event(event)
+            mutations.append(.addEvent(slot: index, event))
+        case .rule(var rule)?:
+            rule.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(rule),
+                                          taken: Set(configs[index].rules.map(\.id)))
+            configs[index].rules.append(rule)
+            change = .rule(rule)
+            mutations.append(.addRule(slot: index, rule))
+        case nil:
+            break
+        }
+        undoStack.append(.changedEvent(slot: configs[index].id, old: old, at: position, new: change))
+        redoStack.removeAll()
+        send(mutations)
+        return true
+    }
+
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
 
@@ -539,11 +579,29 @@ public final class ScenarioStore {
                 configs[index].rules.removeAll { $0.id == rule.id }
                 send(.removeRule(slot: index, id: rule.id))
             }
+        case .changedEvent(let slot, let old, let position, let new):
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                var mutations: [ScenarioEngine.Mutation] = []
+                switch new {
+                case .event(let event)?:
+                    configs[index].events.removeAll { $0.id == event.id }
+                    mutations.append(.removeEvent(slot: index, id: event.id))
+                case .rule(let rule)?:
+                    configs[index].rules.removeAll { $0.id == rule.id }
+                    mutations.append(.removeRule(slot: index, id: rule.id))
+                case nil:
+                    break
+                }
+                configs[index].events.insert(old, at: min(position, configs[index].events.count))
+                mutations.append(.addEvent(slot: index, old))
+                send(mutations)
+            }
         case .slots(let before, _, let focusBefore, _):
             configs = before
             refreshSlots(focus: focusBefore)
         }
         redoStack.append(change)
+        followEditedEvent()
         say("Undone")
     }
 
@@ -560,18 +618,40 @@ public final class ScenarioStore {
                 configs[index].rules.append(rule)
                 send(.addRule(slot: index, rule))
             }
+        case .changedEvent(let slot, let old, let position, let new):
+            if let index = configs.firstIndex(where: { $0.id == slot }) {
+                configs[index].events.removeAll { $0.id == old.id }
+                var mutations: [ScenarioEngine.Mutation] = [.removeEvent(slot: index, id: old.id)]
+                switch new {
+                case .event(let event)?:
+                    configs[index].events.insert(event, at: min(position, configs[index].events.count))
+                    mutations.append(.addEvent(slot: index, event))
+                case .rule(let rule)?:
+                    configs[index].rules.append(rule)
+                    mutations.append(.addRule(slot: index, rule))
+                case nil:
+                    break
+                }
+                send(mutations)
+            }
         case .slots(_, let after, _, let focusAfter):
             configs = after
             refreshSlots(focus: focusAfter)
         }
         undoStack.append(change)
+        followEditedEvent()
         say("Redone")
     }
 
     /// Sends an edit to the engine, then refetches and re-previews. The queue keeps them in order.
-    private func send(_ mutation: ScenarioEngine.Mutation) {
+    private func send(_ mutations: ScenarioEngine.Mutation...) {
+        send(mutations)
+    }
+
+    /// Sends edits that belong together, with one refetch after them.
+    private func send(_ mutations: [ScenarioEngine.Mutation]) {
         revision += 1
-        enqueue(.mutate(mutation))
+        for mutation in mutations { enqueue(.mutate(mutation)) }
         requestData()
         updateDraftPreview()
         onScenarioChange?()
@@ -966,8 +1046,9 @@ public final class ScenarioStore {
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: dragging ? nil : draftOnFocus?.date,
-            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex), pausedReason: focusSlot.pausedReason,
-            stoppedReason: slotFailures[focusSlot.id]?.text)
+            yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
+            editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,
+            pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text)
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)

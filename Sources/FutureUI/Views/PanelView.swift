@@ -108,7 +108,8 @@ struct TimelineArea: View {
                                 pickDate: { store.beginEvent(at: timeline.frame.date(atFraction: $0)) },
                                 pickDateOnLane: { index, fraction in
                                     store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
-                                }))
+                                },
+                                editEvent: { store.editEvent(id: $0) }))
                     .contentShape(Rectangle())
                     .onContinuousHover { phase in
                         guard case .active(let location) = phase else { return }

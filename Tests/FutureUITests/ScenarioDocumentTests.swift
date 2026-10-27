@@ -61,6 +61,28 @@ struct ScenarioDocumentTests {
         await again.close()
     }
 
+    @Test("An edited event is saved in place of the old one, and keeps its id when the file is read again")
+    func savesEditedEvent() async throws {
+        let package = try makePackage()
+        let document = try await open(package)
+        let store = document.store
+        let event = try #require(store.configs[0].events.first { $0.kind == "withdraw" })
+        store.editEvent(id: event.id)
+        store.eventDraft.amountText = "7,500"
+        store.eventDraft.date = utc(2029, 2)
+        #expect(store.commitEvent())
+        let edited = try #require(store.configs[0].events.first { $0.kind == "withdraw" })
+        #expect(document.save())
+        let text = try package.readText()
+        #expect(text.contains("- 2029-02-01 withdraw [amount: 7500]"))
+        #expect(!text.contains("2028-08-01 withdraw"))
+
+        let again = try await open(package)
+        #expect(again.store.configs[0].events.contains(edited))
+        await document.close()
+        await again.close()
+    }
+
     @Test("A change from another app is loaded, and undo takes it back")
     func outsideChange() async throws {
         let package = try makePackage()

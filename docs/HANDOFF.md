@@ -95,6 +95,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The date defaults to now, and clicking the graph picks a date.
   - Deposit, withdraw or set a parameter, once or repeating.
   - A live preview of the effect.
+- **Editing events** (UI.md, 5.4): clicking a one-off event's diamond loads it into the Event tab. Save replaces it (one undoable change, with the id reading the file would give it), Cancel leaves it, and Delete… asks first. The preview leaves the old event out. `EventEditing.swift`.
 - **Command bar (⌘K):**
   - Adding: `+500 monthly from 2027-03`, `set rate 4% from 2027-06`.
   - Moving: `goto 2035`, `goto 100°C`, `goto mortgage $0`, `now`.
@@ -124,7 +125,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The headless runtime and remote slot groups. A server for many users is deferred.
 - **From the slot inspector mockup:** Variables, Events and Readings beside the formula, with values at the cursor, and the links view.
 - **Panel features from UI.md:**
-  - Editing or moving existing events (5.4).
+  - Editing recurring events, and dragging events to move them (5.4). One-off events can be edited by clicking them.
   - Drag the future (5.2). The engine's `GoalSeek` exists.
   - Bands, readings and drift alerts (5.6).
   - Mute and solo, and banks ([ and ]).
@@ -139,6 +140,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Loose ends
 
 - `README.md` still describes only the engine package.
+- **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
 - `goto` with a value, and adding, removing and changing slots, exist only in the panel and command bar. They aren't in the `Command` vocabulary, `etf://` links or the CLI, although UI.md principle 3 says every command should be reachable everywhere.
 - Not checked by hand in the app: dragging chips onto another number, the chip context menus, and typing in the formula editor (completion keys, palette clicks, ⌘↩). The editor's text view was driven in tests (typing, completion, accepting, Esc) and rendered offscreen. Computer use can't find the app, so they were checked only in tests and offscreen renders. The picker popover was checked in an on-screen non-activating panel in a throwaway test.
 - A slider can't be cancelled with Esc while it's being dragged: the slider's tracking loop holds the keyboard until the mouse is let go. Undo covers it.
@@ -176,7 +178,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 220 tests in about 25 seconds.
+- **Tests:** `swift test` runs about 230 tests in about 25 seconds.
   - Store tests must `await store.waitUntilIdle()` before reading results.
   - `PanelViewTests` mounts the real panel in a window. Its `.runaway` scenario makes values huge, infinite and NaN within a few years.
 - **Benchmarks:** `swift run -c release etf-bench [section]`:
@@ -226,6 +228,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Taking an entry out of `sys.path` shifts the rest, so an import on another thread that was part-way through the list skipped one, usually the standard library. Each load now gives `sys.path` a new list.
   - The tests "Scripts loading at the same time each find their libraries" and "Scripts loading on other threads don't hide the standard library from imports" fail without each fix.
 - **Writing Swift with Python:** a `"\n"` in a Python string becomes a real line break in the Swift file. Use a raw string or `\\n`.
+- **The mouse pointer:** SwiftUI's hosting view handles `cursorUpdate:` and `mouseMoved:` and sets the pointer itself (macOS 15). `NSCursor.set()` from a hover handler fights it and flickers. Use `.pointerStyle(...)` on a view under the pointer (`linkPointer()` in `TimelineViews.swift`). Synthetic mouse events in tests don't reach SwiftUI's hover, so the pointer can only be checked by hand.
 - **SwiftUI's global coordinates start at the window's top,** not the hosting view's: in a window with a title bar they're 28 points lower. Measure in a space named on the panel's root (`PanelView.panelSpace`), which matches `hosting.convert(event.locationInWindow, from: nil)`.
 - **Popovers from the panel:** a SwiftUI `.popover` works from the non-activating `NSPanel`. To check one in a test, put the view in an on-screen `NSPanel` (`orderFrontRegardless`) and look for an `_NSPopoverWindow` in `NSApp.windows`; offscreen windows don't show popovers.
 - **Removing slots shifts indices.** Undo records refer to slots by their `id`, not their index, and results are remapped by `id` when the list changes.

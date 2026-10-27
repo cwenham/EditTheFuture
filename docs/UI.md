@@ -73,6 +73,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 | One-off event | Filled diamond, label centered above |
 | Generated event | Hollow circle, italic secondary label |
 | Proposed event | Dashed diamond or dashed bar in `proposal` |
+| Event being edited | Ringed in `proposal`; faint once the draft moves it to another date |
 | Drift | Warning pill attached to the now line |
 
 ## 3. Mac panel anatomy
@@ -97,7 +98,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Now line:** labelled "Now · Oct 2026". When the latest readings leave the projected band, a drift pill sits to its left.
 
-**Events strip:** one row under the time axis for the focused slot. Its label reads "click to pick a date".
+**Events strip:** one row under the time axis for the focused slot. Its label reads "click a date or an event": clicking a one-off event's diamond edits it (5.4), and clicking anywhere else picks that date.
 
 **Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. It has three tabs:
 - **Event:** adds events to the focused slot (5.3).
@@ -136,6 +137,7 @@ Clicking a lane's name focuses that slot.
 | [ / ] | Previous or next bank |
 | Click the graph or events strip | Pick that date for the add-event pane and put the keyboard in its amount field |
 | Click a lane's graph | The same, and switch the pane (and focus) to that lane's slot |
+| Click an event's diamond | Load the event into the add-event pane to change or delete it (5.4) |
 | E | Pick the cursor's date for the add-event pane |
 | Drag the projection | Drag the future (5.2) |
 | ⇧-drag the projection | Sketch a target curve |
@@ -213,8 +215,17 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 ### 5.4 Editing and moving events
 
-- Clicking a marker loads it into the add-event pane, with Delete. Deleting asks for confirmation (DESIGN.md, section 13).
-- Dragging a marker sideways moves it in time, snapping to step boundaries; hold ⌥ to move freely.
+- **Open:** clicking a one-off event's diamond loads it into the Event tab: its kind, its amount (or parameter and value) and its date. A click within 8 points of a diamond counts, and the pointer turns into a hand over one. The pane says "Editing an event", and the diamond gets a ring.
+- **Change:** anything in the form.
+  - Picking a date moves the event: click the graph, press E, or use the date picker. The old diamond fades, and a dashed one shows the new date.
+  - Choosing a repeat turns it into a recurring event.
+  - The dashed line previews the scenario with the event as edited, in place of the old one. The effect counts from whichever date is earlier, so moving an event later shows the difference from where it was.
+- **Save** (or ↩) replaces the event, as one change that undo takes back. **Cancel** (or Esc) leaves it as it was. Either way, the pane goes back to what it held before the click.
+- **Delete…** asks first, in the pane (DESIGN.md, section 13), then removes the event. Undo brings it back.
+- **Stopping:** focusing another slot or pressing ⌃⌥E stops editing, and so does undoing the event's addition.
+- **Limits:** the pane changes one value at a time. An event that sets several parameters, or carries values other than an amount, can't be loaded; clicking one says to change it in scenario.md.
+- **VoiceOver:** the events strip has an "Edit" action for each one-off event in view.
+- **Not built yet:** editing a recurring event by clicking its bar, and dragging a marker sideways to move it in time, snapping to step boundaries (hold ⌥ to move freely).
 - Undo and redo cover every change.
 
 ### 5.5 Generated events
@@ -407,7 +418,7 @@ Sections:
 - **Plots:** drawn with SwiftUI `Canvas`, one path per line (`PlotCanvas`).
   - M1 first used Swift Charts with one `LineMark` per data point. Profiling showed 80% of each frame going to Charts' generic view-graph work: 40–100 ms per frame for a few thousand marks. A path per line costs well under a millisecond.
   - Points that land in the same pixel column are reduced to that column's first, lowest, highest and last values, so a century of daily data still draws only a few thousand points.
-  - Axis labels and the events strip are drawn in a `Canvas` too, which keeps the number of SwiftUI views small.
+  - Axis labels and the events strip are drawn in a `Canvas` too, which keeps the number of SwiftUI views small. So a click on the strip is matched to a diamond by its position (`EventsStrip.editableEvent`). The pointing hand comes from clear views over the diamonds with SwiftUI's link pointer style (`DiamondHotspots`). Setting `NSCursor` from a hover handler flickered between the hand and the arrow, because SwiftUI's hosting view sets the pointer itself on every mouse move.
   - **Huge numbers:** the timeline goes on forever, so compounding values eventually outgrow every number. From 10¹⁵ up, values show in scientific notation ("$1.14e28"). Values that overflow show as "∞", and the line breaks where they start. Ranges and tick steps are clamped to ±10³⁰⁰ so they stay finite. (Converting a label past Int.max to a whole number crashed the app.)
 - **State and redrawing:**
   - One `@Observable` store per scenario. Views read only what they draw, so SwiftUI redraws only what changed.

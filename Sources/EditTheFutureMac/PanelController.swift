@@ -103,8 +103,10 @@ final class PanelController {
     }
 
     /// Opens the add-event card at `date` (the cursor by default) and brings the panel forward.
+    /// An event being edited is left as it was.
     func addEvent(at date: Date? = nil) {
         showFully()
+        store.stopEditingEvent()
         store.beginEvent(at: date ?? store.cursor)
     }
 

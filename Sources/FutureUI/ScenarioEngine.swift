@@ -100,6 +100,8 @@ actor ScenarioEngine {
         let change: PreviewChange
         let from: Date
         let through: Date
+        /// The authored event a draft event replaces, while one is being edited: it's left out of the preview.
+        var replacing: UUID? = nil
     }
 
     struct PreviewResult: Sendable {
@@ -386,14 +388,19 @@ actor ScenarioEngine {
         var samples: [Sample] = []
         var failure: SlotFailure?
         switch request.change {
-        case .event(.event(let event)):
-            scenario.add(event, to: id)
-            samples = (try? scenario.series(original.variable, of: id, from: request.from, through: request.through)) ?? []
-            scenario.removeEvent(id: event.id, from: id)
-        case .event(.rule(let rule)):
-            scenario.add(rule, to: id)
-            samples = (try? scenario.series(original.variable, of: id, from: request.from, through: request.through)) ?? []
-            scenario.removeRecurring(id: rule.id, from: id)
+        case .event(let built):
+            let replaced = request.replacing.flatMap { scenario.removeEvent(id: $0, from: id) }
+            switch built {
+            case .event(let event):
+                scenario.add(event, to: id)
+                samples = (try? scenario.series(original.variable, of: id, from: request.from, through: request.through)) ?? []
+                scenario.removeEvent(id: event.id, from: id)
+            case .rule(let rule):
+                scenario.add(rule, to: id)
+                samples = (try? scenario.series(original.variable, of: id, from: request.from, through: request.through)) ?? []
+                scenario.removeRecurring(id: rule.id, from: id)
+            }
+            if let replaced { scenario.add(replaced, to: id) }
         case .model(let setup):
             // Only this slot and what it reads are computed for the line; putting the model back
             // leaves this slot and those downstream to be recomputed by the next fetch.
