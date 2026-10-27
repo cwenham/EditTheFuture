@@ -41,7 +41,10 @@ struct ScriptSlotTests {
         for template in ModelLibrary.all {
             let facts = TemplateFacts.of(template)
             #expect(facts.error == nil, "\(template.name): \(facts.error ?? "")")
-            #expect(!facts.parameters.isEmpty, "\(template.name) shows no parameters")
+            // Hold the latest has nothing to set: its readings make its line.
+            if template.id != "forecast-holdTheLatest" {
+                #expect(!facts.parameters.isEmpty, "\(template.name) shows no parameters")
+            }
             #expect(facts.line.hasPrefix(template.kind.title), "\(template.name): \(facts.line)")
             if facts.reads == nil {
                 let preview = await TemplatePreview.samples(for: template, start: utc(2026, 1, 1))

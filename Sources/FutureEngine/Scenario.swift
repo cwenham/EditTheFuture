@@ -71,6 +71,9 @@ public final class Scenario {
     public static let engineVersion = 3
 
     public let start: Date
+    /// What `days` counts from: the start, except in a fit that runs from readings before its
+    /// scenario's start (docs/DESIGN.md, 8.4), where it stays that scenario's start.
+    public let origin: Date
     public let calendar: Calendar
     public let seed: UInt64
     public let checkpointInterval: Int
@@ -128,8 +131,10 @@ public final class Scenario {
     /// The seed scenarios use unless they choose their own.
     public static let defaultSeed: UInt64 = 0x5EED_F07E
 
-    public init(start: Date, calendar: Calendar = .utcGregorian, seed: UInt64 = Scenario.defaultSeed, checkpointInterval: Int = 32) {
+    public init(start: Date, calendar: Calendar = .utcGregorian, seed: UInt64 = Scenario.defaultSeed, checkpointInterval: Int = 32,
+                origin: Date? = nil) {
         self.start = start
+        self.origin = origin ?? start
         self.calendar = calendar
         self.seed = seed
         self.checkpointInterval = checkpointInterval
@@ -633,7 +638,7 @@ public final class Scenario {
 
         let slotSeed = seed(for: id)
         let context = StepContext(index: index, window: window, stepRate: runner.descriptor.stepRate,
-                                  scenarioStart: start, inputs: inputs, events: events, readings: readings,
+                                  scenarioStart: origin, inputs: inputs, events: events, readings: readings,
                                   seed: slotSeed, calendar: calendar)
         let began = DispatchTime.now().uptimeNanoseconds
         defer {

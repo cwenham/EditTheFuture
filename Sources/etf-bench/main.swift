@@ -176,12 +176,73 @@ func benchFrames() throws {
     window.close()
 }
 
+/// Scores the Forecast models on a file of readings, as Predict with does (docs/DESIGN.md, 8.4):
+/// `etf-bench predict readings.csv [start 2022-01-01] [step day|week|month|year] [since 1976-01-01]`.
+/// The file is `date,value` lines, as feeds save them.
+func benchPredict(_ arguments: [String]) throws {
+    guard let path = arguments.first else {
+        print("usage: etf-bench predict readings.csv [start 2022-01-01] [step day|week|month|year] [since 1976-01-01]")
+        return
+    }
+    func date(_ text: String) -> Date? {
+        let parts = text.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return CivilDate.date(year: parts[0], month: parts[1], day: parts[2])
+    }
+    var options: [String: String] = [:]
+    for pair in stride(from: 1, to: arguments.count - 1, by: 2) { options[arguments[pair]] = arguments[pair + 1] }
+    let readings = try String(contentsOfFile: path, encoding: .utf8).split(whereSeparator: \.isNewline).compactMap { line -> Reading? in
+        let fields = line.split(separator: ",")
+        guard fields.count >= 2, let time = date(String(fields[0])), let value = Double(fields[1]) else { return nil }
+        return Reading(time: time, variable: "value", value: value)
+    }.sorted { $0.time < $1.time }
+    let step: StepRate = ["day": .days(1), "week": .weeks(1), "year": .years(1)][options["step"] ?? "month"] ?? .months(1)
+    let start = options["start"].flatMap(date) ?? utc(2022)
+    let since = options["since"].flatMap(date)
+    let value = ForecastModels.Value(name: "value", label: "Value", format: .number, step: step)
+    func month(_ date: Date?) -> String { date.map { String(CivilDate($0).year) + "-" + String(format: "%02d", CivilDate($0).month) } ?? "" }
+    print("\(readings.count) readings, \(month(readings.first?.time)) to \(month(readings.last?.time)), scenario from \(month(start))")
+
+    let scenario = Scenario(start: start)
+    let id = try scenario.addSlot("Data", model: FormulaModel(ForecastModels.formula(.holdTheLatest, for: value), name: "Data"))
+    scenario.setReadings(readings, for: id)
+    let copy = try scenario.copyForFitting(id)
+    let window = since.map { since in readings.filter { $0.time >= since } } ?? readings
+    var scores: [(kind: ForecastModels.Kind, fitted: Int, typical: Double)] = []
+    var total = 0.0
+    for template in ForecastModels.templates(for: value, readings: readings) {
+        guard let kind = ForecastModels.kind(of: template) else { continue }
+        let inRatios = window.allSatisfy { $0.value > 0 } && options["kind"] != "temperature"
+        let model = try FormulaModel(template.formula, name: "Data",
+                                     values: ForecastModels.guess(kind, readings: window, inRatios: inRatios))
+        let candidate = copy.replacingModel(model)
+        let began = Date()
+        do {
+            let outcome = try candidate.score("value", .comparing(candidate.markedValues, since: since))
+            let seconds = Date().timeIntervalSince(began)
+            total += seconds
+            let amount = outcome.miss.isRatio ? String(format: "%.2f%%", outcome.miss.typical * 100) : String(format: "%.4g", outcome.miss.typical)
+            let values = outcome.values.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.4g", $0.value))" }.joined(separator: ", ")
+            print(String(format: "%-16@ off by %-10@ %5d runs %7.2f s  ", kind.name as NSString, amount as NSString, outcome.runs, seconds) + values)
+            scores.append((kind, candidate.markedValues.count, outcome.miss.typical))
+        } catch {
+            print(String(format: "%-16@ ", kind.name as NSString) + "\(error)")
+        }
+    }
+    if let lowest = scores.map(\.typical).min(),
+       let best = scores.filter({ $0.typical <= lowest * 1.1 }).min(by: { $0.fitted != $1.fitted ? $0.fitted < $1.fitted : $0.typical < $1.typical }) {
+        print("best: \(best.kind.name)")
+    }
+    print(String(format: "all models: %.2f s", total))
+}
+
 let section = CommandLine.arguments.dropFirst().first ?? "all"
 MainActor.assumeIsolated {
     do {
         if section == "all" || section == "engine" { try benchEngine() }
         if section == "all" || section == "state" { try benchState() }
         if section == "all" || section == "frames" { try benchFrames() }
+        if section == "predict" { try benchPredict(Array(CommandLine.arguments.dropFirst(2))) }
         if section == "engine-loop" {
             // For profiling the engine: compute long horizons repeatedly.
             let end = Date().addingTimeInterval(10)

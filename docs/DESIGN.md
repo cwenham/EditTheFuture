@@ -527,7 +527,7 @@ Type or say "what if rates drop to 3% next June?" and get a structured event pre
 
 ### 8.4 Predict with: choosing and fitting the model behind a projection
 
-Designed in October 2026. Built so far: fit parameters, misses, the solver and Refit, in the engine (`FutureEngine/Fitting.swift`), with tests for formulas, Lua and Python. Not built yet: Refit's sheet, Predict with, the Forecast models and the automatic pick. The screens are in UI.md, 5.11.
+Designed in October 2026, and built: fit parameters, misses, the solver and Refit (`FutureEngine/Fitting.swift`), the Forecast models (`FutureUI/ForecastModels.swift`), the automatic pick, and Refit and Predict with in the panel (`FutureUI/Refitting.swift`, `Predicting.swift`; UI.md, 5.11). Tests cover formulas, Lua and Python.
 
 A slot's model already makes its projection, and readings correct it up to now (4.6). So choosing how to predict a slot's future means choosing its model, and fitting the model to the readings means choosing its parameter values. This section adds four things:
 
@@ -561,30 +561,40 @@ Readings replace the values they're readings of (4.6), so a slot's line always p
 
 - **The miss:** for each reading of a value, the difference between the reading and what its step worked out. Models report what they worked out before a reading replaced it through `doStep(_:_:replaced:)`, as a `Prediction`. Formulas and scripts do; other models report nothing, so they can't be fitted. A scenario with `recordsMisses` on keeps each slot's misses (`Scenario.misses(in:through:)`). Only fitting turns it on for now: the app's scenario would need its saved results (15.5) to keep misses too.
 - **The first reading:** a value's first reading after the start isn't a miss, because its step had nothing observed to start from. A data slot's value is 0 until then (15.8). A reading at or before the start is taken by the start, so then every later reading counts.
-- **Ratios or differences:** when every reading of the value is above zero, a miss is measured as a ratio (the log of the reading divided by what was worked out). That way a series that grows tenfold counts its early years as much as its later ones. Otherwise, a miss is the plain difference.
+- **Ratios or differences:** when every reading of the value is above zero, a miss is measured as a ratio (the log of the reading divided by what was worked out). That way a series that grows tenfold counts its early years as much as its later ones. Otherwise, a miss is the plain difference. Temperatures and percents are always differences, since a temperature's zero is just a point on its scale, and a percent's misses read best in percentage points.
 - **Fitting** makes the sum of the squared misses as small as it can, over a run in which readings correct the model as usual. Each miss is then one step ahead: how far the model went wrong, starting from the reading before. Exponential smoothing and most forecasting methods are fitted this way, and it takes only one run per try.
 - **Scoring** asks a harder question: how far a projection made in the past misses the readings that came after it (the automatic pick, below).
 - Readings of parameters aren't misses. They're inputs.
 
+#### Readings before the start
+
+A feed often goes back further than the scenario: Europe's temperatures start in 1850, and a scenario might start in 2022. Fitting uses them all.
+
+- **Where a fit runs from:** the slot's first reading of a value, on the slot's grid of points stepped back from the scenario's start (`SlotCopy.runStart`). Without this, a scenario that starts in 2022 would fit Europe's warming to 5 of its 176 years.
+- **When it can't:** a slot that reads other slots runs from the scenario's start, since what those slots computed starts there. So does a fit that includes a starting value, since a starting value is the value at the scenario's start.
+- **Time in formulas and scripts:** `days` and `t.days` still count from the scenario's start (`Scenario.origin`), and are below zero before it, so fitted values mean the same in the fit as in the scenario. `step` and `t.index` count from where the run starts. The Forecast models use `year`, which is the same everywhere.
+- **In the scenario,** the slot still starts at the scenario's start, from the latest reading at or before it (4.6). A model that learns as it goes, such as Recent change, learns again from there.
+
 #### The solver
 
 - **Method:** Levenberg–Marquardt, the standard method for least squares. It finds its slopes by nudging each value and running again, and keeps values within their `range`.
-- **Starting points:** it starts from the slot's current values, and again from the middle of each range when there is one. It keeps the better of the two results, so it's less likely to settle in a poor local minimum.
-- **A copy of the slot:** `Scenario.copyForFitting` copies the slot's model, events and readings, and records what the slots it reads computed, through its last reading: their values and their events. `SlotCopy.fit` builds a scenario of its own from them, where the recordings play back (`RecordedModel`), so each try runs only this slot, from the start to its last reading. Slots downstream aren't involved. A loop back through another slot (that slot reading this one with `[t-1]`) is taken as it was, not refitted.
+- **Starting points:** Refit starts from the slot's current values, and again from the middle of each range when there is one. It keeps the better of the two results, so it's less likely to settle in a poor local minimum. Comparing models starts once, from a first guess made from the readings, and stops sooner (`FitSettings.comparing`: at most 40 rounds, and once a round improves by less than a ten-millionth).
+- **A copy of the slot:** `Scenario.copyForFitting` copies the slot's model, events and readings, and records what the slots it reads computed, through its last reading: their values and their events. Each fit builds a scenario of its own from them (a `Trial`), where the recordings play back (`RecordedModel`), so each try runs only this slot, from where the run starts to its last reading. Slots downstream aren't involved. A loop back through another slot (that slot reading this one with `[t-1]`) is taken as it was, not refitted. `SlotCopy.replacingModel` gives the same slot another model, leaving out the connections and events it has no use for.
 - **Threads:** the copy is plain values, so a fit can run on any thread. The engine's thread only makes the copy, which keeps scrolling smooth while a fit runs. `isCancelled` is checked before each try.
 - **Randomness:** stochastic models are fitted on their seeded run (4.4), so every try sees the same random numbers.
 - **Extreme values:** a try that works out an infinite or NaN value counts as worse than any finite result, and so does zero or less where misses are ratios. The solver then steps back towards the last good values.
-- **Speed:** a formula step takes about 3 µs, so a try over 1,000 steps takes about 3 ms, and fitting two values takes well under a second. Python is about four times slower (6.4). A differential equation costs more: in a debug build, fitting an S-curve's two values over 15 years of monthly readings took 95 tries and 2.6 seconds.
+- **Speed:** a formula step takes about 3 µs, so a try over 1,000 steps takes about 3 ms, and fitting two values takes well under a second. Python is about four times slower (6.4). A differential equation costs more: in a debug build, fitting an S-curve's two values over 15 years of monthly readings took 95 tries and 2.6 seconds. Comparing every Forecast model, in a release build (`etf-bench predict`): Europe's monthly temperatures since 1850 take about 3 seconds; ten years of daily S&P 500 closes, 8; thirty years of daily US debt, 32, most of it Seasonal's.
 - **Failures:** a try the model fails on (a script raising an error) counts as worse, like an infinite value. Failing at the slot's own values is an error, which Refit passes on.
 - **Other uses:** the same solver fits sketched curves (8.1), with the sketch's points in place of readings. Goal seek stays as it is: one value and one target.
 
 #### Refit
 
 - **What it shows:** Refit fits the slot's marked or ticked values to its readings. It shows the result as a dashed preview, with each value's change and the typical miss before and after. Nothing changes until it's applied.
+- **In the panel:** the Slot tab's Refit… opens a sheet (UI.md, 5.11). The engine's thread makes the copy; the fit runs on a task of its own.
 - **In the engine:** `Scenario.refit(slot, FitSettings(values:since:))`, or `copyForFitting` then `fit` on another thread. The `FitOutcome` has the fitted values, the misses before and after (`MissSummary`: how many, the typical miss, and whether it's a ratio), and whether the fit improved on the slot's own values. When it didn't, the values are the slot's own. `SlotCopy.markedValues` lists the values marked `fit`, and `fittableValues` every parameter and starting value without readings of its own, for the boxes to tick.
-- **Mistakes** (`FitError`): no readings of a value, nothing chosen, a name the model doesn't have, a value set by its readings, fewer readings than values to fit plus one, and values that can't be compared with the readings at any setting.
+- **Mistakes** (`FitError`): no readings of a value, nothing chosen, a name the model doesn't have, a value set by its readings, fewer readings than values to fit plus one, too few to compare models, and values that can't be compared with the readings at any setting.
 - **Applying** writes the new values as the slot's own values (`### Values` in `scenario.md`, 15.2), as one change that undo takes back. The file format needs nothing new.
-- **Which readings:** all of them by default. It can use only the latest instead (the last year, 5 years or 10 years), for a series whose behaviour has changed.
+- **Which readings:** all of them by default. It can use only the latest instead (the last year, or 5, 10, 25 or 50 years), for a series whose behaviour has changed. Predict with offers the same choice.
 - **Drift alerts** (8.2) offer the same Refit.
 - **New readings** don't start a refit on their own (17). Models that learn from their readings as they go, such as Recent growth below, keep up without one.
 
@@ -592,40 +602,50 @@ Readings replace the values they're readings of (4.6), so a slot's line always p
 
 Predict with is a menu of the models that could make the slot's projection. Choosing one changes the slot's model, as Change model… does (UI.md, 5.7), so the slot keeps its name, color, events and readings.
 
-- **Which models:** every model that has all the values the slot's readings are of, whether it's in the library, among the user's saved models (planned, UI.md 5.7) or a plug-in. A data slot's readings are of `value` (15.8), so it's offered every model built around `value`. A savings slot with readings of `balance` is offered the models that have a `balance`.
+- **Which models:**
+  - **The slot's own,** as it is, with its marked values fitted. It's listed first, unless it's one of the Forecast models below.
+  - **The Forecast models,** written around the value the readings are of, with its label and kind, when the readings are of one value. A feed into Climate's `temp` gets a Trend line of `temp`, so slots that read `Climate.temp` keep working. Models that work in ratios (Steady growth, Recent growth, S-curve) are offered only when every reading is above zero, and Seasonal only for steps shorter than a year.
+  - **Library models** that have every value the readings are of, of the same kind (a `value` shown as currency doesn't compare with one in °C), and that read no other slot.
 - **Fitted first:** each model is fitted to the slot's readings before it's shown. Its preview and score then show it at its best, not at its default values. Choosing a model keeps its fitted values.
-- **The slot's step:** choosing a model keeps the slot's step, so the model's `step` line is set to the slot's. Forecast models are written with `timeunit year` and `dt`, so they work at any step.
+- **The slot's step:** choosing a model keeps the slot's step, so the model's `step` line is set to the slot's. Forecast models are written with `timeunit year` and `dt`, or `year`, so they work at any step.
 - **Models added later** join the menu by following the same rules, wherever they come from. Nothing else has to change for them.
 
-**Forecast models.** A new library category. Every model in it is built around `value`:
+**Forecast models.** A library category of their own (`ForecastModels`), listed in the model picker around a value called `value`. Each starts its fit from a first guess made from the readings: a model with a line starting at zero couldn't be compared with readings that are all above zero, and a wave or a ceiling fits more surely from near the answer.
 
-| Model | What it does | Fitted |
-|---|---|---|
-| Hold the latest | Stays at the latest reading. This is today's "Data series" model, renamed; `scenario.md` files that name "Data series" still read. | Nothing |
-| Recent change | Keeps changing by the recent average change per step. It learns from each new reading. | `smoothing`: how quickly it forgets older readings |
-| Recent growth | The same, for percent growth. Its values must stay above zero. | `smoothing` |
-| Straight line | Changes by the same amount every year | `perYear` |
-| Steady growth | Grows by the same percent every year (the formula above) | `growth` |
-| S-curve | Grows, then levels off (logistic) | `rate`, `capacity` |
-| Seasonal | A straight line plus a yearly wave | `perYear`, `swing`, `peak` |
+| Model | What it does | Fitted | First guess |
+|---|---|---|---|
+| Hold the latest | Stays at the latest reading. Feeds' own slots start with it. It was called "Data series"; `scenario.md` files that name it so still read. | Nothing | |
+| Steady change | Changes by the same amount every year, from the latest reading | `perYear` | First to last reading |
+| Steady growth | Grows by the same percent every year, from the latest reading | `growth` | First to last reading |
+| Recent change | Keeps changing by its recent change per year, which it learns from each new reading | `smoothing`: how much each new reading counts | |
+| Recent growth | The same, for growth | `smoothing` | |
+| Trend line | A straight line through the readings, measured from the start of 2000: `level + perYear * (year - 2000)` | `level`, `perYear` | The least-squares line |
+| S-curve | Grows, then levels off (logistic), from the latest reading | `rate`, `capacity` | 1.5 × the highest reading |
+| Seasonal | A straight line through the readings, plus a yearly wave | `level`, `perYear`, `swing`, `peak` (the month it's highest) | The line, then each month's average distance from it |
 
-Recent change and Recent growth follow their readings as they arrive, so they keep up without a refit. The fitted models keep their fitted values until the next Refit.
+- **From the latest reading, or through the readings:** models that carry on from the latest reading suit series that wander, like prices and debt. On a noisy series, such as monthly temperatures, they carry one odd month forward forever, and a line through the readings does better. The automatic pick tells them apart.
+- **Ratios:** where misses will be ratios, the guessed line is fitted to each reading's share of its size, so it stays above zero near the small early readings of a series that grew a lot.
+- Recent change and Recent growth follow their readings as they arrive, so they keep up without a refit. They're made for readings at about every step. The fitted models keep their fitted values until the next Refit.
 
 #### The automatic pick
 
-- **Holding back:** the score hides the latest readings, those in the last fifth of their span. Each model is fitted to the readings before that cut-off. It then projects from the cut-off with the later readings hidden, and is scored on the readings it didn't see.
-- **Two fits per model:** one to the readings before the cut-off, for the score, and one to all the readings, for the model's line and values.
-- **The score:** the typical miss (the root mean square) over the hidden readings, as a percent of their typical size: "off by 2.1%". For values that cross zero, such as temperature anomalies, it's in the value's own units: "off by 0.12 °C".
+- **Holding back:** the score hides later readings from each model and asks how far its projection misses them (`SlotCopy.score`).
+  - Cut-offs fall at 60%, 70% and 80% of the span of readings compared. Each is on one of the slot's points, so no step has readings from both sides of it.
+  - At each cut-off, the model is fitted to the readings up to it. It's then projected from the cut-off, and from three more points within the next tenth of the span, each time with only the readings up to that point. Each projection is compared with the readings in the next fifth of the span, so the last cut-off is compared with the last fifth.
+  - With twelve projections, the score depends less on how close any one reading was to the trend. That matters for models that carry on from the latest reading: with a single cut-off, a lucky last reading let one beat a trend line on noisy data.
+- **One more fit,** to every reading, gives the model's values and line.
+- **The score:** the typical miss (the root mean square) over every projection's hidden readings, as a percent where misses are ratios ("off by 2.13%"), and otherwise in the value's own units ("off by 0.755 °C"), to three significant figures.
 - **The best** has the lowest score. When two scores are within a tenth of each other, the model with fewer fitted values wins, since it's less likely to be fitting noise.
 - **Use the best** chooses it. That's a one-off choice like any other: the menu never changes the slot's model by itself when new readings arrive (17).
-- **Too few readings:** scoring needs at least 12 readings before the cut-off and 4 after it. With fewer, the menu shows no scores and says why.
-- **The work** runs on the engine's thread while the menu is open, one model at a time, cheapest first. Scores fill in as each model finishes. Closing the menu cancels it. Scores are kept for each slot until its readings or its candidate models change.
-- **Seeing the score:** the preview draws the projection from the cut-off over the readings it didn't see (UI.md, 2.4), which shows what the score measures.
+- **Too few readings:** scoring needs at least 12 readings before the first cut-off and 4 after each. With fewer, the menu shows no scores and says why.
+- **The work:** while the menu is open, the engine's thread copies the slot, and each model is scored on a thread of its own, one at a time, cheapest first, so the panel keeps scrolling. Scores fill in as each model finishes. Closing the menu cancels the work. Scores are kept for each model, its values, the slot's readings and the readings chosen, until one of those changes.
+- **Seeing the score:** the preview draws the projection from the last cut-off over the readings it didn't see (UI.md, 2.4), which shows what the score measures.
+- **On real data** (October 2026): Europe's monthly temperatures (anomalies) pick Trend line, at +0.04 °C a year over the last 50 years ("off by 0.75 °C", against 1.06 for Hold the latest); US debt picks Steady growth, at 5.8% a year; the S&P 500 picks Recent growth.
 
 #### Later
 
 - **Bands from misses:** the held-back misses at each distance ahead give a range that widens with distance. Models without randomness can't draw bands now (4.6), and drift alerts (8.2) could use the range too.
-- **Several cut-offs,** with their scores averaged, for steadier scores (rolling-origin evaluation).
+- **Speed for long daily series:** start runs at the chosen readings, or score on a monthly summary.
 - **Kalman filters** (4.6) fit and correct at the same time, which suits noisy readings better.
 
 ## 9. User interface
@@ -654,7 +674,7 @@ The detailed UI design (visual language, layouts, input, interactions, accessibi
 
 ### 9.4 Command bar
 
-Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040", "goto 100°C", "goto mortgage $0", "add loan to 7", "remove climate". `goto` with a value finds where a slot's line first reaches it (UI.md, 5.1). `add` and `remove` change slots (UI.md, 5.7). Natural-language input goes through section 7's providers.
+Type commands and events: "+500 monthly from Jan", "rate 4% from 2027-06", "goto 2040", "goto 100°C", "goto mortgage $0", "add loan to 7", "remove climate", "refit savings". `goto` with a value finds where a slot's line first reaches it (UI.md, 5.1). `add` and `remove` change slots (UI.md, 5.7). Natural-language input goes through section 7's providers.
 
 ### 9.5 iPad and iPhone
 
@@ -1070,7 +1090,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 
 **Sign-ins** are kept in the Keychain as generic passwords (service `com.editthefuture.feeds`, one item per sign-in, the credential as JSON). A built-in source's sign-in is named after the source (`fred`); a feed at a web address uses its host. Each is tied to its hosts (13.3). Checking whether one is saved reads only its attributes, which never asks the user. The sandbox (when the app has one) needs the outgoing network entitlement.
 
-**A slot of its own.** A feed can be added as a new slot with the "Data series" model: `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does. Predict with (8.4, planned) will offer other models for the slot, such as Steady growth, fitted to its readings.
+**A slot of its own.** A feed can be added as a new slot with the "Hold the latest" model (once called "Data series"): `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does. Predict with (8.4) offers other models for the slot, such as Steady growth or Trend line, fitted to its readings and scored on them.
 
 **Running a feed without the app:** `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01` prints its readings as CSV, using the Keychain's sign-ins; `--key KEY` uses a key just once. `etf-feed treasury10` runs a ready-made feed, `--list` lists them, and `--check` fetches the last 120 days of each one that needs no key.
 
@@ -1082,7 +1102,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
-| M3 | Drag the future UI; readings import; drift alerts; Predict with, Refit and the automatic pick (8.4). Feeds, direct-insertion assimilation and Refit in the engine are done (15.8, 4.6, 8.4). |
+| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with and the automatic pick are done (15.8, 4.6, 8.4). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -1099,7 +1119,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 - Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
 - Should Refit, or the automatic pick, run on its own when new readings arrive (8.4)? It would change values without a preview, and rewrite `scenario.md` after every fetch.
-- Predict with only offers models that have the values the readings are of (8.4). Should it also offer models whose value has another name, and point the readings at that value when one is chosen (a feed's `into`, a CSV file's column)?
+- Predict with writes the Forecast models around whatever value the readings are of, but only offers library models that have that value (8.4). Should it also offer library models whose value has another name, and point the readings at that value when one is chosen (a feed's `into`, a CSV file's column)?
 - Should models be able to read their own past readings (`t.readings` in scripts)? A script could then fit itself, for example with a statistics library.
 - Should stochastic models be fitted to their ensemble's median (4.6), rather than to one seeded run?
 

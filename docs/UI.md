@@ -70,7 +70,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 | Projection (future) | Thicker solid line |
 | Bands | 25–75% at 16% fill, 10–90% at 12% fill |
 | Preview or proposal | Dashed line in `proposal` |
-| Held-back test (planned, 5.11) | A thin dotted line in `proposal`: the projection from the cut-off over the readings it didn't see, with a short tick on the time axis at the cut-off |
+| Held-back test (5.11) | A thin dotted line in `proposal`: the selected model's projection from the last cut-off over the readings it didn't see, with a faint dotted line down the graph at the cut-off |
 | Recurring event | Thin bar in the slot color, label at its start |
 | One-off event | Filled diamond, label centered above |
 | Generated event | Hollow circle, italic secondary label |
@@ -258,7 +258,7 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 
 **The Slot tab** in the side pane (⌘I) shows the focused slot:
 - **Name.** Names start with a letter and can use letters, digits and spaces. Formulas write them without spaces: "Rainy day fund" is `RainyDayFund`. Renaming a slot updates the formulas and scripts in other slots that refer to it, so `Climate.temp` becomes `Weather.temp`, and `"Climate.temp"` in a script becomes `"Weather.temp"`.
-- **Model:** its name and kind, with Change…. For a slot with readings of a value, this row will be the Predict with menu instead, with Refit… beside it (5.11, planned).
+- **Model:** its name and kind, with Change…. Under it, Edit formula… and, for a slot with readings of one of its values, Refit… (5.11). For such slots, the name is the Predict with menu: "Predict with Hold the latest ⌄" (5.11).
 - **Parameters:** each has its label and value, and a slider when the model gives it a range.
   - These are the values the slot starts with. Changes from a date are events: they're added in the Event tab and listed under the slider ("Changes to 4.0% from Jun 2027"). "Change from a date…" opens the Event tab, ready to set that parameter.
   - While a slider is dragged, a dashed line shows the slot's new future. Letting go applies it.
@@ -348,7 +348,7 @@ A feed fetches readings from a public source and keeps them up to date (DESIGN.m
 **Where it opens:**
 - **Add a feed…** in the Slot tab's Readings, for the focused slot.
 - **Edit…** on one of the slot's feeds.
-- **Add a data feed…** in an empty chip's menu, and **Data feed…** at the bottom of the model picker's categories when adding a model. These give the feed a slot of its own, with the "Data series" model, which follows its readings and holds the latest one. Predict with (5.11, planned) will offer other ways to project it.
+- **Add a data feed…** in an empty chip's menu, and **Data feed…** at the bottom of the model picker's categories when adding a model. These give the feed a slot of its own, with the "Hold the latest" model (once called "Data series"), which follows its readings and holds the latest one. Predict with (5.11) offers other ways to project it, compared on its readings.
 
 **The feed setup screen** is a popover, 880 × 560, laid out like the model picker:
 - A search field at the top ("debt, CPI, rain, flu…"), searching titles, descriptions, sources and settings.
@@ -365,25 +365,29 @@ A feed fetches readings from a public source and keeps them up to date (DESIGN.m
 
 ### 5.11 Predict with and Refit
 
-Planned; there's no mockup yet. This is how the app chooses and fits the model behind a slot's projection (DESIGN.md, 8.4).
+This is how the app chooses and fits the model behind a slot's projection (DESIGN.md, 8.4). There's no mockup yet. Both are built (October 2026).
 
-**Predict with** is a menu in the Slot tab. For a slot with readings of a value, it takes the place of the Model row's name: "Predict with [Steady growth ▾]   Refit…".
-- **The list:** the models that can take the slot's readings (DESIGN.md, 8.4), grouped as the model picker groups them, with Forecast first. Each row has the model's name, its one-line description, and its score once it's worked out ("off by 2.1%"), or "…" until then. The best one has a Best tag, and the current model has a tick.
-- **Hover** (or ↑ and ↓): the graph shows that model's fitted line dashed, as the picker's preview does, and its held-back test (2.4). A card beside the menu shows its fitted values ("Growth per year 4.1%").
-- **Choose** (click or ↩): the slot gets that model with its fitted values, as one change that undo takes back. Esc closes the menu and changes nothing.
-- **Use the best,** at the top of the menu, chooses the one tagged Best.
-- **At the bottom:** Other model… opens the model picker (5.7) for models that aren't listed, and Edit formula… opens the Formula tab.
-- **While it works:** the bottom of the menu says "Comparing 7 models…". With too few readings, it says why instead: "Needs 12 readings before the cut-off and 4 after it to compare models (has 9 in all)."
+**Predict with** is a popover from the Slot tab, 700 × 460, laid out like the model picker. For a slot with readings of one of its values, the Model row's name is a menu button: "Predict with Hold the latest ⌄".
+- **The header:** "Predict Data with", the readings to fit and compare on (as Refit's, below), and **Use the best**, which chooses the model tagged Best once every score is in.
+- **The list,** on the left: the slot's own model first under "This slot" (unless it's one of the Forecast models), then the Forecast models, then library models that have the same value, under their categories (DESIGN.md, 8.4). Each row has the model's name, its one-line description, and its score once it's worked out ("off by 2.13%", "off by 0.755 °C"), "…" until then, or "can't compare" when its values can't be compared with the readings. The best has a Best tag, and the slot's own model a tick.
+- **Selecting** (hover, or ↑ and ↓): the graph shows the model's fitted line dashed, a screen to each side of the view, and its held-back test dotted (2.4). The card on the right shows its name, its score ("Off by 0.755 °C. How far its projections missed 1,164 readings they didn't see, made at three cut-offs and the points after them. The dotted line is its projection from Aug 2016."), and its values fitted to every reading ("Change per year 0.04251 °C"). Scores have three significant figures, so close ones can be told apart.
+- **Choosing** (click, or ↩ with the card's **Use Trend line**): the slot gets that model with its fitted values, rounded to six significant figures, as one change that undo takes back. The footer says so: "Data now predicts with Trend line: Value in 2000 0.7304 °C, Change per year 0.04239 °C". Choosing the slot's own model writes its refitted values, as Refit does. **Cancel** (Esc) changes nothing.
+- **At the bottom:** while it works, "Comparing 7 models…" with a spinner; with too few readings, why ("Comparing models needs more readings: at least 12 before the first cut-off, and 4 after each. Data has 15 in all."), and no scores. Then **Other model…**, which opens the model picker, and **Edit formula…**.
+- **Closing:** Cancel, choosing, focusing another slot, opening Refit, or switching to the Event or Formula tab closes the menu, drops its previews and stops its work. Scores are kept, so opening it again shows them straight away.
+- **Speed:** a few seconds for monthly readings over a century; about half a minute for 30 years of daily ones. Scores fill in as each model finishes, cheapest first, and the panel keeps scrolling.
 
-**Refit…** opens a sheet in the side pane, over the Slot tab:
-- **What may change:** the model's fitted values, ticked. A model with none marked lists all its parameters, none ticked, with "Tick the values to fit."
-- **Which readings:** All, or the last year, 5 years or 10 years.
-- **The fit** runs as soon as the sheet opens, and again when what may change or which readings changes. The graph shows the refitted line dashed. The sheet shows each value's change ("Growth per year 3.0% → 4.1%") and the typical miss before and after ("Misses the next reading by 1.8%, was 2.6%").
-- **Apply** (⌘↩) makes the new values the slot's own, as one change that undo takes back. **Cancel** (Esc) leaves everything as it was.
+**Refit…** opens a sheet in the side pane, in place of the Slot tab's settings. It's offered for a slot that runs and has readings of one of its values.
+- **The title:** "Refit Debt", and "Fits values to Debt's readings. Nothing changes until you apply them."
+- **What may change:** a box for each parameter and starting value without readings of its own, with its value now. The ones the model marks `fit` start ticked. A model with none marked starts with none ticked, and says "Tick the values to fit."
+- **Which readings:** a menu of All readings, The last year, and The last 5, 10, 25 or 50 years, counted back from the latest reading. Earlier readings still correct the model; only their misses don't count. Readings from before the scenario's start count too (DESIGN.md, 8.4).
+- **The fit** runs as soon as the sheet opens, and again when a box or the readings change. While it runs, the sheet says "Fitting…" with a spinner. The fit runs off the main thread and the engine's, so the panel keeps scrolling.
+- **The result:** each value's change ("Growth per month 3% → 1.191%"), and the typical miss with the new values and with the old ones ("Misses the next reading by 0.5%, was 1.9%."). The graph shows the refitted line dashed, a screen to each side of the view, and asks again when scrolling goes further.
+- **Apply** (⌘↩) makes the new values the slot's own, rounded to six significant figures, as one change that undo takes back. The footer says what changed: "Refitted Debt: Growth per month 3% → 1.191%". **Cancel** (Esc) leaves everything as it was.
 - **No better fit:** when the fit can't improve on the current values, the sheet says "These values already fit best", and Apply is off.
-- **Long series:** the sheet shows the fit's progress, and Cancel stops it.
+- **Mistakes** show in red in place of the result, such as "Fitting needs at least 2 readings that follow an earlier one. Debt has 1."
+- **Closing:** Cancel, focusing another slot, or switching to the Event or Formula tab closes the sheet and drops the fit and its dashed line. A fit still running is stopped.
 
-**Command bar:** `predict data with steady growth`, `predict data with best` and `refit data` open the same preview, and ↩ applies it. Sent from outside the app (`etf://`, the CLI), they ask for confirmation, as other edits do.
+**Command bar:** `refit` opens Refit for the focused slot, and `refit debt` for a slot by name or number. `predict` opens Predict with for the focused slot, and `predict data` for another. `predict data with trend line` opens it with that model selected, and `predict data with best` selects the best once the scores are in; ↩ then chooses it. Planned: sent from outside the app (`etf://`, the CLI), these will ask for confirmation, as other edits do.
 
 ## 6. Menu bar item
 
@@ -491,6 +495,17 @@ Sections:
   - `FeedCenter` belongs to the `ScenarioDocument`. It keeps each feed's state in `store.feedStatuses`, by slot and what the feed fetches (`FeedKey`), which the Slot tab reads.
   - The focused graph's readings are turned into samples once per readings set and variable (`readingSamples`), not every frame.
   - The setup screen's sign-in section avoids a segmented control: with four kinds it was wider than the pane and pushed the popover's columns off its edges.
+- **Refit** (5.11, DESIGN.md 8.4):
+  - `Refitting.swift` keeps the sheet's state (`ScenarioStore.refit`, a `RefitState`) and which slots can be refitted (`refittable`, kept up to date as slots and readings change). `RefitSheet` draws it.
+  - A fit asks the engine for a copy of the slot through the engine's queue (`copyForFitting`), so the copy follows every edit before it. It then runs `SlotCopy.fit` in a detached task, with a `CancelFlag` it checks before each try. Answers from a fit that was stopped or replaced are ignored (`refitSequence`).
+  - The dashed line is a slot preview, as for sliders and formulas (`parameterPreview`), with the fitted values as the slot's own.
+  - `timelineState()` reads `parameterPreview` every time. It used to read it only when `previewSlot` (not observed) named the focused slot, so a preview that arrived later, like Refit's, didn't redraw the graph until something else did.
+- **Predict with** (5.11, DESIGN.md 8.4):
+  - `Predicting.swift` keeps the menu's state (`ScenarioStore.predict`, a `PredictState`) and the held-back line (`heldBack`, observed on its own so scores filling in don't redraw the graph). `PredictMenu` draws it. `ForecastModels.swift` writes the Forecast models around a value and makes their first guesses.
+  - Opening works out the menu's models on the main thread (parsing a few formulas). Scoring asks the engine for a copy of the slot, as Refit does, then scores one model at a time in a detached task with `SlotCopy.replacingModel` and `score`. Answers from work that was stopped or replaced are ignored (`predictSequence`).
+  - Scores are kept by model, values, readings, start and readings chosen (`predictScores`), and why a slot's models can't be compared, the same way (`predictProblems`).
+  - The ranking is `PredictState.best(of:)`, so it can be tested without scoring anything.
+  - `etf-bench predict readings.csv [start …] [step day|week|month|year] [since …]` scores the Forecast models on a feed's saved readings, as the menu does, and times each.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.

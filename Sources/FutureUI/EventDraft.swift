@@ -156,6 +156,8 @@ extension ScenarioStore {
     /// Shows the Event tab with the keyboard in its amount (or value) field.
     func requestEventFieldFocus() {
         if sidePane != .event {
+            closeRefit()
+            closePredict()
             sidePane = .event
             focusEventFieldOnAppear = true
         }

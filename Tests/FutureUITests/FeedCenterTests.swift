@@ -213,7 +213,7 @@ struct FeedCenterTests {
         await settle(document)
         let index = try #require(store.slotIndex(atPosition: 5))
         #expect(store.slots[index].name == "NationalDebt")
-        #expect(store.slots[index].model == "Data series")
+        #expect(store.slots[index].model == "Hold the latest")
         #expect(store.configs[index].formula.hasPrefix("step 1 day\ninit value = 0 label \"US national debt\" as currency"))
         #expect(store.configs[index].readings.sources.first?.feed?.variable == "value")
         #expect(store.focusedIndex == index)
@@ -232,7 +232,7 @@ struct FeedCenterTests {
 
         #expect(document.save())
         let text = try document.package.readText()
-        #expect(text.contains("## 6. NationalDebt [Data series, shows: value]"))
+        #expect(text.contains("## 6. NationalDebt [Hold the latest, shows: value]"))
         #expect(text.contains("- US national debt [feed: treasury, dataset: v2/accounting/od/debt_to_penny, field: tot_pub_debt_out_amt, into: value]"))
         await document.close()
     }

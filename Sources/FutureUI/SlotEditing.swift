@@ -49,6 +49,10 @@ extension ScenarioStore {
 
     /// ⌘I: the Slot tab, or back to the Event tab when it's showing.
     public func toggleSlotSettings() {
+        if sidePane == .slot {
+            closeRefit()
+            closePredict()
+        }
         sidePane = sidePane == .slot ? .event : .slot
     }
 

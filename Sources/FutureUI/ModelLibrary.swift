@@ -26,7 +26,7 @@ public enum ModelKind: Hashable, Sendable {
 /// (docs/UI.md, 5.7).
 public struct ModelTemplate: Identifiable, Hashable, Sendable {
     public enum Category: String, CaseIterable, Identifiable, Sendable {
-        case money, growth, climate, health, physics, blank, plugins
+        case money, growth, forecast, climate, health, physics, blank, plugins
 
         public var id: String { rawValue }
 
@@ -34,6 +34,7 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
             switch self {
             case .money: return "Money"
             case .growth: return "Growth"
+            case .forecast: return "Forecast"
             case .climate: return "Climate"
             case .health: return "Health"
             case .physics: return "Physics"
@@ -95,7 +96,7 @@ public enum ModelLibrary {
         radioactiveDecay, batteryCapacity,
         predatorPrey,
         blankFormula, blankLua,
-    ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : [])
+    ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : []) + ForecastModels.library
 
     public static func template(id: String) -> ModelTemplate? {
         all.first { $0.id == id }

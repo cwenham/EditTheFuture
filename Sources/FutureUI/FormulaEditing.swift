@@ -39,6 +39,8 @@ extension ScenarioStore {
     /// Opens the Formula tab for a slot (the focused one by default).
     public func showFormulaEditor(forSlotAt index: Int? = nil) {
         if let index { focus(index: index) }
+        closeRefit()
+        closePredict()
         if sidePane != .formula { sidePane = .formula }
         updateFormulaCheck(forSlotAt: focusedIndex)
     }

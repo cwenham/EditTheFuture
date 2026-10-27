@@ -8,7 +8,7 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 
 - Build: `swift build`
 - Test: `swift test` (Swift Testing)
-- Benchmarks: `swift run -c release etf-bench [engine|state|frames|flick|far|loop|engine-loop|cursor-loop]`
+- Benchmarks: `swift run -c release etf-bench [engine|state|frames|flick|far|loop|engine-loop|cursor-loop]`; `etf-bench predict readings.csv [step day] [since 1976-01-01]` scores the Forecast models on saved readings
 - Python for scripts: `scripts/fetch-python.sh` once per checkout (into `Vendor/Python`, not in git). Without it, Python slots pause. Run it again if Python's tests show as skipped: SwiftPM caches whether the folder was there.
 - A script without the app: `swift run etf-script model.lua --through 2040-01-01`
 - A feed without the app: `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01`; `--check` fetches every ready-made feed that needs no key.

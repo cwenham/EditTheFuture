@@ -386,6 +386,25 @@ actor ScenarioEngine {
         return FindResult(request: request, startValue: startValue, found: nil)
     }
 
+    /// A copy of a slot for Refit (docs/DESIGN.md, 8.4), or why there can't be one.
+    enum FittingCopy: Sendable {
+        case copy(SlotCopy)
+        case failed(String)
+    }
+
+    /// Copies what fitting a slot needs, so the fit can run on another thread while this one
+    /// carries on drawing.
+    func copyForFitting(slot: Int) -> FittingCopy {
+        guard ids.indices.contains(slot), let id = ids[slot] else {
+            return .failed("This slot is paused, so it can't be refitted.")
+        }
+        do {
+            return .copy(try scenario.copyForFitting(id))
+        } catch {
+            return .failed(String(describing: error))
+        }
+    }
+
     /// The slot's line with the change applied: tries the change, reads the line, then takes it out again.
     func preview(_ request: PreviewRequest) -> PreviewResult {
         guard let id = ids[request.slot], let original = setups[request.slot] else {

@@ -11,9 +11,13 @@ struct SlotPane: View {
     var body: some View {
         let slot = store.focused
         ScrollView {
-            SlotSettings(store: store, saved: slot)
-                // Fields start afresh for each slot.
-                .id(slot.id)
+            if let refit = store.refit, refit.slot == slot.id {
+                RefitSheet(store: store, slot: slot, state: refit)
+            } else {
+                SlotSettings(store: store, saved: slot)
+                    // Fields start afresh for each slot.
+                    .id(slot.id)
+            }
         }
         .scrollIndicators(.automatic)
     }
@@ -111,13 +115,36 @@ private struct SlotSettings: View {
     private var modelRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(slot.kind.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.chipBorder))
-                Text(slot.model).font(.system(size: 13)).lineLimit(1)
+                if store.canRefit(slot: slot.id) {
+                    // Predict with (docs/UI.md, 5.11): a slot with readings chooses its model by how
+                    // well each one predicts them. The pane is narrow, so the kind badge gives way.
+                    Text("Predict with").font(.system(size: 13)).foregroundStyle(Theme.secondary).fixedSize()
+                    Button {
+                        store.openPredict(slotAt: index)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(slot.model).lineLimit(1)
+                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                        }
+                        .font(.system(size: 13))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Compare models by how well each predicts \(slot.title)'s readings")
+                    .popover(isPresented: Binding(
+                        get: { store.predict?.slot == slot.id },
+                        set: { if !$0 { store.closePredict() } }), arrowEdge: .leading) {
+                        if let state = store.predict { PredictMenu(store: store, state: state) }
+                    }
+                } else {
+                    Text(slot.kind.title)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.chipBorder))
+                    Text(slot.model).font(.system(size: 13)).lineLimit(1)
+                }
                 Spacer(minLength: 4)
                 Button("Change…") { store.openPicker(.change(slot: slot.id)) }
                     .controlSize(.small)
@@ -132,6 +159,13 @@ private struct SlotSettings: View {
                     Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
+                if store.canRefit(slot: slot.id) {
+                    Button("Refit…") { store.openRefit(slotAt: index) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.proposal)
+                        .help("Fit \(slot.title)'s values to its readings")
+                }
                 if slot.kind == .formula || slot.isScript {
                     Button(slot.isScript ? "Edit script…" : "Edit formula…") { store.showFormulaEditor() }
                         .buttonStyle(.plain)

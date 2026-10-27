@@ -158,4 +158,33 @@ struct ScriptFittingTests {
         let (failing, failingID) = try slot(fussyGrowth, language, values: ["growth": -0.01], readings: readings)
         #expect(throws: ScriptError.self) { try failing.refit(failingID, FitSettings(values: ["growth"])) }
     }
+
+    @Test("A fit from readings before the start keeps t.days counting from the scenario's start", arguments: languages)
+    func fromFirstReading(_ language: ScriptLanguage) throws {
+        let line = Scripts(lua: """
+            every "1 month"
+            param("level", 0, { fit = true })
+            param("perYear", 0, { fit = true })
+            output("value")
+            function step(s, t) s.value = s.level + s.perYear * t.days / 365.2425 end
+            """, python: """
+            every("1 month")
+            param("level", 0, fit=True)
+            param("perYear", 0, fit=True)
+            output("value")
+            def step(s, t):
+                s.value = s.level + s.perYear * t.days / 365.2425
+            """)
+        // From 2012, eight years before the start, rising 0.5 a year through 5 at the start.
+        let readings = (0..<120).map { index in
+            Reading(time: Calendar.utcGregorian.date(byAdding: .month, value: index, to: utc(2012, 1, 1))!,
+                    variable: "value", value: 5 + 0.5 * Double(index - 96) / 12)
+        }
+        // The readings are all above zero, so the line starts above zero to be compared with them.
+        let (scenario, id) = try slot(line, language, values: ["level": 3], readings: readings)
+        let outcome = try scenario.refit(id, FitSettings(values: ["level", "perYear"]))
+        #expect(outcome.after.first?.count == 119)
+        #expect(abs(outcome.values["level"]! - 5) < 0.01)
+        #expect(abs(outcome.values["perYear"]! - 0.5) < 0.01)
+    }
 }

@@ -114,7 +114,7 @@ extension ScenarioStore {
     }
 
     /// Adds a slot of its own for a feed, with a model that follows its readings and holds the
-    /// latest one: the "Data series" model with the feed's step.
+    /// latest one: the "Hold the latest" model with the feed's step.
     @discardableResult
     public func addFeedSlot(_ spec: FeedSpec, name: String, format: ValueFormat, step: StepRate,
                             atPosition position: Int? = nil) -> Bool {
@@ -136,18 +136,12 @@ extension ScenarioStore {
         return true
     }
 
-    nonisolated static let dataSeriesName = "Data series"
+    /// The model a feed's own slot starts with: "Hold the latest", once called "Data series".
+    nonisolated static let dataSeriesName = ForecastModels.Kind.holdTheLatest.name
 
     /// A model that follows its readings and holds the latest one (docs/DESIGN.md, 4.6).
     nonisolated static func dataSeriesFormula(label: String, format: ValueFormat, step: StepRate) -> String {
-        let quoted = label.replacingOccurrences(of: "\"", with: "'")
-        let kind = format == .number ? "" : " as \(format.rawValue)"
-        return """
-            step \(step.text)
-            init value = 0 label "\(quoted)"\(kind)
-            # Readings replace the value; between and after them it holds the latest.
-            value[t] = value[t-1]
-            """
+        ForecastModels.formula(.holdTheLatest, for: ForecastModels.Value(name: "value", label: label, format: format, step: step))
     }
 
     /// Fetches feeds now: one slot's, or all of them.

@@ -18,6 +18,11 @@ public enum CommandBarAction: Equatable, Sendable {
     case addModel(String, slot: Int?)
     /// Asks to remove a slot, by name or number.
     case removeSlot(String)
+    /// Opens Refit for a slot, by name or number, or the focused slot (docs/UI.md, 5.11).
+    case refit(String?)
+    /// Opens Predict with for a slot, or the focused one, with a model selected by name, or the
+    /// best once the scores are in (docs/UI.md, 5.11).
+    case predict(slot: String?, with: String?)
     case copySnapshot
     case copyData
     case undo
@@ -51,6 +56,8 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
 /// - `+500`, `+500 monthly from 2027-03`, `-6,000 on Aug 2028`, `+1.2k every year`
 /// - `set rate 4% from 2027-06`, `set monthly 650`
 /// - `add savings account`, `add loan to 7`, `remove climate`
+/// - `refit`, `refit savings`
+/// - `predict`, `predict data with trend line`, `predict data with best`
 /// - `copy`, `copy data`, `undo`, `redo`
 ///
 /// Natural-language input goes to a language model instead (DESIGN.md, section 7).
@@ -107,6 +114,22 @@ public enum CommandBarParser {
             }
             guard !rest.isEmpty else { throw CommandBarError.notUnderstood(text) }
             return .addModel(rest.joined(separator: " "), slot: slot)
+        }
+
+        if words.first == "predict" {
+            let rest = text.split(whereSeparator: \.isWhitespace).dropFirst().map(String.init)
+            if let with = rest.firstIndex(where: { $0.lowercased() == "with" }) {
+                let slot = rest[..<with].joined(separator: " ")
+                let model = rest[(with + 1)...].joined(separator: " ")
+                guard !model.isEmpty else { throw CommandBarError.notUnderstood(text) }
+                return .predict(slot: slot.isEmpty ? nil : slot, with: model)
+            }
+            return .predict(slot: rest.isEmpty ? nil : rest.joined(separator: " "), with: nil)
+        }
+
+        if words.first == "refit" {
+            let rest = text.split(whereSeparator: \.isWhitespace).dropFirst().joined(separator: " ")
+            return .refit(rest.isEmpty ? nil : rest)
         }
 
         if ["remove", "delete"].contains(words.first), words.count >= 2 {

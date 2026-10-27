@@ -153,7 +153,13 @@ struct FocusChart: View {
         if !focus.preview.isEmpty {
             series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
         }
+        if !focus.heldBack.isEmpty {
+            series.append(PlotSeries(samples: focus.heldBack, color: Theme.proposal, lineWidth: 1.25, dash: [1.5, 3]))
+        }
         var rules = [PlotRule(date: timeline.now, color: Theme.nowLine)]
+        if let cutoff = focus.cutoff {
+            rules.append(PlotRule(date: cutoff, color: Theme.proposal.opacity(0.45), dash: [1.5, 3]))
+        }
         if let draftDate = focus.draftDate {
             rules.append(PlotRule(date: draftDate, color: Theme.proposal, dash: [3, 3]))
         }

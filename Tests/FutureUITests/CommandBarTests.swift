@@ -65,7 +65,11 @@ struct CommandBarTests {
             #expect(model.descriptor.variable(named: template.variable) != nil, "\(template.name) has no \(template.variable)")
             for parameter in model.descriptor.variables where parameter.causality == .parameter {
                 #expect(parameter.label != nil, "\(template.name).\(parameter.name) has no label")
-                #expect(parameter.minimum != nil && parameter.maximum != nil, "\(template.name).\(parameter.name) has no range")
+                // Forecast models are fitted to readings, whose size only the readings know, so a
+                // level or a change per year has no range (DESIGN.md, 8.4).
+                if template.category != .forecast {
+                    #expect(parameter.minimum != nil && parameter.maximum != nil, "\(template.name).\(parameter.name) has no range")
+                }
                 if let value = model.declaredDefaults[parameter.name], let low = parameter.minimum, let high = parameter.maximum {
                     #expect(value >= low && value <= high, "\(template.name).\(parameter.name)'s default is outside its range")
                 }

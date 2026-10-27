@@ -192,6 +192,30 @@ public final class ScenarioStore {
     public internal(set) var parameterPreview: [Sample] = []
     @ObservationIgnored var parameterDrag: ParameterDrag?
     @ObservationIgnored var parameterPreviewSequence = 0
+    /// Refit's sheet over the Slot tab, while it's open (docs/UI.md, 5.11).
+    public internal(set) var refit: RefitState?
+    /// Slots that have readings of one of their values, so Refit can run for them.
+    public internal(set) var refittable: Set<UUID> = []
+    @ObservationIgnored var refitTask: Task<Void, Never>?
+    @ObservationIgnored var refitFlag: CancelFlag?
+    @ObservationIgnored var refitSequence = 0
+    /// The range Refit's dashed preview covers, while it shows one.
+    @ObservationIgnored var refitPreviewRange: (from: Date, through: Date)?
+    /// The Predict with menu, while it's open (docs/UI.md, 5.11).
+    public internal(set) var predict: PredictState?
+    /// The selected model's held-back test, drawn dotted on the graph.
+    public internal(set) var heldBack: HeldBackLine?
+    @ObservationIgnored var predictTask: Task<Void, Never>?
+    @ObservationIgnored var predictFlag: CancelFlag?
+    @ObservationIgnored var predictSequence = 0
+    /// The menu's models, by row id.
+    @ObservationIgnored var predictCandidates: [String: PredictCandidate] = [:]
+    /// Scores kept by model, values, readings and window, until one of those changes.
+    @ObservationIgnored var predictScores: [String: PredictState.Phase] = [:]
+    /// Why a slot's models can't be compared, kept the same way.
+    @ObservationIgnored var predictProblems: [String: String] = [:]
+    /// The model and values the menu's dashed preview shows, and the range it covers.
+    @ObservationIgnored var predictPreview: (id: String, values: [String: Double], from: Date, through: Date)?
     /// The slot `parameterPreview` belongs to, while a slider is dragged or a formula edited.
     @ObservationIgnored var previewSlot: UUID?
 
@@ -268,6 +292,7 @@ public final class ScenarioStore {
             savedResults[config.name].map { (index, $0) }
         })
         if !restore.isEmpty { enqueue(.mutate(.restore(restore))) }
+        updateRefittable()
         requestData()
     }
 
@@ -409,6 +434,9 @@ public final class ScenarioStore {
         enqueue(.mutate(.layout(assembly.layout)))
         requestData()
         updateDraftPreview()
+        updateRefittable()
+        refitSlotsChanged()
+        predictSlotsChanged()
         onScenarioChange?()
     }
 
@@ -425,6 +453,8 @@ public final class ScenarioStore {
     /// Focuses a slot. The add-event pane follows the focused slot.
     public func focus(index: Int) {
         guard slots.indices.contains(index) else { return }
+        if let refit, refit.slot != slots[index].id { closeRefit() }
+        if let predict, predict.slot != slots[index].id { closePredict() }
         focusedIndex = index
         retargetDraft()
     }
@@ -517,6 +547,8 @@ public final class ScenarioStore {
     private func frameChanged() {
         requestData()
         extendPreviewIfNeeded()
+        extendRefitPreviewIfNeeded()
+        extendPredictPreviewIfNeeded()
     }
 
     // MARK: Editing
@@ -679,6 +711,7 @@ public final class ScenarioStore {
         enqueue(.mutate(.readings(slot: index, readings.set)))
         requestData()
         updateDraftPreview()
+        updateRefittable()
     }
 
     /// Forgets undo and redo, when the scenario is replaced from its file with a new start or seed.
@@ -702,6 +735,13 @@ public final class ScenarioStore {
         refreshSlots(focus: focus)
     }
 
+    /// A copy of a slot for Refit, made after everything already queued (docs/DESIGN.md, 8.4).
+    func copyForFitting(slotAt index: Int) async -> ScenarioEngine.FittingCopy {
+        await withCheckedContinuation { reply in
+            enqueue(.copyForFitting(slot: index, reply: reply))
+        }
+    }
+
     /// Results worth saving (docs/DESIGN.md, 15.5), by slot index in `configs` as it is now. The
     /// engine answers after everything already queued.
     func resultsToSave(minimumSeconds: Double) async -> [Int: SlotHistory] {
@@ -718,6 +758,7 @@ public final class ScenarioStore {
         case preview(ScenarioEngine.PreviewRequest)
         case find(ScenarioEngine.FindRequest)
         case export(minimumSeconds: Double, reply: CheckedContinuation<[Int: SlotHistory], Never>)
+        case copyForFitting(slot: Int, reply: CheckedContinuation<ScenarioEngine.FittingCopy, Never>)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
@@ -744,7 +785,7 @@ public final class ScenarioStore {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
-        case .mutate, .find, .export: break
+        case .mutate, .find, .export, .copyForFitting: break
         }
         engineQueue.append(operation)
         guard !isDraining else { return }
@@ -762,6 +803,7 @@ public final class ScenarioStore {
                 if case .model = request.change { receiveParameterPreview(result) } else { receive(result) }
             case .find(let request): receive(await engine.find(request))
             case .export(let minimum, let reply): reply.resume(returning: await engine.resultsToSave(minimumSeconds: minimum))
+            case .copyForFitting(let slot, let reply): reply.resume(returning: await engine.copyForFitting(slot: slot))
             }
         }
         isDraining = false
@@ -922,6 +964,20 @@ public final class ScenarioStore {
             }
             requestRemoval(ofSlotAt: index)
             say("Confirm in the Slot tab to remove \(slots[index].title).")
+        case .refit(let text):
+            guard let index = text.map(slotIndex(named:)) ?? focusedIndex else {
+                say("There's no slot called “\(text ?? "")”. Slots: \(slots.map(\.title).joined(separator: ", ")).", isError: true)
+                return true
+            }
+            openRefit(slotAt: index)
+        case .predict(let text, let model):
+            guard let index = text.map(slotIndex(named:)) ?? focusedIndex else {
+                say("There's no slot called “\(text ?? "")”. Slots: \(slots.map(\.title).joined(separator: ", ")).", isError: true)
+                return true
+            }
+            if openPredict(slotAt: index, with: model), model != nil {
+                say("↩ in the menu chooses the selected model, Esc leaves it as it is.")
+            }
         case .undo:
             undo()
         case .redo:
@@ -1061,16 +1117,26 @@ public final class ScenarioStore {
         let focusSlot = focused
         let focusSamples = samples(focusedIndex)
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
-        let dragging = previewSlot == focusSlot.id && !parameterPreview.isEmpty
-        let preview = dragging ? parameterPreview : draftOnFocus == nil ? [] : draftPreview
+        // Read every time, so the graph redraws when a preview arrives. `previewSlot` isn't
+        // observed, so reading this only after checking it would miss a preview that arrives later,
+        // such as Refit's.
+        let slotPreview = parameterPreview
+        let dragging = previewSlot == focusSlot.id && !slotPreview.isEmpty
+        let held = heldBack.flatMap { $0.slot == focusSlot.id ? $0 : nil }
+        let preview = dragging ? slotPreview : draftOnFocus == nil ? [] : draftPreview
         let readings = visibleReadings(ofSlotAt: focusedIndex, from: from, through: through)
         let lineRange = range(focusSamples), previewRange = range(preview), readingRange = range(readings)
-        let low = min(lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity, readingRange?.low ?? .infinity)
-        let high = max(lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity, readingRange?.high ?? -.infinity)
+        let heldRange = range(held?.line ?? [])
+        let lows: [Double] = [lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity,
+                              readingRange?.low ?? .infinity, heldRange?.low ?? .infinity]
+        let highs: [Double] = [lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity,
+                               readingRange?.high ?? -.infinity, heldRange?.high ?? -.infinity]
+        let low = lows.min()!, high = highs.max()!
         let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             format: focusSlot.format, samples: focusSamples, readings: readings, preview: preview,
+            heldBack: held?.line ?? [], cutoff: held?.cutoff,
             draftDate: dragging ? nil : draftOnFocus?.date,
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
             editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,

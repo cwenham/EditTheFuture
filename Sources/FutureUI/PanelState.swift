@@ -47,6 +47,10 @@ public struct FocusedSlotState: Sendable {
     public let readings: [Sample]
     /// The line with the add-event pane's draft applied, drawn dashed. Empty until the draft is complete.
     public let preview: [Sample]
+    /// Predict with's held-back test for the selected model: its projection from the cut-off over
+    /// the readings it didn't see, drawn dotted (docs/UI.md, 2.4).
+    public let heldBack: [Sample]
+    public let cutoff: Date?
     /// Where the draft event would go.
     public let draftDate: Date?
     public let yDomain: ClosedRange<Double>

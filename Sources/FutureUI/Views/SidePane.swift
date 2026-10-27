@@ -80,6 +80,10 @@ struct SidePane: View {
     private func tab(_ tab: ScenarioStore.SidePaneTab, _ title: String, help: String) -> some View {
         let selected = store.sidePane == tab
         return Button {
+            if tab != .slot {
+                store.closeRefit()
+                store.closePredict()
+            }
             if tab == .formula {
                 store.showFormulaEditor()
             } else if store.sidePane != tab {

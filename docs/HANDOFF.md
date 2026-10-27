@@ -60,15 +60,20 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - `FeedCenter` (owned by `ScenarioDocument`) reads each feed's copy in `readings/` when the scenario opens, fetches feeds with no copy or an old one, and checks every ten minutes. Each fetch asks for the readings since 400 days before the latest, and merges. New readings go to the engine without being an edit; undo keeps them. A failed fetch keeps the copy and says why.
   - Sign-ins (API key, key in a header, bearer token, username and password) are kept in the Keychain (`KeychainCredentialStore`), never in `scenario.md`, and sent only to the hosts they were saved for, over HTTPS, and not through redirects to other hosts.
   - The feed setup screen: Add a feed… in the Slot tab's new Readings section, Edit… on a feed, Add a data feed… on an empty chip, and Data feed… in the model picker. Categories, ready-made feeds, the source's settings, how to use the readings, the sign-in with a box to paste a key, and Test, which fetches a year of readings without adding anything.
-  - A feed in a slot of its own gets the "Data series" model (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
+  - A feed in a slot of its own gets the "Hold the latest" model, once called "Data series" (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
   - Menu bar item: Refresh Data Feeds. `swift run etf-feed` fetches a feed without the app.
 - **Readings correct models** (DESIGN.md 4.6): direct insertion, the same for formulas, Lua and Python. A reading of a parameter sets it at its step, as a `set` event would; a reading of a value replaces what the step worked out. The start takes the latest readings before it. `Scenario.engineVersion` is now 2, so older caches are recomputed.
 - **Fitting to readings, in the engine** (DESIGN.md 8.4, on `feature/predict-with`):
   - `fit` marks a param or init as one Refit may change: `param growth = 3% range -50%..100% fit`, `{ fit = true }` in Lua, `fit=True` in Python. It becomes `Variable.fittable`.
   - Formulas and scripts report what each step worked out before a reading replaced it (`doStep(_:_:replaced:)`, `Prediction`). A scenario with `recordsMisses` on keeps them as `Miss`es.
   - `Scenario.refit(slot, FitSettings(values:since:))` fits values to the slot's readings with Levenberg–Marquardt (`LeastSquares`), from the slot's own values and from the middle of each range. It runs on a copy of the slot (`copyForFitting`, then `SlotCopy.fit` on any thread), with recordings of the slots it reads, and never changes the scenario. The `FitOutcome` has the values, the typical miss before and after, and whether it improved.
-  - Misses are ratios when every reading is above zero, and differences otherwise. A value's first reading after the start isn't counted.
-  - Not built yet: Refit's sheet, Predict with, the Forecast models and the automatic pick (UI.md 5.11).
+  - Fits use readings from before the scenario's start: runs start at the slot's first reading (`SlotCopy.runStart`), unless the slot reads other slots or a starting value is fitted. `days` still counts from the scenario's start (`Scenario.origin`).
+  - Misses are ratios when every reading is above zero, and differences otherwise, and always differences for temperatures and percents. A value's first reading after the start isn't counted.
+  - `SlotCopy.score(variable, settings)` is the automatic pick's score: fits at cut-offs of 60%, 70% and 80% of the span, projects from four points after each, and gives the typical miss on the hidden readings, then fits to every reading for the values. `SlotCopy.replacingModel` tries another model on the same slot.
+  - **Refit in the panel** (UI.md 5.11): Refit… in the Slot tab, for a slot with readings of a value, opens a sheet with a box for each value that may change, a menu for which readings count, and the result: each value's change and the typical miss before and after. The fitted line shows dashed. Apply (⌘↩) makes the values the slot's own, undoably; Cancel (Esc) drops them. `refit` and `refit savings` in the command bar. The fit runs on a task of its own, so the panel keeps scrolling.
+  - **The Forecast models** (`ForecastModels.swift`): Hold the latest, Steady change, Steady growth, Recent change, Recent growth, Trend line, S-curve and Seasonal, written around whichever value a slot's readings are of, each with a first guess from the readings. A Forecast category in the model picker.
+  - **Predict with in the panel** (UI.md 5.11): for a slot with readings, the Slot tab's model name opens a popover listing the slot's own model, the Forecast models and matching library models. Each is fitted and scored on readings it didn't see, one at a time off the main thread, with the best tagged (lowest score; within a tenth of it, fewest fitted values). Hovering or ↑ and ↓ preview a model's fitted line dashed and its held-back projection dotted. Click or ↩ chooses it, undoably. A Which readings menu, Use the best, and `predict data with trend line` or `with best` in the command bar. Scores are kept until the model, values or readings change.
+  - `swift run -c release etf-bench predict readings.csv [step day] [since 1976-01-01]` scores the Forecast models on a feed's saved readings. Europe's temperatures pick Trend line, US debt Steady growth, the S&P 500 Recent growth.
 - **Readings on the graph** (UI.md 2.4): the focused graph draws readings of the value it shows as dots on a thin line (just the line when they're dense), and the readout says "Reading" over them.
 - **The panel:**
   - Floating `NSPanel`. ⌃⌥Space toggles it, and holding it peeks.
@@ -133,7 +138,6 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - A scenario menu in the panel, and New Scenario. For now, Open Scenario… in the menu bar item, and copying folders in Finder.
   - Remembering where the panel was looking for each scenario.
   - Better assimilation than direct insertion (nudging, Kalman filters), and drift alerts (UI.md 5.6).
-  - Refit in the panel, Predict with, the Forecast models and the automatic pick (DESIGN.md 8.4, UI.md 5.11). The engine part is built.
   - Readings in the lanes, and the Readings toggle in the focus area (UI.md, 3).
   - Asking before running scripts from a scenario someone else made (DESIGN.md, 17).
   - Sync, iOS documents, branches, and the sandbox's related-files declaration for SQLite.
@@ -177,6 +181,11 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The app's scenario doesn't keep misses (`recordsMisses` is off), because saved results (`SlotCache`) don't include them. Drift alerts will need both.
   - Refit takes the slots a slot reads as they are. A loop back through another slot isn't refitted.
   - A differential equation makes each try slow in debug builds: an S-curve over 15 years of months took 2.6 seconds in a test. Release builds are much faster, but this wasn't measured.
+  - Refit in the panel was checked in tests and offscreen renders of the real panel (the sheet, the Refit… link, the dashed line), not by clicking in the app. Not checked by hand: Esc and ⌘↩ reaching the sheet's buttons in the floating panel, and the readings menu.
+  - The sheet and the Predict with menu don't notice new readings arriving while they're open; closing and opening again fits to them.
+  - Predict with: ↑ and ↓ rely on the popover taking keyboard focus in the floating panel, and Esc and ↩ on its Cancel and Use buttons. Comparing every model takes about 30 seconds for 30 years of daily readings (US debt), most of it Seasonal's; ideas are in DESIGN.md 8.4, Later.
+  - Recent change and Recent growth learn a change per step from each reading, so readings much sparser than the step (yearly readings in a monthly slot) make them overreact. Their smoothing often settles at its lowest, 0.1%, on noisy monthly data.
+  - Forecast models' values that only readings can size (a trend line's level, a change per year) have no range, so the Slot tab shows them without a slider.
   - Fitting several values with readings of different values adds their misses together. Differences in different units could outweigh each other; ratios don't.
 - `README.md` still describes only the engine package.
 - **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
@@ -219,7 +228,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 317 tests in about 20 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Tests:** `swift test` runs about 349 tests in about 25 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
 - **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
 - **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.
   - Store tests must `await store.waitUntilIdle()` before reading results.
@@ -243,6 +252,9 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 ## Lessons learned
 
+- **Scoring on one cut-off is a lottery for models that carry on from the latest reading.** On noisy readings, how far the last reading before the cut-off was from the trend decides their score. With one cut-off, and then three, Steady change beat Trend line on test data that was a noisy straight line. Twelve projections (three fits, four starting points each) fixed it at little cost, since a projection is one run and a fit is dozens.
+- **Starting points matter more than the solver.** A trend line starting at zero, or an ordinary straight line through readings that grew tenfold, works out values at or below zero, which can't be compared with readings above zero as ratios; the solver then has nowhere to start. The Forecast models start from guesses made from the readings, weighted by size where misses are ratios.
+- **Observation and short-circuits:** a view redraws only for observed properties its last drawing read. `timelineState()` read `parameterPreview` only after checking `previewSlot`, which isn't observed, so Refit's dashed line didn't appear until something else redrew the graph. Read observed values before any condition that might skip them. The test "The graph redraws when the fitted line arrives" fails without the fix.
 - **A reading at the start instant was applied twice:** by the start, which takes the latest readings at or before it, and again by the first step, whose window includes the start for events. The first step then repeated the reading, and fitting saw a miss that wasn't one. Readings at the start now belong only to the start, and `Scenario.engineVersion` is 3.
 - **Values get extreme.** Compound interest thousands of years out passes Int.max, then overflows to infinity, then can become NaN. Two crashes came from this.
   - Format values with `ValueFormat`, which switches to scientific notation from 10¹⁵.
