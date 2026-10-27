@@ -47,6 +47,13 @@ struct AssimilationTests {
         #expect(abs(read.balance[1] - (2000 * (1 + 0.12 / 12) + 200)) < 1e-9)
     }
 
+    @Test("A reading at the start instant is the start's, not the first step's too")
+    func readingAtStart() throws {
+        let read = try balances([Reading(time: start, variable: "balance", value: 2000)])
+        #expect(read.balance[0] == 2000)
+        #expect(abs(read.balance[1] - (2000 * (1 + 0.06 / 12) + 200)) < 1e-9)
+    }
+
     @Test("Readings of names the model doesn't have change nothing")
     func unknown() throws {
         #expect(try balances([Reading(time: utc(2026, 3, 10), variable: "price", value: 1)]).balance == balances([]).balance)

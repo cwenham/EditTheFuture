@@ -82,10 +82,13 @@ public struct Variable: Hashable, Sendable, Codable {
     /// A slider's step.
     public var increment: Double?
     public var quantity: Quantity?
+    /// Refit may change it to match the slot's readings (docs/DESIGN.md, 8.4). Only parameters and
+    /// starting values are marked.
+    public var fittable: Bool
 
     public init(name: String, causality: Causality, unit: String? = nil, start: Double = 0, source: Reference? = nil,
                 label: String? = nil, minimum: Double? = nil, maximum: Double? = nil, increment: Double? = nil,
-                quantity: Quantity? = nil) {
+                quantity: Quantity? = nil, fittable: Bool = false) {
         self.name = name
         self.causality = causality
         self.unit = unit
@@ -96,6 +99,7 @@ public struct Variable: Hashable, Sendable, Codable {
         self.maximum = maximum
         self.increment = increment
         self.quantity = quantity
+        self.fittable = fittable
     }
 }
 
@@ -161,6 +165,18 @@ public struct GeneratedEvent: Hashable, Sendable {
     }
 }
 
+/// What a step worked out for a value before a reading replaced it: the model's prediction, which
+/// fitting compares with the reading (docs/DESIGN.md, 8.4).
+public struct Prediction: Hashable, Sendable {
+    public var variable: String
+    public var value: Double
+
+    public init(variable: String, value: Double) {
+        self.variable = variable
+        self.value = value
+    }
+}
+
 /// Everything a model receives for one step.
 public struct StepContext: Sendable {
     /// Index of the communication point being computed. 0 is the start.
@@ -216,6 +232,11 @@ public protocol TimelineModel: Sendable {
     /// Advances one communication step (FMI: `fmi3DoStep`) and returns any events it generated.
     func doStep(_ state: inout State, _ context: StepContext) throws -> [GeneratedEvent]
 
+    /// The same, and adds to `replaced` what the step worked out for each value that one of its
+    /// readings then replaced, once per value (docs/DESIGN.md, 8.4). The default calls `doStep` and
+    /// adds nothing, so the model can't be fitted to readings.
+    func doStep(_ state: inout State, _ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent]
+
     /// Current values of readable variables (outputs and parameters), by name.
     func values(of state: State) -> [String: Double]
 
@@ -232,6 +253,10 @@ public protocol TimelineModel: Sendable {
 }
 
 extension TimelineModel {
+    public func doStep(_ state: inout State, _ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent] {
+        try doStep(&state, context)
+    }
+
     public func readableValues(of state: State) -> [Double] {
         let values = values(of: state)
         return descriptor.readable.map { values[$0.name] ?? .nan }

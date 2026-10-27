@@ -3,6 +3,8 @@ import Foundation
 /// Type-erased view of a slot's runner, so a scenario can hold different model types.
 protocol AnySlotRunner: AnyObject {
     var descriptor: ModelDescriptor { get }
+    /// The slot's model, for fitting (docs/DESIGN.md, 8.4).
+    var anyModel: any TimelineModel { get }
     var grid: TimeGrid { get }
     /// Time of each computed communication point, by index.
     var times: [Date] { get }
@@ -13,7 +15,8 @@ protocol AnySlotRunner: AnyObject {
     func value(at index: Int, column: Int) -> Double
 
     func computeStart(_ context: StepContext) throws
-    func computeStep(_ context: StepContext) throws -> [GeneratedEvent]
+    /// Computes the next step. `replaced` collects what it worked out for values its readings replaced.
+    func computeStep(_ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent]
 
     /// Discards every point at or after `date` and rewinds to the newest checkpoint before it.
     /// Returns the time of the last point kept, or nil if nothing is left.
@@ -80,6 +83,8 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         self.width = readable.count
     }
 
+    var anyModel: any TimelineModel { model }
+
     func column(of variable: String) -> Int? { columns[variable] }
 
     func value(at index: Int, column: Int) -> Double { values[index * width + column] }
@@ -92,10 +97,10 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         record(state, at: context.to)
     }
 
-    func computeStep(_ context: StepContext) throws -> [GeneratedEvent] {
+    func computeStep(_ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent] {
         precondition(context.index == times.count, "steps must be computed in order")
         guard var state = current else { preconditionFailure("step computed before start") }
-        let generated = try model.doStep(&state, context)
+        let generated = try model.doStep(&state, context, replaced: &replaced)
         record(state, at: context.to)
         if context.index % checkpointInterval == 0 {
             checkpoints.append((context.index, state))

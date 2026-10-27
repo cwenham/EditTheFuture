@@ -15,6 +15,8 @@ struct ScriptDescription: Decodable, Sendable {
         var `as`: String?
         /// For state variables: declared with `init` rather than `output`.
         var isInit: Bool?
+        /// Refit may change it (docs/DESIGN.md, 8.4).
+        var fit: Bool?
     }
 
     struct Input: Decodable, Sendable {
@@ -45,6 +47,7 @@ struct ScriptShape: Sendable {
         var maximum: Double?
         var increment: Double?
         var quantity: Quantity?
+        var fittable: Bool
     }
 
     var stepRate: StepRate
@@ -86,7 +89,8 @@ struct ScriptShape: Sendable {
                 quantity = known
             }
             return Value(name: value.name, start: value.value ?? .nan, isInit: isInit, label: value.label,
-                         minimum: value.min, maximum: value.max, increment: value.by, quantity: quantity)
+                         minimum: value.min, maximum: value.max, increment: value.by, quantity: quantity,
+                         fittable: value.fit ?? false)
         }
         params = try description.params.map { try value($0, isInit: true) }
         vars = try description.vars.map { try value($0, isInit: $0.isInit ?? false) }
@@ -125,7 +129,7 @@ struct ScriptShape: Sendable {
         func describe(_ value: Value, _ causality: Causality) -> Variable {
             Variable(name: value.name, causality: causality, start: value.start.isFinite ? value.start : 0,
                      label: value.label, minimum: value.minimum, maximum: value.maximum,
-                     increment: value.increment, quantity: value.quantity)
+                     increment: value.increment, quantity: value.quantity, fittable: value.fittable)
         }
         var variables = params.map { describe($0, .parameter) } + vars.map { describe($0, .output) }
         var seen = Set<String>()

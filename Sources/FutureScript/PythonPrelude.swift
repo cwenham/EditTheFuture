@@ -192,7 +192,8 @@ class Program:
         if name in self._declared:
             raise ScriptMistake(f'"{name}" is already declared')
 
-    def _options(self, what, name, is_percent, range=None, by=None, label=None, as_=None, start=None, allow_start=False):
+    def _options(self, what, name, is_percent, range=None, by=None, label=None, as_=None, start=None, fit=None,
+                 allow_start=False):
         result = {}
         if range is not None:
             try:
@@ -226,16 +227,20 @@ class Program:
             if value is None:
                 raise ScriptMistake(f'{what} "{name}": start should be a number')
             result["start"] = value[0]
+        if fit is not None:
+            if not isinstance(fit, bool):
+                raise ScriptMistake(f'{what} "{name}": fit should be True or False')
+            result["fit"] = fit
         return result
 
     def _value(self, what, name, value, options, is_init):
         number = _number(value)
         if number is None:
             raise ScriptMistake(f'{what} "{name}" needs a value: a number, or text like "4.5%"')
-        unknown = set(options) - {"range", "by", "label", "as_"}
+        unknown = set(options) - {"range", "by", "label", "as_", "fit"}
         if unknown:
             raise ScriptMistake(f'{what} "{name}": there\'s no option called "{sorted(unknown)[0]}". '
-                                "The options are range, by, label and as_.")
+                                "The options are range, by, label, as_ and fit.")
         entry = {"name": name, "value": _finite(number[0]), "isInit": is_init}
         entry.update(self._options(what, name, number[1], **options))
         self._declared[name] = what

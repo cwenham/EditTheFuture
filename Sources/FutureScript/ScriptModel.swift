@@ -69,17 +69,23 @@ public struct ScriptModel: AuthoredModel {
 
     public func start(_ context: StepContext) throws -> State {
         var values = initial
-        applyReadings(context.readings, to: &values, parameters: true)
+        var ignored: [Prediction] = []
+        applyReadings(context.readings, to: &values, parameters: true, replaced: &ignored)
         if program.shape.hasStart {
             try failing {
                 try program.start(&values, inputs: inputs(from: context), time: time(for: context))
             }
         }
-        applyReadings(context.readings, to: &values, parameters: false)
+        applyReadings(context.readings, to: &values, parameters: false, replaced: &ignored)
         return State(values: values)
     }
 
     public func doStep(_ state: inout State, _ context: StepContext) throws -> [GeneratedEvent] {
+        var ignored: [Prediction] = []
+        return try doStep(&state, context, replaced: &ignored)
+    }
+
+    public func doStep(_ state: inout State, _ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent] {
         var events: [Event] = []
         for event in context.events {
             if event.kind == Event.setKind && event.originSlot == nil {
@@ -90,14 +96,19 @@ public struct ScriptModel: AuthoredModel {
                 events.append(event)
             }
         }
-        applyReadings(context.readings, to: &state.values, parameters: true)
+        var ignored: [Prediction] = []
+        applyReadings(context.readings, to: &state.values, parameters: true, replaced: &ignored)
         var values = state.values
         let generated = try failing {
             try program.step(&values, inputs: inputs(from: context), time: time(for: context), events: events)
         }
-        applyReadings(context.readings, to: &values, parameters: false)
+        applyReadings(context.readings, to: &values, parameters: false, replaced: &replaced)
         state.values = values
         return generated
+    }
+
+    public func replacingValues(_ values: [String: Double]) throws -> ScriptModel {
+        try ScriptModel(source, language: language, name: descriptor.name, values: overrides.merging(values) { $1 })
     }
 
     public func values(of state: State) -> [String: Double] {
@@ -120,10 +131,15 @@ public struct ScriptModel: AuthoredModel {
     // MARK: Helpers
 
     /// Readings correct the model, as they do for formulas (docs/DESIGN.md, 4.6): a reading of a
-    /// parameter sets it before the step, and a reading of a value replaces it after.
-    private func applyReadings(_ readings: [Reading], to values: inout [Double], parameters: Bool) {
+    /// parameter sets it before the step, and a reading of a value replaces it after. What the
+    /// step worked out for a value goes in `replaced` (8.4).
+    private func applyReadings(_ readings: [Reading], to values: inout [Double], parameters: Bool,
+                               replaced: inout [Prediction]) {
         for reading in readings {
             guard let index = readableIndex[reading.variable], (parameterIndex[reading.variable] != nil) == parameters else { continue }
+            if !parameters, !replaced.contains(where: { $0.variable == reading.variable }) {
+                replaced.append(Prediction(variable: reading.variable, value: values[index]))
+            }
             values[index] = reading.value
         }
     }

@@ -123,9 +123,12 @@ local function readOptions(options, isPercent, allowStart)
       local start = number(value)
       if not start then return nil, "start should be a number" end
       result.start = start
+    elseif key == "fit" and not allowStart then
+      if type(value) ~= "boolean" then return nil, "fit should be true or false" end
+      result.fit = value
     else
-      return nil, "there's no option called \"" .. tostring(key) .. "\". The options are range, by, label, as"
-        .. (allowStart and " and start" or "") .. "."
+      return nil, "there's no option called \"" .. tostring(key) .. "\". The options are range, by, label, as and "
+        .. (allowStart and "start" or "fit") .. "."
     end
   end
   if not result.as and isPercent then result.as = "percent" end
@@ -138,7 +141,8 @@ local function declareValue(kind, name, value, options, isInit)
   local read, problem = readOptions(options, isPercent, false)
   if not read then error(kind .. " \"" .. name .. "\": " .. problem, 3) end
   declared[name] = kind
-  local entry = { name = name, value = v, label = read.label, min = read.min, max = read.max, by = read.by, as = read.as, isInit = isInit }
+  local entry = { name = name, value = v, label = read.label, min = read.min, max = read.max, by = read.by, as = read.as,
+                  isInit = isInit, fit = read.fit }
   return entry
 end
 

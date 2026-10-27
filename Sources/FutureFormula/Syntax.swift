@@ -56,6 +56,8 @@ struct DeclarationOptions: Sendable, Equatable {
     var maximum: Double?
     var increment: Double?
     var quantity: Quantity?
+    /// `fit`: Refit may change it (docs/DESIGN.md, 8.4). Only on params and inits.
+    var fit = false
 }
 
 /// `when condition emit Kind`

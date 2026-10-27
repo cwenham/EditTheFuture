@@ -25,6 +25,10 @@ public protocol AuthoredModel: TimelineModel {
 
     /// The same with `overrides` applied: what the slot starts with.
     var startingValues: [String: Double] { get }
+
+    /// The same model with these values of the slot's own, on top of the ones it has. Refit builds
+    /// a model like this for each set of values it tries (docs/DESIGN.md, 8.4).
+    func replacingValues(_ values: [String: Double]) throws -> Self
 }
 
 /// An error a model raises that already names its slot and where it went wrong, such as a script's

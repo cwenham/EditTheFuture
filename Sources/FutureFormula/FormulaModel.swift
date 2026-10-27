@@ -87,7 +87,8 @@ public struct FormulaModel: AuthoredModel {
 
         func describe(_ name: String, _ causality: Causality, _ options: DeclarationOptions?) -> Variable {
             Variable(name: name, causality: causality, label: options?.label, minimum: options?.minimum,
-                     maximum: options?.maximum, increment: options?.increment, quantity: options?.quantity)
+                     maximum: options?.maximum, increment: options?.increment, quantity: options?.quantity,
+                     fittable: options?.fit ?? false)
         }
         // A variable's options can be on its init line or the line that defines it; the init line wins.
         var outputOptions: [String: DeclarationOptions] = [:]
@@ -98,6 +99,7 @@ public struct FormulaModel: AuthoredModel {
             options.maximum = options.maximum ?? assignment.options.maximum
             options.increment = options.increment ?? assignment.options.increment
             options.quantity = options.quantity ?? assignment.options.quantity
+            options.fit = options.fit || assignment.options.fit
             outputOptions[assignment.name] = options
         }
         var variables = program.params.map { describe($0.name, .parameter, $0.options) }
@@ -144,12 +146,18 @@ public struct FormulaModel: AuthoredModel {
         for definition in executable.definitions where !executable.variableHasInit[definition.index] {
             evaluator.current[definition.index] = try evaluator.evaluate(definition.expr)
         }
-        applyValueReadings(context.readings, to: &evaluator.current)
+        var ignored: [Prediction] = []
+        applyValueReadings(context.readings, to: &evaluator.current, replaced: &ignored)
         return State(parameters: evaluator.parameters, values: evaluator.current,
                      triggerStates: Array(repeating: false, count: executable.triggers.count))
     }
 
     public func doStep(_ state: inout State, _ context: StepContext) throws -> [GeneratedEvent] {
+        var ignored: [Prediction] = []
+        return try doStep(&state, context, replaced: &ignored)
+    }
+
+    public func doStep(_ state: inout State, _ context: StepContext, replaced: inout [Prediction]) throws -> [GeneratedEvent] {
         var evaluator = Evaluator(parameters: state.parameters, current: state.values, previous: state.values,
                                   inputs: inputs(from: context), builtins: builtins(for: context),
                                   random: context.makeRandom())
@@ -203,7 +211,7 @@ public struct FormulaModel: AuthoredModel {
         }
 
         // 5. Readings replace the values they're readings of (docs/DESIGN.md, 4.6).
-        applyValueReadings(context.readings, to: &evaluator.current)
+        applyValueReadings(context.readings, to: &evaluator.current, replaced: &replaced)
 
         // 6. Triggers fire when their condition turns true.
         var generated: [GeneratedEvent] = []
@@ -218,6 +226,10 @@ public struct FormulaModel: AuthoredModel {
         state.parameters = evaluator.parameters
         state.values = evaluator.current
         return generated
+    }
+
+    public func replacingValues(_ values: [String: Double]) throws -> FormulaModel {
+        try FormulaModel(source, name: descriptor.name, values: overrides.merging(values) { $1 })
     }
 
     public func values(of state: State) -> [String: Double] {
@@ -256,10 +268,14 @@ public struct FormulaModel: AuthoredModel {
     }
 
     /// The latest reading of a value in a step replaces what the step worked out, so the next step
-    /// carries on from what was observed.
-    private func applyValueReadings(_ readings: [Reading], to values: inout [Double]) {
+    /// carries on from what was observed. What the step worked out goes in `replaced` (8.4).
+    private func applyValueReadings(_ readings: [Reading], to values: inout [Double], replaced: inout [Prediction]) {
         for reading in readings {
-            if let index = variableIndex[reading.variable] { values[index] = reading.value }
+            guard let index = variableIndex[reading.variable] else { continue }
+            if !replaced.contains(where: { $0.variable == reading.variable }) {
+                replaced.append(Prediction(variable: reading.variable, value: values[index]))
+            }
+            values[index] = reading.value
         }
     }
 

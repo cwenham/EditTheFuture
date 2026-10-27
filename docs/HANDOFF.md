@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-27, at commit `500e406` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-27, on the `feature/predict-with` branch (not merged into `main` yet).
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -63,6 +63,12 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - A feed in a slot of its own gets the "Data series" model (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
   - Menu bar item: Refresh Data Feeds. `swift run etf-feed` fetches a feed without the app.
 - **Readings correct models** (DESIGN.md 4.6): direct insertion, the same for formulas, Lua and Python. A reading of a parameter sets it at its step, as a `set` event would; a reading of a value replaces what the step worked out. The start takes the latest readings before it. `Scenario.engineVersion` is now 2, so older caches are recomputed.
+- **Fitting to readings, in the engine** (DESIGN.md 8.4, on `feature/predict-with`):
+  - `fit` marks a param or init as one Refit may change: `param growth = 3% range -50%..100% fit`, `{ fit = true }` in Lua, `fit=True` in Python. It becomes `Variable.fittable`.
+  - Formulas and scripts report what each step worked out before a reading replaced it (`doStep(_:_:replaced:)`, `Prediction`). A scenario with `recordsMisses` on keeps them as `Miss`es.
+  - `Scenario.refit(slot, FitSettings(values:since:))` fits values to the slot's readings with Levenberg–Marquardt (`LeastSquares`), from the slot's own values and from the middle of each range. It runs on a copy of the slot (`copyForFitting`, then `SlotCopy.fit` on any thread), with recordings of the slots it reads, and never changes the scenario. The `FitOutcome` has the values, the typical miss before and after, and whether it improved.
+  - Misses are ratios when every reading is above zero, and differences otherwise. A value's first reading after the start isn't counted.
+  - Not built yet: Refit's sheet, Predict with, the Forecast models and the automatic pick (UI.md 5.11).
 - **Readings on the graph** (UI.md 2.4): the focused graph draws readings of the value it shows as dots on a thin line (just the line when they're dense), and the readout says "Reading" over them.
 - **The panel:**
   - Floating `NSPanel`. ⌃⌥Space toggles it, and holding it peeks.
@@ -126,7 +132,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **More for saving** (DESIGN.md, 15):
   - A scenario menu in the panel, and New Scenario. For now, Open Scenario… in the menu bar item, and copying folders in Finder.
   - Remembering where the panel was looking for each scenario.
-  - Better assimilation than direct insertion (nudging, Kalman filters), refitting parameters, and drift alerts (UI.md 5.6).
+  - Better assimilation than direct insertion (nudging, Kalman filters), and drift alerts (UI.md 5.6).
+  - Refit in the panel, Predict with, the Forecast models and the automatic pick (DESIGN.md 8.4, UI.md 5.11). The engine part is built.
   - Readings in the lanes, and the Readings toggle in the focus area (UI.md, 3).
   - Asking before running scripts from a scenario someone else made (DESIGN.md, 17).
   - Sync, iOS documents, branches, and the sandbox's related-files declaration for SQLite.
@@ -166,6 +173,11 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The zoom stops at about 18 months, where daily readings are too dense for dots. Monthly and weekly ones show dots.
   - The sandboxed app (Mac App Store) will need the outgoing network entitlement (`com.apple.security.network.client`).
 
+- **Fitting:**
+  - The app's scenario doesn't keep misses (`recordsMisses` is off), because saved results (`SlotCache`) don't include them. Drift alerts will need both.
+  - Refit takes the slots a slot reads as they are. A loop back through another slot isn't refitted.
+  - A differential equation makes each try slow in debug builds: an S-curve over 15 years of months took 2.6 seconds in a test. Release builds are much faster, but this wasn't measured.
+  - Fitting several values with readings of different values adds their misses together. Differences in different units could outweigh each other; ratios don't.
 - `README.md` still describes only the engine package.
 - **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
 - `goto` with a value, and adding, removing and changing slots, exist only in the panel and command bar. They aren't in the `Command` vocabulary, `etf://` links or the CLI, although UI.md principle 3 says every command should be reachable everywhere.
@@ -191,7 +203,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 | Module | Key parts |
 |---|---|
-| `FutureEngine` | `Wiring.check` decides which slots can run before a scenario is built. `Scenario`, the coordinator. It evaluates lazily, keeps checkpoints every 32 steps, invalidates downstream, and checks connections for same-step loops (`[t-1]` lags allow feedback). It resamples between step rates, routes events, and runs independent slot groups concurrently in `ensureAll`. Also `SlotRunner` (flat history arrays), `TimeGrid` and `CivilDate` (fast UTC Gregorian maths), and `GoalSeek`. |
+| `FutureEngine` | `Fitting.swift`: `Miss`, `SlotCopy` (a slot copied with recordings of the slots it reads, `RecordedModel`), `LeastSquares` and `Scenario.refit` (DESIGN.md 8.4). `Wiring.check` decides which slots can run before a scenario is built. `Scenario`, the coordinator. It evaluates lazily, keeps checkpoints every 32 steps, invalidates downstream, and checks connections for same-step loops (`[t-1]` lags allow feedback). It resamples between step rates, routes events, and runs independent slot groups concurrently in `ensureAll`. Also `SlotRunner` (flat history arrays), `TimeGrid` and `CivilDate` (fast UTC Gregorian maths), and `GoalSeek`. |
 | `FutureScript` | Lua and Python scripts (DESIGN.md 6.4). `ScriptModel` (an `AuthoredModel`) keeps the state as numbers. `ScriptPrograms` loads each script once and shares it, behind a lock. `LuaRuntime` and `PythonRuntime` drive the interpreters through `CLua` and `CPythonBridge`. `LuaPrelude` and `PythonPrelude` implement the script API and report declarations as JSON (`ScriptDescription`, checked into a `ScriptShape`). `ScriptTools`: `ScriptHighlighter`, `ScriptCompleter` and `ScriptVocabulary`. |
 | `CLua`, `CPythonBridge` | C: Lua 5.5.1 with `etf_lua.c` (sandboxed state, memory cap, time-limit hook, `require`); `etf_python.c` (CPython start, audit hooks, watchdog). `CPythonBridge` is in the package only when `Vendor/Python` exists. |
 | `FutureFormula` | The formula language (DESIGN.md 6.2): lexer, parser (with `range`, `by`, `label` and `as` options), analyzer, resolution to array positions (`Executable`), evaluator, and `FormulaModel`, which takes a slot's own values and reports its constant defaults. `FormulaTools`: `FormulaVocabulary` (functions and built-ins with descriptions), `FormulaHighlighter`, `FormulaCompleter` and `FormulaDiagnoser`, all working on half-written text. |
@@ -207,7 +219,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 285 tests in about 25 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Tests:** `swift test` runs about 317 tests in about 20 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
 - **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
 - **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.
   - Store tests must `await store.waitUntilIdle()` before reading results.
@@ -231,6 +243,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 ## Lessons learned
 
+- **A reading at the start instant was applied twice:** by the start, which takes the latest readings at or before it, and again by the first step, whose window includes the start for events. The first step then repeated the reading, and fitting saw a miss that wasn't one. Readings at the start now belong only to the start, and `Scenario.engineVersion` is 3.
 - **Values get extreme.** Compound interest thousands of years out passes Int.max, then overflows to infinity, then can become NaN. Two crashes came from this.
   - Format values with `ValueFormat`, which switches to scientific notation from 10¹⁵.
   - Build axis ranges with `niceTicks` and lane ranges with `ScenarioStore.laneDomain`.

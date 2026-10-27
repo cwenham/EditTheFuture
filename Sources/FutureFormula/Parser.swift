@@ -61,7 +61,7 @@ struct Parser {
             if word.count > 1, word.hasPrefix("d"), isSymbol("/", at: 1), isIdentifier("dt", at: 2), isSymbol("=", at: 3) {
                 advance(4)
                 let name = String(word.dropFirst())
-                let (expr, options) = try parseValueWithOptions(for: name)
+                let (expr, options) = try parseValueWithOptions(for: name, allowsFit: false)
                 program.odes.append(Assignment(name: name, expr: expr, line: line, options: options))
             } else {
                 advance()
@@ -72,31 +72,37 @@ struct Parser {
                     try expectSymbol("]")
                 }
                 try expectSymbol("=")
-                let (expr, options) = try parseValueWithOptions(for: word)
+                let (expr, options) = try parseValueWithOptions(for: word, allowsFit: false)
                 program.definitions.append(Assignment(name: word, expr: expr, line: line, options: options))
             }
         }
     }
 
-    /// `name = value [range low..high] [by step] [label "text"] [as quantity]`, after `param` or `init`.
+    /// `name = value [range low..high] [by step] [label "text"] [as quantity] [fit]`, after `param` or `init`.
     private mutating func parseDeclaration(line: Int) throws -> Assignment {
         let name = try expectIdentifier()
         try expectSymbol("=")
-        let (expr, options) = try parseValueWithOptions(for: name)
+        let (expr, options) = try parseValueWithOptions(for: name, allowsFit: true)
         return Assignment(name: name, expr: expr, line: line, options: options)
     }
 
-    /// A value followed by any of `range low..high`, `by step`, `label "text"` and `as quantity`.
-    private mutating func parseValueWithOptions(for name: String) throws -> (Expr, DeclarationOptions) {
+    /// A value followed by any of `range low..high`, `by step`, `label "text"`, `as quantity` and,
+    /// on a param or init, `fit`.
+    private mutating func parseValueWithOptions(for name: String, allowsFit: Bool) throws -> (Expr, DeclarationOptions) {
         let valueStart = position
         let expr = try parseExpression()
         let writtenAsPercent = tokens[valueStart..<position].contains { $0.kind == .symbol("%") }
         var options = DeclarationOptions()
         var seen: Set<String> = []
-        while case .identifier(let word) = current.kind, ["range", "by", "label", "as"].contains(word) {
+        while case .identifier(let word) = current.kind, ["range", "by", "label", "as", "fit"].contains(word) {
             guard seen.insert(word).inserted else { throw syntax("\(name) has more than one \(word).") }
             advance()
             switch word {
+            case "fit":
+                guard allowsFit else {
+                    throw syntax("Only a param or init can be fitted. Put fit on the line that declares \(name)'s parameter or starting value.")
+                }
+                options.fit = true
             case "range":
                 options.minimum = try parseConstant()
                 try expectSymbol("..")

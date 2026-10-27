@@ -19,8 +19,8 @@ public enum FormulaVocabulary {
 
     /// Words that start a statement or join conditions.
     public static let keywords: Set<String> = ["step", "timeunit", "param", "init", "when", "emit", "on", "and", "or", "not"]
-    /// Words for a param's or init's options: `range 0..10 by 1 label "Rate" as percent`.
-    public static let optionWords: Set<String> = ["range", "by", "label", "as"]
+    /// Words for a param's or init's options: `range 0..10 by 1 label "Rate" as percent fit`.
+    public static let optionWords: Set<String> = ["range", "by", "label", "as", "fit"]
 
     public static let functions: [Entry] = [
         Entry(name: "min", usage: "min(a, b, …)", summary: "The smallest of its values"),
@@ -172,6 +172,9 @@ public enum FormulaHighlighter {
                     add(.name, start, index)  // a kind of value
                 } else if FormulaVocabulary.keywords.contains(word) && (word != "step" || isFirst) {
                     add(.keyword, start, index)
+                } else if word == "fit", firstWordOfLine == "param" || firstWordOfLine == "init",
+                          isFlag(units, start: start, end: index) {
+                    add(.keyword, start, index)
                 } else if FormulaVocabulary.optionWords.contains(word), isOption(units, start: start, end: index) {
                     add(.keyword, start, index)
                 } else if FormulaVocabulary.builtins.contains(where: { $0.name == word }) {
@@ -203,6 +206,19 @@ public enum FormulaHighlighter {
         guard after < units.count else { return false }
         let next = units[after]
         return isDigit(next) || next == minus || next == quote || isIdentifierStart(next)
+    }
+
+    /// `fit` takes no value, so it's an option when it doesn't follow an operator and ends the line
+    /// or comes before a comment or another option.
+    private static func isFlag(_ units: [UInt16], start: Int, end: Int) -> Bool {
+        var before = start - 1
+        while before >= 0, units[before] == 32 || units[before] == 9 { before -= 1 }
+        if before >= 0, operatorUnits.contains(units[before]) { return false }
+        var after = end
+        while after < units.count, units[after] == 32 || units[after] == 9 || units[after] == 13 { after += 1 }
+        guard after < units.count else { return true }
+        let next = units[after]
+        return next == 10 || next == hash || next == slash || isIdentifierStart(next)
     }
 
     private static let hash: UInt16 = 35, slash: UInt16 = 47, quote: UInt16 = 34, dot: UInt16 = 46

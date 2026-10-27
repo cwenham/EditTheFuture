@@ -56,7 +56,7 @@ Nothing is computed until something asks for it. When the graph needs values up 
 
 Each model declares a step rate: seconds, minutes, hours, days, weeks, months, quarters or years. Rates are calendar-aware, so monthly steps land on the same day of each month. Steps use a UTC Gregorian calendar, so daylight-saving changes never move a boundary. Point *i* is computed as start + *i* × rate directly from the start date, never by repeated addition, so month-end dates don't drift. A Jan 31 start gives Feb 28/29, then Mar 31, and so on.
 
-Step windows are half-open: the step that ends at point *i* covers the time after point *i−1*, up to and including point *i*. The first step also includes the start instant. Events and readings are delivered to the step whose window contains them.
+Step windows are half-open: the step that ends at point *i* covers the time after point *i−1*, up to and including point *i*. The first step also includes the start instant for events. Events and readings are delivered to the step whose window contains them. A reading at the start instant belongs to the start (4.6), not to the first step as well.
 
 ### 4.3 Checkpoints and invalidation
 
@@ -87,9 +87,9 @@ Models declare capabilities so the engine can take shortcuts:
 ### 4.6 Past, present and future
 
 - **Past**: real readings, used to correct the model's state up to "now" (data assimilation, for example a Kalman filter or simple nudging). Before the first reading, a model can run backwards when its maths allows it (hindcast). Otherwise the graph starts at the scenario start.
-  - **Built so far** (October 2026): the simplest assimilation, direct insertion, for formulas and scripts alike. A reading of a parameter sets it at the start of its step, as a `set` event would. A reading of a value replaces what the step worked out, so the next step carries on from what was observed. When a step has several readings of one name, the latest wins. The start takes the latest reading of each name at or before it, so a scenario that starts after its readings begin starts from them.
+  - **Built so far** (October 2026): the simplest assimilation, direct insertion, for formulas and scripts alike. A reading of a parameter sets it at the start of its step, as a `set` event would. A reading of a value replaces what the step worked out, so the next step carries on from what was observed. When a step has several readings of one name, the latest wins. The start takes the latest reading of each name at or before it, so a scenario that starts after its readings begin starts from them. Until October 2026 a reading at the start instant was applied again at the first step, so the first step repeated it; it now belongs only to the start, and `Scenario.engineVersion` is 3.
   - Values worked out from a replaced value in the same step (a definition without `[t-1]` that reads it) see the reading from the next step on.
-  - Nudging and Kalman filters are still to do. Refitting parameters to readings, and choosing which model makes the projection, are designed in 8.4.
+  - Nudging and Kalman filters are still to do. Refitting parameters to readings is built in the engine, and choosing which model makes the projection is designed (8.4).
 - **Now**: a vertical line. To its left the graph is anchored by observations, to its right it's a projection.
 - **Future**: for stochastic models, run an ensemble of seeded runs and draw a fan of percentile bands (for example 10–90% and 25–75%) around the median. Compute the median first and refine the bands progressively as the user pauses.
 
@@ -268,9 +268,9 @@ init balance = 18000 label "Balance" as currency
 | `by step` | The slider's step. |
 | `label "text"` | The name shown in the Slot tab. Defaults to the variable's name. |
 | `as currency` | How the value is written: `number`, `percent`, `currency` or `temperature`. A value written with `%` is a percent unless it says otherwise. |
-| `fit` | Refit may change it to match the slot's readings, within its `range` (8.4). Planned. |
+| `fit` | Refit may change it to match the slot's readings, within its `range` (8.4). Only on `param` and `init` lines. |
 
-They become the variable's `label`, `minimum`, `maximum`, `increment`, `quantity` and (planned) `fittable` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
+They become the variable's `label`, `minimum`, `maximum`, `increment`, `quantity` and `fittable` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
 
 A slot can override any parameter's or starting value's default (UI.md, 5.7), like an SSP parameter binding. The formula keeps its defaults, and the slot keeps its own values next to it.
 
@@ -400,7 +400,7 @@ def deposit(s, e, t):
 | `on("kind", fn)` | Runs `fn(s, e, t)` for each event of that kind in the step. `"Slot.Kind"` or `"Slot.Kind[t-1]"` listens to another slot's events. |
 | `start(s, t)` | Optional. Runs once at the start, after the starting values are set. |
 
-The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). `fit` (8.4) will join them: `{ fit = true }` in Lua, `fit=True` in Python. A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
+The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). Parameters and starting values also take `fit` (8.4): `{ fit = true }` in Lua, `fit=True` in Python. A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
 
 What a step sees:
 - **`s`** holds the parameters, state variables and outputs, which it can change, and the inputs, which it can only read. A name that isn't declared is an error, so typos don't go unnoticed.
@@ -527,7 +527,7 @@ Type or say "what if rates drop to 3% next June?" and get a structured event pre
 
 ### 8.4 Predict with: choosing and fitting the model behind a projection
 
-Planned in October 2026; nothing here is built yet. The screens are in UI.md, 5.11.
+Designed in October 2026. Built so far: fit parameters, misses, the solver and Refit, in the engine (`FutureEngine/Fitting.swift`), with tests for formulas, Lua and Python. Not built yet: Refit's sheet, Predict with, the Forecast models and the automatic pick. The screens are in UI.md, 5.11.
 
 A slot's model already makes its projection, and readings correct it up to now (4.6). So choosing how to predict a slot's future means choosing its model, and fitting the model to the readings means choosing its parameter values. This section adds four things:
 
@@ -549,7 +549,8 @@ value[t] = value[t-1] * (1 + growth)^dt
 ```
 
 - **Scripts** mark them the same way: `param("growth", "3%", { fit = true })` in Lua, `fit=True` in Python.
-- **Bounds:** a fitted value stays within the `range` when the model gives one. Without a range it can take any finite value.
+- **Bounds:** a fitted value stays within the `range` when the model gives one. Without a range it can take any finite value. A slot's own value can be outside its range, since values can be typed; the fit keeps it when nothing within the range does better.
+- **Only declarations:** `fit` on a definition or a differential equation is a mistake, since only parameters and starting values have values to set.
 - **Plug-ins** mark them in their descriptor (`fittable`), next to `minimum` and `maximum` (6.2).
 - **Nothing marked:** a model can still be refitted. Refit then lists its parameters with a box to tick for each, and none are ticked to start with.
 - **Parameters with readings** (a feed with `into: rate`) are set by their readings, so they're never offered for fitting.
@@ -558,7 +559,8 @@ value[t] = value[t-1] * (1 + growth)^dt
 
 Readings replace the values they're readings of (4.6), so a slot's line always passes through its readings. A fit has to look instead at what the model worked out *before* each reading replaced it.
 
-- **The miss:** for each reading of a value, the difference between the reading and what its step worked out. Formulas and scripts keep what they worked out before replacing it, and hand it back with the step's results.
+- **The miss:** for each reading of a value, the difference between the reading and what its step worked out. Models report what they worked out before a reading replaced it through `doStep(_:_:replaced:)`, as a `Prediction`. Formulas and scripts do; other models report nothing, so they can't be fitted. A scenario with `recordsMisses` on keeps each slot's misses (`Scenario.misses(in:through:)`). Only fitting turns it on for now: the app's scenario would need its saved results (15.5) to keep misses too.
+- **The first reading:** a value's first reading after the start isn't a miss, because its step had nothing observed to start from. A data slot's value is 0 until then (15.8). A reading at or before the start is taken by the start, so then every later reading counts.
 - **Ratios or differences:** when every reading of the value is above zero, a miss is measured as a ratio (the log of the reading divided by what was worked out). That way a series that grows tenfold counts its early years as much as its later ones. Otherwise, a miss is the plain difference.
 - **Fitting** makes the sum of the squared misses as small as it can, over a run in which readings correct the model as usual. Each miss is then one step ahead: how far the model went wrong, starting from the reading before. Exponential smoothing and most forecasting methods are fitted this way, and it takes only one run per try.
 - **Scoring** asks a harder question: how far a projection made in the past misses the readings that came after it (the automatic pick, below).
@@ -568,16 +570,19 @@ Readings replace the values they're readings of (4.6), so a slot's line always p
 
 - **Method:** Levenberg–Marquardt, the standard method for least squares. It finds its slopes by nudging each value and running again, and keeps values within their `range`.
 - **Starting points:** it starts from the slot's current values, and again from the middle of each range when there is one. It keeps the better of the two results, so it's less likely to settle in a poor local minimum.
-- **Each try** runs the slot on its own, from its first reading to its last, and reads other slots' values as they're already computed. Slots downstream don't compute again until a result is applied.
-- **Threads:** the solver runs on the engine's thread (4.8), like goal seek, and can be cancelled.
+- **A copy of the slot:** `Scenario.copyForFitting` copies the slot's model, events and readings, and records what the slots it reads computed, through its last reading: their values and their events. `SlotCopy.fit` builds a scenario of its own from them, where the recordings play back (`RecordedModel`), so each try runs only this slot, from the start to its last reading. Slots downstream aren't involved. A loop back through another slot (that slot reading this one with `[t-1]`) is taken as it was, not refitted.
+- **Threads:** the copy is plain values, so a fit can run on any thread. The engine's thread only makes the copy, which keeps scrolling smooth while a fit runs. `isCancelled` is checked before each try.
 - **Randomness:** stochastic models are fitted on their seeded run (4.4), so every try sees the same random numbers.
 - **Extreme values:** a try that works out an infinite or NaN value counts as worse than any finite result, and so does zero or less where misses are ratios. The solver then steps back towards the last good values.
-- **Speed:** a formula step takes about 3 µs, so a try over 1,000 steps takes about 3 ms, and fitting two values takes well under a second. Python is about four times slower (6.4).
+- **Speed:** a formula step takes about 3 µs, so a try over 1,000 steps takes about 3 ms, and fitting two values takes well under a second. Python is about four times slower (6.4). A differential equation costs more: in a debug build, fitting an S-curve's two values over 15 years of monthly readings took 95 tries and 2.6 seconds.
+- **Failures:** a try the model fails on (a script raising an error) counts as worse, like an infinite value. Failing at the slot's own values is an error, which Refit passes on.
 - **Other uses:** the same solver fits sketched curves (8.1), with the sketch's points in place of readings. Goal seek stays as it is: one value and one target.
 
 #### Refit
 
 - **What it shows:** Refit fits the slot's marked or ticked values to its readings. It shows the result as a dashed preview, with each value's change and the typical miss before and after. Nothing changes until it's applied.
+- **In the engine:** `Scenario.refit(slot, FitSettings(values:since:))`, or `copyForFitting` then `fit` on another thread. The `FitOutcome` has the fitted values, the misses before and after (`MissSummary`: how many, the typical miss, and whether it's a ratio), and whether the fit improved on the slot's own values. When it didn't, the values are the slot's own. `SlotCopy.markedValues` lists the values marked `fit`, and `fittableValues` every parameter and starting value without readings of its own, for the boxes to tick.
+- **Mistakes** (`FitError`): no readings of a value, nothing chosen, a name the model doesn't have, a value set by its readings, fewer readings than values to fit plus one, and values that can't be compared with the readings at any setting.
 - **Applying** writes the new values as the slot's own values (`### Values` in `scenario.md`, 15.2), as one change that undo takes back. The file format needs nothing new.
 - **Which readings:** all of them by default. It can use only the latest instead (the last year, 5 years or 10 years), for a series whose behaviour has changed.
 - **Drift alerts** (8.2) offer the same Refit.
@@ -1077,7 +1082,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
-| M3 | Drag the future UI; readings import; drift alerts; Predict with, Refit and the automatic pick (8.4). Feeds and direct-insertion assimilation are done (15.8, 4.6). |
+| M3 | Drag the future UI; readings import; drift alerts; Predict with, Refit and the automatic pick (8.4). Feeds, direct-insertion assimilation and Refit in the engine are done (15.8, 4.6, 8.4). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -1122,7 +1127,7 @@ docs/
   HANDOFF.md         where the work stands, for the next session
 Package.swift
 Sources/
-  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek
+  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit)
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
@@ -1137,9 +1142,9 @@ Sources/
   etf-feed/          fetches a feed without the app and prints CSV
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
-  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
-  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections
-  FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks; colouring and completion
+  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares
+  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit
+  FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
   FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds

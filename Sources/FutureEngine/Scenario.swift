@@ -68,7 +68,7 @@ public final class Scenario {
 
     /// The version of the engine's maths. Raise it whenever a change to the engine could change
     /// results, so results saved by an older engine aren't used (docs/DESIGN.md, 15.5).
-    public static let engineVersion = 2
+    public static let engineVersion = 3
 
     public let start: Date
     public let calendar: Calendar
@@ -86,6 +86,8 @@ public final class Scenario {
         var readings: [Reading]
         /// Events this slot generated, in time order.
         var generated: [Event] = []
+        /// Its misses, in time order, when the scenario keeps them (`recordsMisses`).
+        var misses: [Miss] = []
         /// Set while the slot is computing a step, to catch same-step loops.
         var isStepping = false
         /// Time spent in the model's steps, not counting the slots it reads, and how many steps that
@@ -118,6 +120,11 @@ public final class Scenario {
     /// All event routes, including ones resolved from subscriptions. Current after `validate()`.
     public private(set) var eventRoutes: [EventRoute] = []
 
+    /// Whether slots keep their misses: what each step worked out for a value before a reading
+    /// replaced it (docs/DESIGN.md, 8.4). Fitting turns this on in its own copy of a slot. The app's
+    /// scenario leaves it off for now, since saved results (15.5) don't include misses.
+    public var recordsMisses = false
+
     /// The seed scenarios use unless they choose their own.
     public static let defaultSeed: UInt64 = 0x5EED_F07E
 
@@ -140,6 +147,9 @@ public final class Scenario {
     public func name(of slot: SlotID) -> String { slots[slot.rawValue].name }
 
     public func descriptor(of slot: SlotID) -> ModelDescriptor { slots[slot.rawValue].runner.descriptor }
+
+    /// The slot's model, for fitting (docs/DESIGN.md, 8.4).
+    func model(of slot: SlotID) -> any TimelineModel { slots[slot.rawValue].runner.anyModel }
 
     @discardableResult
     public func addSlot<M: TimelineModel>(_ name: String, model: M) throws -> SlotID {
@@ -296,6 +306,13 @@ public final class Scenario {
         (slots[slot.rawValue].secondsPerStep ?? 0) * Double(slots[slot.rawValue].runner.computedCount)
     }
 
+    /// The slot's misses up to `date`, computing as needed. Empty unless `recordsMisses` was on
+    /// while it computed.
+    public func misses(in slot: SlotID, through date: Date) throws -> [Miss] {
+        try ensure(slot, through: date)
+        return slots[slot.rawValue].misses.filter { $0.time <= date }
+    }
+
     /// Events the slot generated up to `date`, computing as needed.
     public func generatedEvents(in slot: SlotID, through date: Date) throws -> [Event] {
         try ensure(slot, through: date)
@@ -354,8 +371,10 @@ public final class Scenario {
             earliest[id] = from
             if let kept = slots[id.rawValue].runner.truncate(from: from) {
                 slots[id.rawValue].generated.removeAll { $0.time > kept }
+                slots[id.rawValue].misses.removeAll { $0.time > kept }
             } else {
                 slots[id.rawValue].generated.removeAll()
+                slots[id.rawValue].misses.removeAll()
             }
             for connection in connections where connection.from == id {
                 pending.append((connection.to, from))
@@ -385,6 +404,7 @@ public final class Scenario {
         for index in slots.indices {
             _ = slots[index].runner.truncate(from: start)
             slots[index].generated.removeAll()
+            slots[index].misses.removeAll()
         }
     }
 
@@ -588,10 +608,11 @@ public final class Scenario {
                 events += try deliveredEvents(route, index: index, grid: runner.grid)
             }
             if events.count > 1 { events.sort(by: Event.stepOrder) }
+            // Readings at the start instant belong to the start, which took them below, so the
+            // first step's window doesn't include its lower end for readings as it does for events.
             let all = slots[id.rawValue].readings
             if !all.isEmpty {
                 var next = Self.firstIndex(in: all, after: window.lower)
-                if window.includesLower { while next > 0 && all[next - 1].time == window.lower { next -= 1 } }
                 while next < all.count, all[next].time <= window.upper {
                     readings.append(all[next])
                     next += 1
@@ -623,7 +644,16 @@ public final class Scenario {
             if index == 0 {
                 try runner.computeStart(context)
             } else {
-                let generated = try runner.computeStep(context)
+                var replaced: [Prediction] = []
+                let generated = try runner.computeStep(context, replaced: &replaced)
+                if recordsMisses {
+                    for prediction in replaced {
+                        // The latest reading in the step is the one that replaced it.
+                        guard let reading = readings.last(where: { $0.variable == prediction.variable }) else { continue }
+                        slots[id.rawValue].misses.append(Miss(time: window.upper, variable: prediction.variable,
+                                                              reading: reading.value, predicted: prediction.value))
+                    }
+                }
                 let stamped = generated.enumerated().map { offset, event in
                     Event(id: UUID.deterministic(slotSeed ^ UInt64(index), UInt64(offset)), time: window.upper,
                           kind: event.kind, values: event.values, source: .generated(slot: slotName))
