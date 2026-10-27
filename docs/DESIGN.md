@@ -40,6 +40,8 @@ Consequences:
 | Recurring event | A rule that produces authored events on a schedule. | |
 | Generated event | An event a model emitted, like `OverCapacity`. | |
 | Reading | A real-world observation used to correct a model's state. | |
+| Miss | How far a reading is from what its step worked out before the reading replaced it (8.4). | |
+| Fit | Choosing parameter values that make a slot's misses small (8.4). | |
 | Checkpoint | A saved model state that recomputation can restart from. | `fmi3GetFMUState` |
 | Branch | An alternative future for the whole scenario. | |
 | Bank | A page of 8 slots, shown together in the UI and on the hardware. | (DAW control-surface bank) |
@@ -87,7 +89,7 @@ Models declare capabilities so the engine can take shortcuts:
 - **Past**: real readings, used to correct the model's state up to "now" (data assimilation, for example a Kalman filter or simple nudging). Before the first reading, a model can run backwards when its maths allows it (hindcast). Otherwise the graph starts at the scenario start.
   - **Built so far** (October 2026): the simplest assimilation, direct insertion, for formulas and scripts alike. A reading of a parameter sets it at the start of its step, as a `set` event would. A reading of a value replaces what the step worked out, so the next step carries on from what was observed. When a step has several readings of one name, the latest wins. The start takes the latest reading of each name at or before it, so a scenario that starts after its readings begin starts from them.
   - Values worked out from a replaced value in the same step (a definition without `[t-1]` that reads it) see the reading from the next step on.
-  - Nudging, Kalman filters and refitting parameters (UI.md, 5.6) are still to do.
+  - Nudging and Kalman filters are still to do. Refitting parameters to readings, and choosing which model makes the projection, are designed in 8.4.
 - **Now**: a vertical line. To its left the graph is anchored by observations, to its right it's a projection.
 - **Future**: for stochastic models, run an ensemble of seeded runs and draw a fan of percentile bands (for example 10–90% and 25–75%) around the median. Compute the median first and refine the bands progressively as the user pauses.
 
@@ -266,8 +268,9 @@ init balance = 18000 label "Balance" as currency
 | `by step` | The slider's step. |
 | `label "text"` | The name shown in the Slot tab. Defaults to the variable's name. |
 | `as currency` | How the value is written: `number`, `percent`, `currency` or `temperature`. A value written with `%` is a percent unless it says otherwise. |
+| `fit` | Refit may change it to match the slot's readings, within its `range` (8.4). Planned. |
 
-They become the variable's `label`, `minimum`, `maximum`, `increment` and `quantity` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
+They become the variable's `label`, `minimum`, `maximum`, `increment`, `quantity` and (planned) `fittable` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
 
 A slot can override any parameter's or starting value's default (UI.md, 5.7), like an SSP parameter binding. The formula keeps its defaults, and the slot keeps its own values next to it.
 
@@ -397,7 +400,7 @@ def deposit(s, e, t):
 | `on("kind", fn)` | Runs `fn(s, e, t)` for each event of that kind in the step. `"Slot.Kind"` or `"Slot.Kind[t-1]"` listens to another slot's events. |
 | `start(s, t)` | Optional. Runs once at the start, after the starting values are set. |
 
-The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
+The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). `fit` (8.4) will join them: `{ fit = true }` in Lua, `fit=True` in Python. A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
 
 What a step sees:
 - **`s`** holds the parameters, state variables and outputs, which it can change, and the inputs, which it can only read. A name that isn't declared is an error, so typos don't go unnoticed.
@@ -512,15 +515,113 @@ Grab the line at a future date and drag it to a target value. The app works out 
 - The user, or a sensible default, chooses what may change: a parameter from a date (`set deposit = x`), a one-off amount, a start date.
 - The solver tries values with bisection, or secant when the function behaves. Each try inserts a trial event, so only the time after that event is recomputed, thanks to checkpoints. The scaffold implements this as `Scenario.goalSeek`.
 - Several candidate fixes can be offered side by side: raise the deposit, extend the term, accept more risk.
-- **Apple Pencil, and dragging with the mouse:** sketch the whole curve you want. The solver fits the changes that best match it (least squares across many target points).
+- **Apple Pencil, and dragging with the mouse:** sketch the whole curve you want. The solver fits the changes that best match it (least squares across many target points). It's the same solver Refit uses (8.4), with the sketch's points in place of readings.
 
 ### 8.2 Drift alerts
 
-When real readings leave the projected band (for example outside the 10–90% ensemble range, or more than k standard deviations from the projection), notify the user: "Your fermentation is running 2 days behind the model." Offer to re-fit the model's parameters to the new readings.
+When real readings leave the projected band (for example outside the 10–90% ensemble range, or more than k standard deviations from the projection), notify the user: "Your fermentation is running 2 days behind the model." Offer Refit (8.4), which fits the model's parameters to the new readings.
 
 ### 8.3 Natural-language events
 
 Type or say "what if rates drop to 3% next June?" and get a structured event preview. The same mechanism can turn "model yeast growth in a 5L carboy at 20°C" into a formula with parameters. Providers are listed in section 7.
+
+### 8.4 Predict with: choosing and fitting the model behind a projection
+
+Planned in October 2026; nothing here is built yet. The screens are in UI.md, 5.11.
+
+A slot's model already makes its projection, and readings correct it up to now (4.6). So choosing how to predict a slot's future means choosing its model, and fitting the model to the readings means choosing its parameter values. This section adds four things:
+
+1. **Fit parameters:** a model marks which of its values may be fitted to readings.
+2. **Refit:** the app fits those values to the slot's readings and shows the result as a preview before anything changes.
+3. **Predict with:** a menu of the models that can take the slot's readings, each one fitted, previewed and scored.
+4. **The automatic pick:** the menu scores each model on readings it didn't see, and marks the best.
+
+#### Fit parameters
+
+A parameter or starting value marked `fit` is one that Refit may change:
+
+```
+step 1 month
+timeunit year
+param growth = 3% range -50%..100% label "Growth per year" fit
+init value = 0
+value[t] = value[t-1] * (1 + growth)^dt
+```
+
+- **Scripts** mark them the same way: `param("growth", "3%", { fit = true })` in Lua, `fit=True` in Python.
+- **Bounds:** a fitted value stays within the `range` when the model gives one. Without a range it can take any finite value.
+- **Plug-ins** mark them in their descriptor (`fittable`), next to `minimum` and `maximum` (6.2).
+- **Nothing marked:** a model can still be refitted. Refit then lists its parameters with a box to tick for each, and none are ticked to start with.
+- **Parameters with readings** (a feed with `into: rate`) are set by their readings, so they're never offered for fitting.
+
+#### What a fit measures
+
+Readings replace the values they're readings of (4.6), so a slot's line always passes through its readings. A fit has to look instead at what the model worked out *before* each reading replaced it.
+
+- **The miss:** for each reading of a value, the difference between the reading and what its step worked out. Formulas and scripts keep what they worked out before replacing it, and hand it back with the step's results.
+- **Ratios or differences:** when every reading of the value is above zero, a miss is measured as a ratio (the log of the reading divided by what was worked out). That way a series that grows tenfold counts its early years as much as its later ones. Otherwise, a miss is the plain difference.
+- **Fitting** makes the sum of the squared misses as small as it can, over a run in which readings correct the model as usual. Each miss is then one step ahead: how far the model went wrong, starting from the reading before. Exponential smoothing and most forecasting methods are fitted this way, and it takes only one run per try.
+- **Scoring** asks a harder question: how far a projection made in the past misses the readings that came after it (the automatic pick, below).
+- Readings of parameters aren't misses. They're inputs.
+
+#### The solver
+
+- **Method:** Levenberg–Marquardt, the standard method for least squares. It finds its slopes by nudging each value and running again, and keeps values within their `range`.
+- **Starting points:** it starts from the slot's current values, and again from the middle of each range when there is one. It keeps the better of the two results, so it's less likely to settle in a poor local minimum.
+- **Each try** runs the slot on its own, from its first reading to its last, and reads other slots' values as they're already computed. Slots downstream don't compute again until a result is applied.
+- **Threads:** the solver runs on the engine's thread (4.8), like goal seek, and can be cancelled.
+- **Randomness:** stochastic models are fitted on their seeded run (4.4), so every try sees the same random numbers.
+- **Extreme values:** a try that works out an infinite or NaN value counts as worse than any finite result, and so does zero or less where misses are ratios. The solver then steps back towards the last good values.
+- **Speed:** a formula step takes about 3 µs, so a try over 1,000 steps takes about 3 ms, and fitting two values takes well under a second. Python is about four times slower (6.4).
+- **Other uses:** the same solver fits sketched curves (8.1), with the sketch's points in place of readings. Goal seek stays as it is: one value and one target.
+
+#### Refit
+
+- **What it shows:** Refit fits the slot's marked or ticked values to its readings. It shows the result as a dashed preview, with each value's change and the typical miss before and after. Nothing changes until it's applied.
+- **Applying** writes the new values as the slot's own values (`### Values` in `scenario.md`, 15.2), as one change that undo takes back. The file format needs nothing new.
+- **Which readings:** all of them by default. It can use only the latest instead (the last year, 5 years or 10 years), for a series whose behaviour has changed.
+- **Drift alerts** (8.2) offer the same Refit.
+- **New readings** don't start a refit on their own (17). Models that learn from their readings as they go, such as Recent growth below, keep up without one.
+
+#### Predict with
+
+Predict with is a menu of the models that could make the slot's projection. Choosing one changes the slot's model, as Change model… does (UI.md, 5.7), so the slot keeps its name, color, events and readings.
+
+- **Which models:** every model that has all the values the slot's readings are of, whether it's in the library, among the user's saved models (planned, UI.md 5.7) or a plug-in. A data slot's readings are of `value` (15.8), so it's offered every model built around `value`. A savings slot with readings of `balance` is offered the models that have a `balance`.
+- **Fitted first:** each model is fitted to the slot's readings before it's shown. Its preview and score then show it at its best, not at its default values. Choosing a model keeps its fitted values.
+- **The slot's step:** choosing a model keeps the slot's step, so the model's `step` line is set to the slot's. Forecast models are written with `timeunit year` and `dt`, so they work at any step.
+- **Models added later** join the menu by following the same rules, wherever they come from. Nothing else has to change for them.
+
+**Forecast models.** A new library category. Every model in it is built around `value`:
+
+| Model | What it does | Fitted |
+|---|---|---|
+| Hold the latest | Stays at the latest reading. This is today's "Data series" model, renamed; `scenario.md` files that name "Data series" still read. | Nothing |
+| Recent change | Keeps changing by the recent average change per step. It learns from each new reading. | `smoothing`: how quickly it forgets older readings |
+| Recent growth | The same, for percent growth. Its values must stay above zero. | `smoothing` |
+| Straight line | Changes by the same amount every year | `perYear` |
+| Steady growth | Grows by the same percent every year (the formula above) | `growth` |
+| S-curve | Grows, then levels off (logistic) | `rate`, `capacity` |
+| Seasonal | A straight line plus a yearly wave | `perYear`, `swing`, `peak` |
+
+Recent change and Recent growth follow their readings as they arrive, so they keep up without a refit. The fitted models keep their fitted values until the next Refit.
+
+#### The automatic pick
+
+- **Holding back:** the score hides the latest readings, those in the last fifth of their span. Each model is fitted to the readings before that cut-off. It then projects from the cut-off with the later readings hidden, and is scored on the readings it didn't see.
+- **Two fits per model:** one to the readings before the cut-off, for the score, and one to all the readings, for the model's line and values.
+- **The score:** the typical miss (the root mean square) over the hidden readings, as a percent of their typical size: "off by 2.1%". For values that cross zero, such as temperature anomalies, it's in the value's own units: "off by 0.12 °C".
+- **The best** has the lowest score. When two scores are within a tenth of each other, the model with fewer fitted values wins, since it's less likely to be fitting noise.
+- **Use the best** chooses it. That's a one-off choice like any other: the menu never changes the slot's model by itself when new readings arrive (17).
+- **Too few readings:** scoring needs at least 12 readings before the cut-off and 4 after it. With fewer, the menu shows no scores and says why.
+- **The work** runs on the engine's thread while the menu is open, one model at a time, cheapest first. Scores fill in as each model finishes. Closing the menu cancels it. Scores are kept for each slot until its readings or its candidate models change.
+- **Seeing the score:** the preview draws the projection from the cut-off over the readings it didn't see (UI.md, 2.4), which shows what the score measures.
+
+#### Later
+
+- **Bands from misses:** the held-back misses at each distance ahead give a range that widens with distance. Models without randomness can't draw bands now (4.6), and drift alerts (8.2) could use the range too.
+- **Several cut-offs,** with their scores averaged, for steadier scores (rolling-origin evaluation).
+- **Kalman filters** (4.6) fit and correct at the same time, which suits noisy readings better.
 
 ## 9. User interface
 
@@ -964,7 +1065,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 
 **Sign-ins** are kept in the Keychain as generic passwords (service `com.editthefuture.feeds`, one item per sign-in, the credential as JSON). A built-in source's sign-in is named after the source (`fred`); a feed at a web address uses its host. Each is tied to its hosts (13.3). Checking whether one is saved reads only its attributes, which never asks the user. The sandbox (when the app has one) needs the outgoing network entitlement.
 
-**A slot of its own.** A feed can be added as a new slot with the "Data series" model: `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does.
+**A slot of its own.** A feed can be added as a new slot with the "Data series" model: `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does. Predict with (8.4, planned) will offer other models for the slot, such as Steady growth, fitted to its readings.
 
 **Running a feed without the app:** `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01` prints its readings as CSV, using the Keychain's sign-ins; `--key KEY` uses a key just once. `etf-feed treasury10` runs a ready-made feed, `--list` lists them, and `--check` fetches the last 120 days of each one that needs no key.
 
@@ -976,7 +1077,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
-| M3 | Drag the future UI; readings import; drift alerts. Feeds and direct-insertion assimilation are done (15.8, 4.6). |
+| M3 | Drag the future UI; readings import; drift alerts; Predict with, Refit and the automatic pick (8.4). Feeds and direct-insertion assimilation are done (15.8, 4.6). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -992,6 +1093,10 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 - Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 - Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
+- Should Refit, or the automatic pick, run on its own when new readings arrive (8.4)? It would change values without a preview, and rewrite `scenario.md` after every fetch.
+- Predict with only offers models that have the values the readings are of (8.4). Should it also offer models whose value has another name, and point the readings at that value when one is chosen (a feed's `into`, a CSV file's column)?
+- Should models be able to read their own past readings (`t.readings` in scripts)? A script could then fit itself, for example with a statistics library.
+- Should stochastic models be fitted to their ensemble's median (4.6), rather than to one seeded run?
 
 ## 18. Further reading: FMI and co-simulation
 
