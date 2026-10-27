@@ -91,6 +91,14 @@ public enum ReadingSource: Sendable, Equatable {
     case csvFile(title: String, path: String)
     /// A link to a SQLite database, and the query that reads it.
     case database(title: String, path: String, query: String)
+    /// Readings fetched from a public source, kept in a copy in `readings/` (15.8).
+    case feed(FeedSpec)
+
+    /// The feed, when this is one.
+    public var feed: FeedSpec? {
+        if case .feed(let spec) = self { return spec }
+        return nil
+    }
 }
 
 /// A mistake in `scenario.md`, with its line (from 1).

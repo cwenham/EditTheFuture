@@ -31,7 +31,7 @@ public struct ScenarioPackage: Sendable, Hashable {
         let parsed = try ScenarioFormat.parse(try readText())
         var readings: [String: LoadedReadings] = [:]
         for slot in parsed.file.slots where !slot.readings.isEmpty {
-            readings[slot.name] = ReadingLoader.load(slot.readings, slot: slot.name, folder: url)
+            readings[slot.name] = ReadingLoader.load(slot.readings, slot: slot.name, folder: url, variable: slot.shows)
         }
         return (parsed, readings)
     }

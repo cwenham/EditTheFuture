@@ -96,6 +96,23 @@ struct ModelPicker: View {
                 .accessibilityAddTraits(active ? .isSelected : [])
             }
             Spacer()
+            if case .add(let position) = request {
+                // Real-world data in a slot of its own (docs/UI.md, 5.10).
+                Button {
+                    store.closePicker()
+                    store.openFeedSetup(.newSlot(position: position))
+                } label: {
+                    Label("Data feed…", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 12))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.proposal)
+                .help("Fetch market prices, rates, debt, climate, migration or disease data into slot \(position + 1)")
+            }
         }
         .padding(8)
     }

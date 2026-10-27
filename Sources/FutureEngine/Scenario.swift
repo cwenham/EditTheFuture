@@ -68,7 +68,7 @@ public final class Scenario {
 
     /// The version of the engine's maths. Raise it whenever a change to the engine could change
     /// results, so results saved by an older engine aren't used (docs/DESIGN.md, 15.5).
-    public static let engineVersion = 1
+    public static let engineVersion = 2
 
     public let start: Date
     public let calendar: Calendar
@@ -597,6 +597,17 @@ public final class Scenario {
                     next += 1
                 }
             }
+        } else {
+            // The start takes the latest reading of each variable up to then, so a slot that
+            // starts after its readings do begins from the latest one (docs/DESIGN.md, 4.6).
+            let all = slots[id.rawValue].readings
+            var next = Self.firstIndex(in: all, after: window.upper)
+            var seen = Set<String>()
+            while next > 0 {
+                next -= 1
+                if seen.insert(all[next].variable).inserted { readings.append(all[next]) }
+            }
+            readings.reverse()
         }
 
         let slotSeed = seed(for: id)

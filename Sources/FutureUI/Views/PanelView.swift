@@ -290,12 +290,19 @@ struct EmptySlotChip: View {
         .accessibilityLabel("Slot \(key) is empty. Add a model")
         .contextMenu {
             Button("Add a model…") { store.openPicker(.add(position: position)) }
+            Button("Add a data feed…") { store.openFeedSetup(.newSlot(position: position)) }
         }
         .popover(isPresented: Binding(get: { store.picker == .add(position: position) },
                                       set: { if !$0 { store.closePicker() } }),
                  arrowEdge: .bottom) {
             ModelPicker(store: store, request: .add(position: position))
         }
+        // A second popover on the same view doesn't show, so this one hangs from a background.
+        .background(Color.clear.popover(isPresented: Binding(get: { store.feedSetup == .newSlot(position: position) },
+                                                             set: { if !$0 { store.closeFeedSetup() } }),
+                                        arrowEdge: .bottom) {
+            FeedSetup(store: store, request: .newSlot(position: position))
+        })
         .dropDestination(for: String.self) { items, _ in
             store.dropSlot(items.first, atPosition: position)
         }

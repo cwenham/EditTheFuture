@@ -27,9 +27,11 @@ let package = Package(
         .library(name: "FutureScript", targets: ["FutureScript"]),
         .library(name: "FutureCommands", targets: ["FutureCommands"]),
         .library(name: "FutureDocument", targets: ["FutureDocument"]),
+        .library(name: "FutureFeeds", targets: ["FutureFeeds"]),
         .library(name: "FutureUI", targets: ["FutureUI"]),
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
+        .executable(name: "etf-feed", targets: ["etf-feed"]),
     ],
     targets: [
         .target(name: "FutureEngine"),
@@ -40,9 +42,14 @@ let package = Package(
         .target(name: "FutureCommands"),
         // Saved scenarios: scenario.md, readings and the cache (docs/DESIGN.md, 15).
         .target(name: "FutureDocument", dependencies: ["FutureEngine"], linkerSettings: [.linkedLibrary("sqlite3")]),
-        .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument"]),
+        // Readings fetched from public sources, and the sign-ins they need (docs/DESIGN.md, 15.5).
+        .target(name: "FutureFeeds", dependencies: ["FutureEngine", "FutureDocument"]),
+        .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
+                                                 "FutureFeeds"]),
         .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
-                                                                    "FutureDocument"]),
+                                                                    "FutureDocument", "FutureFeeds"]),
+        // Fetches a feed without the app: swift run etf-feed "[feed: fred, series: DGS10]"
+        .executableTarget(name: "etf-feed", dependencies: ["FutureFeeds", "FutureDocument", "FutureEngine"]),
         // Runs a script model without the app: swift run etf-script <file>
         .executableTarget(name: "etf-script", dependencies: ["FutureScript", "FutureEngine"]),
         // Performance benchmarks: swift run -c release etf-bench
@@ -53,7 +60,8 @@ let package = Package(
         .testTarget(name: "FutureCommandsTests", dependencies: ["FutureCommands"]),
         .testTarget(name: "FutureDocumentTests", dependencies: ["FutureDocument", "FutureEngine", "FutureFormula"],
                     linkerSettings: [.linkedLibrary("sqlite3")]),
+        .testTarget(name: "FutureFeedsTests", dependencies: ["FutureFeeds", "FutureDocument", "FutureEngine"]),
         .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
-                                                          "FutureDocument"]),
+                                                          "FutureDocument", "FutureFeeds"]),
     ] + pythonTargets
 )

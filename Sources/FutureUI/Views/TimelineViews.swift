@@ -158,7 +158,8 @@ struct FocusChart: View {
             rules.append(PlotRule(date: draftDate, color: Theme.proposal, dash: [3, 3]))
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
-                          series: series, rules: rules)
+                          series: series, rules: rules,
+                          readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(focus.name) from \(DateText.monthYear(timeline.frame.start)) to \(DateText.monthYear(timeline.frame.end))")
             .accessibilityHint("Click to pick this date for a new event")
@@ -240,7 +241,8 @@ struct Readout: View {
                 .font(.system(size: 22, weight: .semibold))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                // Small enough for a national debt written out in full: $40,463,151,897,249.
+                .minimumScaleFactor(0.45)
             Text(state.readoutNote)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.secondary)
@@ -492,5 +494,6 @@ struct LaneValue: View {
             .font(.system(size: 13))
             .monospacedDigit()
             .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 }

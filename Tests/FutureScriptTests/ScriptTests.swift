@@ -157,6 +157,27 @@ struct ScriptTests {
         #expect(rates[5] == 0.06 && rates[6] == 0.03)
     }
 
+    @Test("Readings correct a script as they do a formula: values after the step, parameters before", arguments: languages)
+    func readingsCorrect(_ language: ScriptLanguage) throws {
+        let scenario = Scenario(start: start)
+        let id = try scenario.addSlot("Savings", model: ScriptModel(savings.source(language), language: language, name: "Savings"))
+        scenario.setReadings([
+            Reading(time: utc(2025, 12, 1), variable: "balance", value: 2000),
+            Reading(time: utc(2026, 3, 10), variable: "balance", value: 5000),
+            Reading(time: utc(2026, 6, 15), variable: "rate", value: 0.03),
+        ], for: id)
+        let balances = try series(scenario, id, "balance", through: utc(2026, 8, 1))
+        let rates = try series(scenario, id, "rate", through: utc(2026, 8, 1))
+        #expect(balances[0] == 2000)
+        #expect(abs(balances[1] - (2000 * (1 + 0.06 / 12) + 200)) < 1e-9)
+        #expect(balances[3] == 5000)
+        #expect(abs(balances[4] - (5000 * (1 + 0.06 / 12) + 200)) < 1e-9)
+        #expect(rates[5] == 0.06 && rates[6] == 0.03)
+        // The interest that step worked out came from the rate the reading set.
+        let interest = try series(scenario, id, "interest", through: utc(2026, 8, 1))
+        #expect(abs(interest[6] - balances[5] * 0.03 / 12) < 1e-9)
+    }
+
     @Test("Declarations become the model's descriptor", arguments: languages)
     func declarations(_ language: ScriptLanguage) throws {
         let model = try ScriptModel(savings.source(language), language: language, name: "Savings", values: ["deposit": 300, "nope": 1])

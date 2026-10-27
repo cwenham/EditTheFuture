@@ -28,6 +28,8 @@ public struct ScriptModel: AuthoredModel {
     private let readableNames: [String]
     /// The engine's name for each input, in the order the script declared them.
     private let inputKeys: [String]
+    /// Each readable value's position in the state, for readings.
+    private let readableIndex: [String: Int]
 
     /// - Parameter values: the slot's own values for parameters and starting values, by name.
     ///   Names the script doesn't declare are ignored.
@@ -59,6 +61,7 @@ public struct ScriptModel: AuthoredModel {
         for (index, param) in shape.params.enumerated() { parameterIndex[param.name] = index }
         self.parameterIndex = parameterIndex
         inputKeys = shape.inputs.map(\.reference.text)
+        readableIndex = Dictionary(readableNames.enumerated().map { ($0.element, $0.offset) }) { first, _ in first }
 
         let stochastic = ["random", "normal", "gauss"].contains { source.contains($0) }
         descriptor = shape.descriptor(name: name, stochastic: stochastic)
@@ -66,11 +69,13 @@ public struct ScriptModel: AuthoredModel {
 
     public func start(_ context: StepContext) throws -> State {
         var values = initial
+        applyReadings(context.readings, to: &values, parameters: true)
         if program.shape.hasStart {
             try failing {
                 try program.start(&values, inputs: inputs(from: context), time: time(for: context))
             }
         }
+        applyReadings(context.readings, to: &values, parameters: false)
         return State(values: values)
     }
 
@@ -85,10 +90,12 @@ public struct ScriptModel: AuthoredModel {
                 events.append(event)
             }
         }
+        applyReadings(context.readings, to: &state.values, parameters: true)
         var values = state.values
         let generated = try failing {
             try program.step(&values, inputs: inputs(from: context), time: time(for: context), events: events)
         }
+        applyReadings(context.readings, to: &values, parameters: false)
         state.values = values
         return generated
     }
@@ -111,6 +118,15 @@ public struct ScriptModel: AuthoredModel {
     }
 
     // MARK: Helpers
+
+    /// Readings correct the model, as they do for formulas (docs/DESIGN.md, 4.6): a reading of a
+    /// parameter sets it before the step, and a reading of a value replaces it after.
+    private func applyReadings(_ readings: [Reading], to values: inout [Double], parameters: Bool) {
+        for reading in readings {
+            guard let index = readableIndex[reading.variable], (parameterIndex[reading.variable] != nil) == parameters else { continue }
+            values[index] = reading.value
+        }
+    }
 
     /// Names the slot in errors the script raises.
     private func failing<T>(_ body: () throws -> T) throws -> T {

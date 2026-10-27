@@ -11,8 +11,9 @@ import FutureEngine
 /// balance[t] = balance[t-1] * (1 + rate / 12) + deposit
 /// ```
 ///
-/// Each step: `set` events update parameters, differential equations are integrated,
-/// definitions are evaluated in dependency order, `on` handlers run, then `when` triggers fire.
+/// Each step: `set` events and readings of parameters update parameters, differential equations
+/// are integrated, definitions are evaluated in dependency order, `on` handlers run, readings of
+/// values replace them, then `when` triggers fire.
 public struct FormulaModel: AuthoredModel {
     /// Parameter and variable values by position (see `Executable`), so steps use arrays, not dictionaries.
     public struct State: Sendable {
@@ -60,6 +61,8 @@ public struct FormulaModel: AuthoredModel {
 
     private let parameterOverrides: [Int: Double]
     private let initOverrides: [Int: Double]
+    /// Each variable's position in `State.values`, for readings.
+    private let variableIndex: [String: Int]
 
     /// - Parameter values: the slot's own values for parameters and starting values, by name.
     ///   Names the formula doesn't declare are ignored.
@@ -78,6 +81,7 @@ public struct FormulaModel: AuthoredModel {
         for (position, initial) in program.inits.enumerated() { initOverrides[executable.inits[position].index] = overrides[initial.name] }
         self.parameterOverrides = parameterOverrides
         self.initOverrides = initOverrides
+        variableIndex = Dictionary(program.variableNames.enumerated().map { ($0.element, $0.offset) }) { first, _ in first }
         declaredDefaults = Self.constantValues(program, executable, overrides: [:])
         startingValues = Self.constantValues(program, executable, overrides: overrides)
 
@@ -127,6 +131,7 @@ public struct FormulaModel: AuthoredModel {
                 evaluator.parameters[parameter.index] = try evaluator.evaluate(parameter.expr)
             }
         }
+        applyParameterReadings(context.readings, to: &evaluator.parameters)
         for initial in executable.inits {
             if let value = initOverrides[initial.index] {
                 evaluator.current[initial.index] = value
@@ -139,6 +144,7 @@ public struct FormulaModel: AuthoredModel {
         for definition in executable.definitions where !executable.variableHasInit[definition.index] {
             evaluator.current[definition.index] = try evaluator.evaluate(definition.expr)
         }
+        applyValueReadings(context.readings, to: &evaluator.current)
         return State(parameters: evaluator.parameters, values: evaluator.current,
                      triggerStates: Array(repeating: false, count: executable.triggers.count))
     }
@@ -148,12 +154,13 @@ public struct FormulaModel: AuthoredModel {
                                   inputs: inputs(from: context), builtins: builtins(for: context),
                                   random: context.makeRandom())
 
-        // 1. Parameter changes.
+        // 1. Parameter changes, then readings of parameters.
         for event in context.events where event.kind == Event.setKind && event.originSlot == nil {
             for (name, value) in event.values {
                 if let index = executable.parameterIndex[name] { evaluator.parameters[index] = value }
             }
         }
+        applyParameterReadings(context.readings, to: &evaluator.parameters)
 
         // 2. Differential equations (RK4).
         if !executable.odes.isEmpty {
@@ -195,7 +202,10 @@ public struct FormulaModel: AuthoredModel {
             }
         }
 
-        // 5. Triggers fire when their condition turns true.
+        // 5. Readings replace the values they're readings of (docs/DESIGN.md, 4.6).
+        applyValueReadings(context.readings, to: &evaluator.current)
+
+        // 6. Triggers fire when their condition turns true.
         var generated: [GeneratedEvent] = []
         for (index, trigger) in executable.triggers.enumerated() {
             let isTrue = try evaluator.evaluate(trigger.condition) != 0
@@ -236,6 +246,22 @@ public struct FormulaModel: AuthoredModel {
     }
 
     // MARK: Helpers
+
+    /// Readings correct the model (docs/DESIGN.md, 4.6). The latest reading of a parameter in a
+    /// step sets it, as a `set` event would.
+    private func applyParameterReadings(_ readings: [Reading], to parameters: inout [Double]) {
+        for reading in readings {
+            if let index = executable.parameterIndex[reading.variable] { parameters[index] = reading.value }
+        }
+    }
+
+    /// The latest reading of a value in a step replaces what the step worked out, so the next step
+    /// carries on from what was observed.
+    private func applyValueReadings(_ readings: [Reading], to values: inout [Double]) {
+        for reading in readings {
+            if let index = variableIndex[reading.variable] { values[index] = reading.value }
+        }
+    }
 
     /// Params and inits that are constants (numbers, `pi`, earlier constants), worked out without a
     /// step context. Ones that read the date, another slot or randomness are left out.

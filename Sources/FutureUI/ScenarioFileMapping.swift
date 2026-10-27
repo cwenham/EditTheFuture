@@ -9,12 +9,19 @@ extension ScenarioDefinition {
     /// The scenario a file describes, with the readings found for its slots, by slot name.
     public init(file: ScenarioFile, readings: [String: ReadingSet] = [:]) {
         self.init(name: file.name, start: file.start, seed: file.seed,
-                  slots: file.slots.map { SlotSpec(file: $0, readings: readings[$0.name]) })
+                  slots: file.slots.map { SlotSpec(file: $0, readings: SlotReadings(sources: $0.readings, set: readings[$0.name] ?? .empty)) })
+    }
+
+    /// The same, with each source's readings apart, as `ReadingLoader` loads them.
+    public init(file: ScenarioFile, loaded: [String: LoadedReadings]) {
+        self.init(name: file.name, start: file.start, seed: file.seed, slots: file.slots.map {
+            SlotSpec(file: $0, readings: SlotReadings(sources: $0.readings, parts: loaded[$0.name]?.parts ?? []))
+        })
     }
 }
 
 extension SlotSpec {
-    init(file slot: SlotFile, readings: ReadingSet?) {
+    init(file slot: SlotFile, readings: SlotReadings) {
         let kind = ModelKind(slot.language)
         // What the graph shows, and how: as the file says, else from the model.
         var variable = slot.shows ?? ""
@@ -30,7 +37,7 @@ extension SlotSpec {
         self.init(name: slot.name, model: slot.model.isEmpty ? kind.customModelName : slot.model, kind: kind,
                   formula: slot.source, variable: variable, color: slot.color.map { "#" + $0 }, format: format ?? .number,
                   position: slot.position, values: slot.values, events: slot.events, rules: slot.rules,
-                  readings: SlotReadings(sources: slot.readings, set: readings ?? .empty), problem: slot.problem)
+                  readings: readings, problem: slot.problem)
         showsInFile = slot.shows != nil
         formatInFile = slot.format != nil
     }

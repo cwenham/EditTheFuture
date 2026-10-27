@@ -15,6 +15,8 @@ public enum Theme {
     public static let warning = Color(hex: "#FFC77A")
     public static let error = Color(hex: "#FF9C9C")
     public static let success = Color(hex: "#9FE3C4")
+    /// Readings: dots on a thin line, drawn at 85% (docs/UI.md, 2.4).
+    public static let reading = Color(hex: "#ECEEF1")
 }
 
 /// Column layout shared by the focused graph, the axis rows and every lane,

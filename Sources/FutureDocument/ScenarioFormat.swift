@@ -147,6 +147,12 @@ public enum ScenarioFormat {
                 out.append("- [\(title)](\(path))")
                 out.append("")
                 out += ["```sql"] + query.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) + ["```"]
+            case .feed(let spec):
+                // Feeds sit together, one line each.
+                if out.count >= 2, out[out.count - 2].hasPrefix("- "), (try? FeedSpec.parse(line: String(out[out.count - 2].dropFirst(2)))) != nil {
+                    out.removeLast()
+                }
+                out.append("- " + spec.line)
             }
         }
         return out
@@ -550,7 +556,15 @@ private struct Reader {
                     index = end + 1
                     continue
                 case .text:
-                    if let item = Self.listItem(lines[index]), let (title, path) = Self.link(item) {
+                    if let item = Self.listItem(lines[index]), !item.hasPrefix("[") || Self.link(item) == nil {
+                        do {
+                            if let spec = try FeedSpec.parse(line: item) { slot.readings.append(.feed(spec)) }
+                        } catch let error as FeedLineError {
+                            problems.append(FileProblem(line: index + 1, message: error.message + " The feed is skipped.", slot: slot.name))
+                        } catch {
+                            problems.append(FileProblem(line: index + 1, message: String(describing: error), slot: slot.name))
+                        }
+                    } else if let item = Self.listItem(lines[index]), let (title, path) = Self.link(item) {
                         let ext = (path as NSString).pathExtension.lowercased()
                         if ["sqlite", "sqlite3", "db", "db3"].contains(ext) {
                             slot.readings.append(.database(title: title, path: path, query: ""))

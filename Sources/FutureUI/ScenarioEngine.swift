@@ -43,6 +43,8 @@ actor ScenarioEngine {
         case rebuild(start: Date, seed: UInt64, layout: Layout)
         /// Results saved earlier (docs/DESIGN.md, 15.5), by slot index, put back instead of computed.
         case restore([Int: SlotHistory])
+        /// A slot's readings changed, such as when a feed brought new ones (docs/DESIGN.md, 15.8).
+        case readings(slot: Int, ReadingSet)
     }
 
     struct FetchRequest: Sendable {
@@ -208,6 +210,10 @@ actor ScenarioEngine {
             for (index, history) in histories where ids.indices.contains(index) {
                 if let id = ids[index] { scenario.restore(history, to: id) }
             }
+        case .readings(let slot, let set):
+            guard readingSets.indices.contains(slot), readingSets[slot] != set else { return }
+            readingSets[slot] = set
+            if let id = ids[slot] { scenario.setReadings(set.readings, for: id) }
         }
     }
 

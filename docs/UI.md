@@ -43,6 +43,7 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 | `warning` | `#FFC77A` on `rgba(255,180,84,0.16)` | Drift alerts |
 | `error` | `#FF9C9C` text, `#FF6B6B` strokes | Loops, failed models |
 | `success` | `#9FE3C4` | Parsed natural language, positive deltas |
+| `reading` | `#ECEEF1` at 85% | Readings: dots on a thin line |
 
 Light and high-contrast themes are open questions (section 13). With Reduce Transparency on, the panel is opaque (α = 1) and the blur is off.
 
@@ -65,7 +66,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 | Mark | Drawn as |
 |---|---|
-| Readings (past) | Dots on a thin line, 85% opacity |
+| Readings (past) | Dots on a thin line in `reading`, 85% opacity. The dots show while they're at least 6 points apart; closer, just the line. Built for the focused graph, for readings of the value it shows. |
 | Projection (future) | Thicker solid line |
 | Bands | 25–75% at 16% fill, 10–90% at 12% fill |
 | Preview or proposal | Dashed line in `proposal` |
@@ -94,7 +95,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - Slot name and model summary ("Market model · monthly · median with bands").
 - Toggles for Bands, Readings and Events.
 - The graph with its y axis.
-- A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection), and the 10–90% range when there is one.
+- A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection), and the 10–90% range when there is one. "Reading" shows while the cursor is within the slot's readings of the value the graph shows. Long values shrink to fit.
 
 **Now line:** labelled "Now · Oct 2026". When the latest readings leave the projected band, a drift pill sits to its left.
 
@@ -264,6 +265,7 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
   - A changed parameter has a reset button that puts back the model's default.
   - Every change can be undone.
 - **Starting values:** the model's `init` values, such as a starting balance, at the scenario's start date. They're typed and reset the same way.
+- **Readings:** where the slot's readings come from (5.10). Each feed shows its title, its source, what it's fetching and what it's readings of ("FRED · DGS10 → rate, as a percent"), and how many readings it has, to when, and when it was checked ("1,704 readings to Oct 2026 · checked 5 min. ago"). While it's fetching, "Fetching…"; when a fetch failed, why, in red. Edit… opens the feed setup screen; × removes the feed, which undo brings back; the refresh button fetches the slot's feeds now. Readings from files and databases are listed too, to be edited in `scenario.md`. Add a feed… opens the feed setup screen.
 - **Display:** which of the model's values the graph shows, its format (currency, temperature, percent or number) and its color. A slot with a color of its own has a reset button that puts back its position's color.
 - **Duplicate** copies the slot, with its events, to the next free position.
 - **Remove** asks first, at the top of the pane: "Remove Climate and its 2 events? Energy bill reads Climate.temp, so it will pause. You can undo this." Undo brings the slot back with its events, and focuses it.
@@ -338,6 +340,28 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 - **Formats:** PNG, PDF, tab-separated data and the app's own snapshot format, all at once (DESIGN.md, section 11).
 - **Feedback:** a brief flash and a toast: "Copied image, PDF, table and snapshot."
 
+### 5.10 Data feeds
+
+A feed fetches readings from a public source and keeps them up to date (DESIGN.md, 15.8). Readings correct the slot's model: a reading of a parameter sets it from its date, and a reading of a value replaces it (DESIGN.md, 4.6).
+
+**Where it opens:**
+- **Add a feed…** in the Slot tab's Readings, for the focused slot.
+- **Edit…** on one of the slot's feeds.
+- **Add a data feed…** in an empty chip's menu, and **Data feed…** at the bottom of the model picker's categories when adding a model. These give the feed a slot of its own, with the "Data series" model, which follows its readings and holds the latest one.
+
+**The feed setup screen** is a popover, 880 × 560, laid out like the model picker:
+- A search field at the top ("debt, CPI, rain, flu…"), searching titles, descriptions, sources and settings.
+- **Categories** on the left: Markets, Rates and bonds, Debt, Inflation, Climate, Migration, Disease, and Any source. "Most sources are free and need no key."
+- **Ready-made feeds** in the middle, each with its source. A key marks the ones that need one. Any source has any FRED series, World Bank indicator, BLS series, Fiscal Data dataset or open data portal dataset, and CSV or JSON at a web address.
+- **The feed**, on the right:
+  - Its name, a description, the source with a link to its website, and what its values are ("percent", "°C above the 1901–2000 average").
+  - **What to fetch:** the source's settings, filled in from the ready-made feed: a series, a dataset and field, a country, a place. A ⌄ menu beside a setting offers common values (countries, US states' temperature series, BLS series). Help under each says where to find its value.
+  - **How to use the readings:** which of the slot's parameters and values the readings are of (the value the graph shows to start); Convert (none, percent points to a fraction, °F to °C), set to fit when the source's units differ from the variable's; how often to check (as the source updates, hourly, daily, weekly, monthly); and the earliest reading.
+  - **Sign-in:** whether the source needs one (Not needed, Optional, Needed), what a key changes, and a link to get one ("Get a free key"). A box to paste the key, with an eye button to show it. Sources at a web address also offer a key in a header, a bearer token, or a username and password, in a menu, with the parameter's or header's name. When one is saved: "A sign-in for fred is saved. Paste a new one to replace it", with Forget. Under it: "Kept in your Keychain, never in the scenario file. Sent only to api.stlouisfed.org, over HTTPS." Sources that need no sign-in don't show this part.
+- **Footer:** Test fetches the last year of readings without adding anything, using the sign-in as typed, and shows how many came, their span and the latest, with a small chart, or what went wrong. Cancel (Esc), and Add to *slot* (↩), Save when editing, or Add to slot *N* for a slot of its own. Add needs the source's required settings, and a sign-in when the source needs one. A sign-in typed in is saved to the Keychain when the feed is added.
+
+**After adding:** the feed's line is written to `scenario.md`, the footer says "Fetching its readings…", and the Slot tab shows its progress. Readings appear as dots on the graph when it shows their value.
+
 ## 6. Menu bar item
 
 - **Values:** the current scenario's values now and at a pinned date.
@@ -348,6 +372,7 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
   - **Show Scenario in Finder** and **Open Scenarios Folder**.
   - A scenario that can't be opened says why, with Try Again, Edit scenario.md and Cancel (Quit when nothing else is open).
 - **Scripts:** Open Script Libraries Folder (made if it isn't there) and Reload Script Libraries, which loads every script again with the folder's current files.
+- **Feeds:** Refresh Data Feeds checks every feed in the scenario for new readings now (5.10).
 - **Status:** controller and paired-device status lines.
 - **Also:** Settings and Quit.
 - **Icon:** monochrome, so it works in light and dark menu bars.
@@ -438,6 +463,11 @@ Sections:
   - The formula editor is an `NSTextView` (TextKit 1) with an `NSRulerView` for line numbers. `FormulaHighlighter` colours the whole text after each change, or `ScriptHighlighter` for scripts. Formulas and scripts are short enough that this costs nothing noticeable.
   - The completion list is the app's own SwiftUI overlay, driven by the text view's keys. AppKit's built-in completion puts the selected word in when you type on, and opens on Esc, which isn't what a formula wants.
   - Sliders don't use SwiftUI's `step`: on the Mac it draws a tick mark per step, and a range of 10,000 steps took 16 seconds to draw. The value is snapped to the step instead.
+- **Feeds** (5.10, DESIGN.md 15.8):
+  - The store keeps each slot's readings by source (`SlotReadings.parts`), so a feed's new readings replace only its own. They reach the engine as a readings change (`ScenarioEngine.Mutation.readings`), not a layout, and aren't an edit.
+  - `FeedCenter` belongs to the `ScenarioDocument`. It keeps each feed's state in `store.feedStatuses`, by slot and what the feed fetches (`FeedKey`), which the Slot tab reads.
+  - The focused graph's readings are turned into samples once per readings set and variable (`readingSamples`), not every frame.
+  - The setup screen's sign-in section avoids a segmented control: with four kinds it was wider than the pane and pushed the popover's columns off its edges.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.

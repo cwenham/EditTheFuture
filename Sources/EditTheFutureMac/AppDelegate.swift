@@ -225,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         menu.addItem(withTitle: "Edit scenario.md", action: #selector(editScenario), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Show Scenario in Finder", action: #selector(showScenarioInFinder), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Open Scenarios Folder", action: #selector(openScenarioFolder), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Refresh Data Feeds", action: #selector(refreshFeeds), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Mouse Has a Horizontal Wheel", action: #selector(toggleHorizontalWheel), keyEquivalent: "").target = self
         menu.addItem(.separator())
@@ -255,6 +256,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc private func reloadLibraries() { store?.reloadScripts() }
+    /// Checks every feed in the scenario for new readings now (docs/DESIGN.md, 15.8).
+    @objc private func refreshFeeds() { store?.refreshFeeds() }
 
     /// Overrides the automatic detection: with a horizontal wheel, the vertical wheel zooms.
     @objc private func toggleHorizontalWheel() {

@@ -1,5 +1,7 @@
 import SwiftUI
+import FutureDocument
 import FutureEngine
+import FutureFeeds
 
 /// The side pane's Slot tab (docs/UI.md, 5.7): the focused slot's name, model, parameters,
 /// starting values and display settings.
@@ -65,6 +67,7 @@ private struct SlotSettings: View {
                     }
                 }
             }
+            ReadingsSection(store: store, slot: slot)
             display
             actions
         }
@@ -362,5 +365,150 @@ private struct ValueRow: View {
         error = nil
         store.setStartingValue(value.name, to: parsed, inSlotAt: slotIndex)
         text = value.text(parsed)
+    }
+}
+
+/// Where the slot's readings come from (docs/UI.md, 5.10): its feeds, each with how many readings
+/// it has, how recent they are and when it was checked, and its files and databases.
+private struct ReadingsSection: View {
+    let store: ScenarioStore
+    let slot: ScenarioStore.SlotInfo
+
+    private var index: Int? { store.slotIndex(id: slot.id) }
+
+    var body: some View {
+        let sources = index.map { store.readingSources(ofSlotAt: $0) } ?? []
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Readings").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Spacer()
+                if sources.contains(where: { $0.feed != nil }) {
+                    Button {
+                        store.refreshFeeds(slot: slot.id)
+                    } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondary)
+                    .help("Check \(slot.title)'s feeds for new readings now")
+                    .accessibilityLabel("Refresh feeds")
+                }
+            }
+            ForEach(Array(sources.enumerated()), id: \.offset) { offset, source in
+                if let spec = source.feed {
+                    FeedRow(store: store, slot: slot, source: offset, spec: spec)
+                } else {
+                    Label(Self.describe(source), systemImage: "doc.text")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondary)
+                        .lineLimit(2)
+                        .help("Edit it in scenario.md")
+                }
+            }
+            if sources.isEmpty {
+                Text("Real-world values that correct the model: market prices, rates, debt, climate, disease…")
+                    .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Add a feed…") { store.openFeedSetup(.add(slot: slot.id)) }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.proposal)
+                .popover(isPresented: Binding(get: { store.feedSetup == .add(slot: slot.id) },
+                                              set: { if !$0 { store.closeFeedSetup() } }), arrowEdge: .leading) {
+                    FeedSetup(store: store, request: .add(slot: slot.id))
+                }
+        }
+    }
+
+    static func describe(_ source: ReadingSource) -> String {
+        switch source {
+        case .inline: return "Readings written in scenario.md"
+        case .csvFile(let title, let path): return "\(title) (\(path))"
+        case .database(let title, let path, _): return "\(title) (\(path), read through a query)"
+        case .feed(let spec): return spec.title
+        }
+    }
+}
+
+/// One feed in the Slot tab.
+private struct FeedRow: View {
+    let store: ScenarioStore
+    let slot: ScenarioStore.SlotInfo
+    let source: Int
+    let spec: FeedSpec
+
+    private var status: FeedStatus? { store.feedStatuses[FeedKey(slot: slot.id, identity: spec.identity)] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(spec.title).font(.system(size: 13)).lineLimit(1)
+                Spacer(minLength: 4)
+                Button("Edit…") { store.openFeedSetup(.edit(slot: slot.id, source: source)) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.proposal)
+                    .popover(isPresented: Binding(get: { store.feedSetup == .edit(slot: slot.id, source: source) },
+                                                  set: { if !$0 { store.closeFeedSetup() } }), arrowEdge: .leading) {
+                        FeedSetup(store: store, request: .edit(slot: slot.id, source: source))
+                    }
+                Button {
+                    if let index = store.slotIndex(id: slot.id) { store.removeFeed(at: source, inSlotAt: index) }
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.secondary)
+                .help("Remove this feed. Undo brings it back.")
+                .accessibilityLabel("Remove \(spec.title)")
+            }
+            Text(summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1).help(details)
+            statusLine
+        }
+        .padding(8)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// "FRED · DGS10 → rate, as a percent". Settings too long for one line are in the tooltip.
+    private var summary: String {
+        let source = FeedProviders.named(spec.provider)?.name ?? spec.provider
+        let short = spec.query.filter { $0.key != "from" && $0.value.count <= 12 && !$0.value.contains("/") }
+        let what = short.map(\.value).prefix(2).joined(separator: " · ")
+        var text = source + (what.isEmpty ? "" : " · " + what) + " → " + (spec.variable ?? slot.variable)
+        if let conversion = spec.conversion { text += conversion == .percent ? ", as a percent" : ", in °C" }
+        return text
+    }
+
+    private var details: String {
+        spec.query.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        if let status, let error = status.error, !status.isFetching {
+            Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+        } else if status?.isFetching == true {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Fetching…").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            }
+        } else if let status, status.count > 0, let last = status.last {
+            let checked = status.checked.map { " · checked " + Self.ago($0) } ?? ""
+            Text("\(SlotValue.number(Double(status.count))) readings to \(DateText.monthYear(last))\(checked)")
+                .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+        } else if status != nil {
+            Text("No readings yet").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+        }
+    }
+
+    /// "just now", "5 min. ago", "yesterday".
+    static func ago(_ date: Date) -> String {
+        let seconds = Date().timeIntervalSince(date)
+        if seconds < 60 { return "just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.dateTimeStyle = .named
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }

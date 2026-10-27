@@ -38,6 +38,8 @@ public final class ReadingSet: Sendable, Equatable {
 /// keep in the scenario folder.
 public struct LoadedReadings: Sendable {
     public var set: ReadingSet
+    /// What each source gave, in the order of the sources.
+    public var parts: [ReadingSet]
     public var problems: [String]
     /// CSV copies of what was read from databases, by their path in the scenario folder.
     public var copies: [String: String]
@@ -48,11 +50,14 @@ public enum ReadingLoader {
     public static let queryTimeLimit: TimeInterval = 10
 
     /// Reads every source of a slot's readings. `folder` is the scenario folder; links are relative to it.
-    public static func load(_ sources: [ReadingSource], slot: String, folder: URL?) -> LoadedReadings {
-        var readings: [Reading] = []
+    /// `variable` is the one the slot's graph shows, which feeds without `into` are readings of.
+    public static func load(_ sources: [ReadingSource], slot: String, folder: URL?, variable: String? = nil) -> LoadedReadings {
+        var parts: [ReadingSet] = []
         var problems: [String] = []
         var copies: [String: String] = [:]
         for source in sources {
+            var readings: [Reading] = []
+            defer { parts.append(ReadingSet(readings)) }
             switch source {
             case .inline(let csv):
                 do {
@@ -90,9 +95,34 @@ public enum ReadingLoader {
                         problems.append("\(slot)'s readings: \(path): \(reason).")
                     }
                 }
+            case .feed(let spec):
+                do {
+                    readings = try feedReadings(spec, slot: slot, folder: folder, variable: variable) ?? []
+                } catch {
+                    problems.append("\(slot)'s readings: \(spec.title): \(error)")
+                }
             }
         }
-        return LoadedReadings(set: ReadingSet(readings), problems: problems, copies: copies)
+        return LoadedReadings(set: ReadingSet(parts.flatMap(\.readings)), parts: parts, problems: problems, copies: copies)
+    }
+
+    /// A feed's readings from its copy in `readings/`, or nil when it hasn't been fetched yet.
+    public static func feedReadings(_ spec: FeedSpec, slot: String, folder: URL?, variable: String?) throws -> [Reading]? {
+        guard let into = spec.variable ?? variable, !into.isEmpty else {
+            throw DatabaseReadings.Mistake("say which variable the readings are of, with into: (into: price)")
+        }
+        guard let folder,
+              let text = try? String(contentsOf: folder.appendingPathComponent(spec.copyPath(slot: slot)), encoding: .utf8)
+        else { return nil }
+        return try readings(FeedCopy.parse(text), spec: spec, variable: into)
+    }
+
+    /// Points from a feed as readings of a variable, with the feed's `convert` and `scale`.
+    public static func readings(_ points: [FeedPoint], spec: FeedSpec, variable: String) -> [Reading] {
+        points.compactMap { point in
+            let value = spec.value(point.value)
+            return value.isNaN ? nil : Reading(time: point.time, variable: variable, value: value)
+        }
     }
 
     /// Where the copy of a database's readings is kept: `readings/Kitchen-sensors.csv`.
@@ -164,6 +194,11 @@ public enum CSVReadings {
             lines.append(([FileDate.text(time)] + variables.map { values[$0].map { FileNumber.text($0) } ?? "" }).joined(separator: ","))
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// CSV text as rows of fields, for sources that aren't readings yet (docs/DESIGN.md, 15.8).
+    public static func table(_ text: String) -> [[String]] {
+        records(text).map(\.fields)
     }
 
     struct Record {

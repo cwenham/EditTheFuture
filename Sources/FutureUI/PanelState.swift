@@ -43,6 +43,8 @@ public struct FocusedSlotState: Sendable {
     public let color: Color
     public let format: ValueFormat
     public let samples: [Sample]
+    /// Readings of the value the graph shows, drawn as dots on a thin line (docs/UI.md, 2.4).
+    public let readings: [Sample]
     /// The line with the add-event pane's draft applied, drawn dashed. Empty until the draft is complete.
     public let preview: [Sample]
     /// Where the draft event would go.

@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-27, at commit `b6d51e4` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-27, on the branch `feature/data-feeds` (data feeds), from commit `66f0ddf` on `main`. The branch isn't merged yet.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -37,6 +37,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `8e68250` | Saving built: `.etf` scenario folders with `scenario.md`, outside edits loaded as they're saved, readings from CSV and SQLite, and a cache of slow slots. Merged from `feature/document-format`. |
 | `2f244a9` | Python scripts load one at a time, which fixed a flaky libraries test: loads on different threads raced on `sys.path`. |
 | `b6d51e4` | Clicking an event's diamond edits it in the Event tab, with Save, Cancel and Delete (UI.md, 5.4). Merged from `feature/edit-events`. |
+| `feature/data-feeds` | Data feeds: readings fetched from public sources and kept up to date, with sign-ins in the Keychain and a setup screen (DESIGN.md 15.8, UI.md 5.10). Readings now correct formulas and scripts (DESIGN.md 4.6) and show on the focused graph. On its branch, not merged yet. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -49,10 +50,20 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The app opens the scenario used last, and saves changes half a second after they stop.
   - Edits made to `scenario.md` in another editor show in the panel within a couple of seconds, as one change that ⌘Z takes back. A file that can't be read is reported, and the app doesn't save over it.
   - Writing back keeps notes, unknown settings and lines with mistakes, and rewrites only the parts whose meaning changed.
-  - Readings: `csv` blocks, linked CSV files, and SQLite databases read through a query (read-only, `ATTACH` and `PRAGMA` refused, 10-second limit), with a CSV copy kept in `readings/`. They reach the models, but nothing uses or draws them yet.
+  - Readings: `csv` blocks, linked CSV files, SQLite databases read through a query (read-only, `ATTACH` and `PRAGMA` refused, 10-second limit), and feeds (below), with a CSV copy kept in `readings/`.
   - Cache: when a scenario closes, slots that took over a second to compute are saved to `cache/` as binary, with a fingerprint of everything that made them. They're used on the next opening only if it still matches.
   - Menu bar item: Open Scenario…, Edit scenario.md, Show Scenario in Finder, Open Scenarios Folder.
 
+- **Data feeds** (DESIGN.md 15.8, UI.md 5.10):
+  - A feed is a line under a slot's `### Readings`: `- 10-year Treasury yield [feed: fred, series: DGS10, into: rate, convert: percent]`. `into` picks the parameter or value; `convert` turns percent points into fractions or °F into °C.
+  - Ten sources (`FutureFeeds/Providers`): FRED, US Treasury Fiscal Data, World Bank, BLS, NOAA Climate at a Glance, Open-Meteo, Socrata open data portals (the CDC's), Tiingo, and CSV or JSON at any web address. 53 ready-made feeds across markets, rates and bonds, debt, inflation, climate, migration and disease (`FeedCatalog`). All but Tiingo work without a key.
+  - `FeedCenter` (owned by `ScenarioDocument`) reads each feed's copy in `readings/` when the scenario opens, fetches feeds with no copy or an old one, and checks every ten minutes. Each fetch asks for the readings since 400 days before the latest, and merges. New readings go to the engine without being an edit; undo keeps them. A failed fetch keeps the copy and says why.
+  - Sign-ins (API key, key in a header, bearer token, username and password) are kept in the Keychain (`KeychainCredentialStore`), never in `scenario.md`, and sent only to the hosts they were saved for, over HTTPS, and not through redirects to other hosts.
+  - The feed setup screen: Add a feed… in the Slot tab's new Readings section, Edit… on a feed, Add a data feed… on an empty chip, and Data feed… in the model picker. Categories, ready-made feeds, the source's settings, how to use the readings, the sign-in with a box to paste a key, and Test, which fetches a year of readings without adding anything.
+  - A feed in a slot of its own gets the "Data series" model (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
+  - Menu bar item: Refresh Data Feeds. `swift run etf-feed` fetches a feed without the app.
+- **Readings correct models** (DESIGN.md 4.6): direct insertion, the same for formulas, Lua and Python. A reading of a parameter sets it at its step, as a `set` event would; a reading of a value replaces what the step worked out. The start takes the latest readings before it. `Scenario.engineVersion` is now 2, so older caches are recomputed.
+- **Readings on the graph** (UI.md 2.4): the focused graph draws readings of the value it shows as dots on a thin line (just the line when they're dense), and the readout says "Reading" over them.
 - **The panel:**
   - Floating `NSPanel`. ⌃⌥Space toggles it, and holding it peeks.
   - ⌃⌥C copies a snapshot, and ⌃⌥E opens the panel ready to add an event.
@@ -115,7 +126,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **More for saving** (DESIGN.md, 15):
   - A scenario menu in the panel, and New Scenario. For now, Open Scenario… in the menu bar item, and copying folders in Finder.
   - Remembering where the panel was looking for each scenario.
-  - Drawing readings, and models that use them (assimilation).
+  - Better assimilation than direct insertion (nudging, Kalman filters), refitting parameters, and drift alerts (UI.md 5.6).
+  - Readings in the lanes, and the Readings toggle in the focus area (UI.md, 3).
   - Asking before running scripts from a scenario someone else made (DESIGN.md, 17).
   - Sync, iOS documents, branches, and the sandbox's related-files declaration for SQLite.
 - **More for programming models:** saving a slot's model to the library ("Your models"), and plug-ins. The picker's Plug-ins category is empty until then.
@@ -140,6 +152,19 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **Later milestones:** iPhone and iPad apps, widgets, plug-in hosts (WebAssembly, remote, ExtensionKit), FMU import, ensembles.
 
 ## Loose ends
+
+- **Data feeds:**
+  - Checked in the real app: opening a scenario with two feeds fetched the debt since 1993 (8,420 readings) and the 10-year yield since 1962 (16,188) into `readings/`, and the panel drew the debt with "Reading" in the readout. The feed setup screen, the Slot tab's Readings section and the dots were checked in offscreen renders, not by clicking in the app. Not checked by hand: the popovers opening from the Slot tab, the empty chip's menu and the model picker; Test; saving a sign-in.
+  - **The Keychain and ad-hoc signing:** `build-app.sh` signs with `-`, so each build is a different app to the Keychain. After a rebuild, macOS may ask before the app can read a sign-in it saved. Not seen yet, since no sign-in was saved in the app. Tests use `MemoryCredentialStore`.
+  - Opening a scenario from someone else fetches its feeds, which tells the sources (DESIGN.md 17). A feed's address could be the author's own.
+  - The World Bank seems to ignore the `date` range, so each refresh fetches the whole series. It's small, and merging handles it.
+  - Open-Meteo counts a long range as many calls. The ready-made feeds start in 1990, about 900 calls' worth of the free 10,000 a day, once.
+  - BLS without a key allows 25 requests a day, and fetches 10 years a request. The first fetch of 30 years is three requests.
+  - Some sources from the request didn't make it: Stooq now checks for a browser (bot detection), CMU Delphi's Epidata is moving to a new API (retired for data after 2026-09-22), the WHO's API failed on filtered queries, and the World Bank's refugee indicator is gone.
+  - NOAA's CO₂ file (gml.noaa.gov) was down once during `etf-feed --check`, and fine with curl earlier.
+  - A data series' value is 0 until its first reading, when the feed starts after the scenario does.
+  - The zoom stops at about 18 months, where daily readings are too dense for dots. Monthly and weekly ones show dots.
+  - The sandboxed app (Mac App Store) will need the outgoing network entitlement (`com.apple.security.network.client`).
 
 - `README.md` still describes only the engine package.
 - **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
@@ -171,16 +196,20 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 | `CLua`, `CPythonBridge` | C: Lua 5.5.1 with `etf_lua.c` (sandboxed state, memory cap, time-limit hook, `require`); `etf_python.c` (CPython start, audit hooks, watchdog). `CPythonBridge` is in the package only when `Vendor/Python` exists. |
 | `FutureFormula` | The formula language (DESIGN.md 6.2): lexer, parser (with `range`, `by`, `label` and `as` options), analyzer, resolution to array positions (`Executable`), evaluator, and `FormulaModel`, which takes a slot's own values and reports its constant defaults. `FormulaTools`: `FormulaVocabulary` (functions and built-ins with descriptions), `FormulaHighlighter`, `FormulaCompleter` and `FormulaDiagnoser`, all working on half-written text. |
 | `FutureCommands` | The `Command` vocabulary, `etf://` parsing, the confirmation policy, MIDI decoding, the controller profile and feedback. |
-| `FutureDocument` | Saved scenarios (DESIGN.md, 15), with no UI: `ScenarioFormat` reads `scenario.md` into a `ScenarioFile` and writes it back over the text it came from (`ParsedScenario` keeps where each part was). `FileNumber` and `FileDate` write numbers and dates exactly. `EventIdentity` gives events the ids the file would. `ReadingLoader`, `CSVReadings` and `DatabaseReadings` (SQLite) make a `ReadingSet`. `SlotCache` reads and writes cache files; `Fingerprint` hashes. `ScenarioPackage` is the folder. |
-| `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). Saving: `ScenarioDocument` (opens a folder off the main thread, saves after changes, checks the file every second, writes the cache on closing) and `ScenarioLibrary` (the Scenarios folder); `ScenarioFileMapping` turns the store into a `ScenarioFile` and back (`reload(from:)`), and works out fingerprints. |
+| `FutureDocument` | Saved scenarios (DESIGN.md, 15), with no UI: `ScenarioFormat` reads `scenario.md` into a `ScenarioFile` and writes it back over the text it came from (`ParsedScenario` keeps where each part was). `FileNumber` and `FileDate` write numbers and dates exactly. `EventIdentity` gives events the ids the file would. `ReadingLoader`, `CSVReadings` and `DatabaseReadings` (SQLite) make a `ReadingSet`, with each source's readings apart (`LoadedReadings.parts`). `FeedSpec` is a feed's line, `FeedCopy` its copy in `readings/` and the merging of new readings. `SlotCache` reads and writes cache files; `Fingerprint` hashes. `ScenarioPackage` is the folder. |
+| `FutureFeeds` | Feeds (DESIGN.md, 15.8), with no UI: `FeedProvider` and the sources in `Providers/`, `FeedCatalog` (ready-made feeds), `FeedCredential` with `KeychainCredentialStore` and `MemoryCredentialStore`, `FeedFetcher` (sign-ins, hosts, pages, errors) over a `FeedTransport` (`URLSessionTransport`, with a guard on redirects), and `FeedDate`, `FeedNumber`, `JSONPath` and `FeedTable` for what sources send. |
+| `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). Saving: `ScenarioDocument` (opens a folder off the main thread, saves after changes, checks the file every second, writes the cache on closing) and `ScenarioLibrary` (the Scenarios folder); `ScenarioFileMapping` turns the store into a `ScenarioFile` and back (`reload(from:)`), and works out fingerprints. Feeds: `FeedCenter` (fetching, copies, statuses), `FeedEditing` (adding, changing and removing feeds, a feed's own slot, new readings, readings for drawing), and the views `FeedSetup` and the Slot tab's Readings section. |
 | `EditTheFutureMac` | `AppDelegate` (status item and hot-keys), `FloatingPanel`, `PanelController` (hosting, keys, scroll mapping, copy), `CommandRouter` (runs `Command`s, asks for confirmation), `HotKeyCenter` (Carbon hot-keys). |
 | `etf-bench` | Benchmarks that render the real panel. |
+| `etf-feed` | Fetches a feed without the app and prints CSV; `--list` and `--check` for the ready-made feeds. |
 
 ## Checking your work
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 230 tests in about 25 seconds.
+- **Tests:** `swift test` runs about 285 tests in about 25 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
+- **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.
   - Store tests must `await store.waitUntilIdle()` before reading results.
   - `PanelViewTests` mounts the real panel in a window. Its `.runaway` scenario makes values huge, infinite and NaN within a few years.
 - **Benchmarks:** `swift run -c release etf-bench [section]`:
@@ -229,6 +258,13 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Two scripts loading at once each rewrote `sys.path`, so a load without libraries removed the folder while another load was importing from it. Loads now take a lock in `etf_py_load`, before the GIL, so waiting doesn't hold the GIL or count against the time limit.
   - Taking an entry out of `sys.path` shifts the rest, so an import on another thread that was part-way through the list skipped one, usually the standard library. Each load now gives `sys.path` a new list.
   - The tests "Scripts loading at the same time each find their libraries" and "Scripts loading on other threads don't hide the standard library from imports" fail without each fix.
+- **Feeds:**
+  - `"abc".contains("")` is false in Swift, so a match-anything test helper matched nothing.
+  - `FileDate.parse("202609")` reads the year 202,609, since years can have more digits. `FeedDate` checks forms made only of digits first.
+  - 4.98 / 100 is 0.049800000000000004. `convert: percent` lowers the exponent of the number's shortest text instead, so 4.98 becomes 0.0498, as if typed.
+  - A segmented picker with four long choices doesn't shrink: it pushed the setup screen's columns off both edges. A menu picker fits.
+  - Outside a popover, an offscreen render of the setup screen comes out light. Give the window `.darkAqua` and the view `Theme.panel` behind it.
+  - Undo puts back whole slot lists, readings included. Without `keepingReadings`, undoing an unrelated change put back older feed readings.
 - **Writing Swift with Python:** a `"\n"` in a Python string becomes a real line break in the Swift file. Use a raw string or `\\n`.
 - **The mouse pointer:** SwiftUI's hosting view handles `cursorUpdate:` and `mouseMoved:` and sets the pointer itself (macOS 15). `NSCursor.set()` from a hover handler fights it and flickers. Use `.pointerStyle(...)` on a view under the pointer (`linkPointer()` in `TimelineViews.swift`). Synthetic mouse events in tests don't reach SwiftUI's hover, so the pointer can only be checked by hand.
 - **SwiftUI's global coordinates start at the window's top,** not the hosting view's: in a window with a title bar they're 28 points lower. Measure in a space named on the panel's root (`PanelView.panelSpace`), which matches `hosting.convert(event.locationInWindow, from: nil)`.

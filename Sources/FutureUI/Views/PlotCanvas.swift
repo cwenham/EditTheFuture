@@ -17,6 +17,13 @@ struct PlotRule {
     var dash: [CGFloat] = []
 }
 
+/// Readings: dots on a thin line, at 85% opacity (docs/UI.md, 2.4). The dots are drawn only
+/// while there's room between them.
+struct PlotReadings {
+    var samples: [Sample]
+    var color: Color
+}
+
 /// A dot on a line (the cursor's value).
 struct PlotMarker {
     var date: Date
@@ -39,6 +46,7 @@ struct PlotCanvas: View {
     var gridValues: [Double] = []
     let series: [PlotSeries]
     var rules: [PlotRule] = []
+    var readings: PlotReadings?
     var marker: PlotMarker?
 
     var body: some View {
@@ -69,6 +77,23 @@ struct PlotCanvas: View {
                 let path = Self.path(for: line.samples, frame: frame, size: size, x: x, y: y)
                 context.stroke(path, with: .color(line.color),
                                style: StrokeStyle(lineWidth: line.lineWidth, lineCap: .round, lineJoin: .round, dash: line.dash))
+            }
+            if let readings, !readings.samples.isEmpty {
+                let color = readings.color.opacity(0.85)
+                let path = Self.path(for: readings.samples, frame: frame, size: size, x: x, y: y)
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+                let low = Self.firstIndex(in: readings.samples, atOrAfter: frame.start)
+                let high = Self.firstIndex(in: readings.samples, atOrAfter: frame.end)
+                // A dot for each reading, while they're at least 6 points apart on average.
+                if high > low, CGFloat(high - low) <= size.width / 6 {
+                    var dots = Path()
+                    for sample in readings.samples[low..<min(high + 1, readings.samples.count)] where sample.value.isFinite {
+                        let center = CGPoint(x: x(sample.time), y: y(sample.value))
+                        dots.addEllipse(in: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
+                    }
+                    context.fill(dots, with: .color(color))
+                    context.stroke(dots, with: .color(Theme.panel.opacity(0.6)), lineWidth: 0.75)
+                }
             }
             for rule in rules where frame.contains(rule.date) {
                 var path = Path()

@@ -1,6 +1,7 @@
 import Foundation
 import FutureDocument
 import FutureEngine
+import FutureFeeds
 import FutureScript
 
 /// A scenario saved in its folder (docs/DESIGN.md, 15). It opens the folder, saves changes to
@@ -10,6 +11,8 @@ import FutureScript
 public final class ScenarioDocument {
     public let package: ScenarioPackage
     public let store: ScenarioStore
+    /// Fetches the scenario's feeds into `readings/` (docs/DESIGN.md, 15.8).
+    public let feeds: FeedCenter
 
     /// Mistakes found the last time `scenario.md` was read, readings' included.
     public private(set) var problems: [String] = []
@@ -43,7 +46,10 @@ public final class ScenarioDocument {
         let store = try ScenarioStore(definition: loaded.definition, now: now, savedResults: loaded.results)
         let document = ScenarioDocument(package: package, store: store, parsed: loaded.parsed)
         document.report(loaded.problems)
-        if watch { document.startWatching() }
+        if watch {
+            document.startWatching()
+            document.feeds.start()
+        }
         return document
     }
 
@@ -56,8 +62,13 @@ public final class ScenarioDocument {
         self.package = package
         self.store = store
         self.parsed = parsed
+        feeds = FeedCenter(store: store, folder: package.url)
         lastSeen = Self.stamp(package)
-        store.onScenarioChange = { [weak self] in self?.scheduleSave() }
+        store.onScenarioChange = { [weak self] in
+            self?.scheduleSave()
+            self?.feeds.sync()
+        }
+        store.onRefreshFeeds = { [weak self] slot in self?.feeds.refresh(slot: slot) }
     }
 
     struct Loaded: Sendable {
@@ -72,10 +83,10 @@ public final class ScenarioDocument {
         let parsed = try ScenarioFormat.parse(try text ?? package.readText())
         var readings: [String: LoadedReadings] = [:]
         for slot in parsed.file.slots where !slot.readings.isEmpty {
-            readings[slot.name] = ReadingLoader.load(slot.readings, slot: slot.name, folder: package.url)
+            readings[slot.name] = ReadingLoader.load(slot.readings, slot: slot.name, folder: package.url, variable: slot.shows)
         }
         try? package.write(copies: readings.values.reduce(into: [:]) { $0.merge($1.copies) { $1 } })
-        let definition = ScenarioDefinition(file: parsed.file, readings: readings.mapValues(\.set))
+        let definition = ScenarioDefinition(file: parsed.file, loaded: readings)
 
         var problems = parsed.problems.map(\.description) + readings.values.flatMap(\.problems)
         let configs = ScenarioStore.configs(from: definition)
@@ -219,7 +230,9 @@ public final class ScenarioDocument {
         isClosed = true
         timer?.invalidate()
         timer = nil
+        feeds.close()
         store.onScenarioChange = nil
+        store.onRefreshFeeds = nil
         await saveResults()
     }
 

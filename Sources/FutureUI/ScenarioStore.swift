@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 import FutureDocument
 import FutureEngine
+import FutureFeeds
 import FutureFormula
 import FutureScript
 
@@ -145,6 +146,19 @@ public final class ScenarioStore {
     public var sidePane = SidePaneTab.event
     /// The model picker that's open, if any.
     public var picker: PickerRequest?
+    /// The feed setup screen that's open, if any (docs/UI.md, 5.10).
+    public var feedSetup: FeedSetupRequest?
+    /// Each feed's state, for the Slot tab. `FeedCenter` keeps it (docs/DESIGN.md, 15.8).
+    public internal(set) var feedStatuses: [FeedKey: FeedStatus] = [:]
+    /// Asks for feeds to be fetched now: one slot's, or every slot's with nil.
+    @ObservationIgnored public var onRefreshFeeds: ((UUID?) -> Void)?
+    /// Where feeds' sign-ins are kept. Tests use one in memory.
+    @ObservationIgnored public var credentials: any CredentialStore = KeychainCredentialStore()
+    /// How feeds reach the network. Tests answer from fixtures.
+    @ObservationIgnored public var feedTransport: any FeedTransport = URLSessionTransport.shared
+    /// The focused graph's readings as samples, by readings digest and variable, so drawing
+    /// doesn't rebuild them every frame.
+    @ObservationIgnored var readingSamples: (key: String, samples: [Sample])?
     /// The slot whose removal is waiting to be confirmed in the Slot tab.
     public internal(set) var pendingRemoval: UUID?
 
@@ -597,7 +611,7 @@ public final class ScenarioStore {
                 send(mutations)
             }
         case .slots(let before, _, let focusBefore, _):
-            configs = before
+            configs = keepingReadings(before)
             refreshSlots(focus: focusBefore)
         }
         redoStack.append(change)
@@ -635,7 +649,7 @@ public final class ScenarioStore {
                 send(mutations)
             }
         case .slots(_, let after, _, let focusAfter):
-            configs = after
+            configs = keepingReadings(after)
             refreshSlots(focus: focusAfter)
         }
         undoStack.append(change)
@@ -655,6 +669,16 @@ public final class ScenarioStore {
         requestData()
         updateDraftPreview()
         onScenarioChange?()
+    }
+
+    /// Gives a slot new readings without making it an edit: undo leaves them (docs/DESIGN.md, 15.8).
+    func setReadings(_ readings: SlotReadings, forSlotAt index: Int) {
+        guard isSlot(index), readings != configs[index].readings else { return }
+        configs[index].readings = readings
+        revision += 1
+        enqueue(.mutate(.readings(slot: index, readings.set)))
+        requestData()
+        updateDraftPreview()
     }
 
     /// Forgets undo and redo, when the scenario is replaced from its file with a new start or seed.
@@ -1039,13 +1063,15 @@ public final class ScenarioStore {
         let draftOnFocus = eventDraft.slotIndex == focusedIndex ? eventDraft : nil
         let dragging = previewSlot == focusSlot.id && !parameterPreview.isEmpty
         let preview = dragging ? parameterPreview : draftOnFocus == nil ? [] : draftPreview
-        let lineRange = range(focusSamples), previewRange = range(preview)
-        let low = min(lineRange?.low ?? 0, previewRange?.low ?? .infinity)
-        let high = max(lineRange?.high ?? 1, previewRange?.high ?? -.infinity)
+        let readings = visibleReadings(ofSlotAt: focusedIndex, from: from, through: through)
+        let lineRange = range(focusSamples), previewRange = range(preview), readingRange = range(readings)
+        let low = min(lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity, readingRange?.low ?? .infinity)
+        let high = max(lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity, readingRange?.high ?? -.infinity)
         let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
-            format: focusSlot.format, samples: focusSamples, preview: preview, draftDate: dragging ? nil : draftOnFocus?.date,
+            format: focusSlot.format, samples: focusSamples, readings: readings, preview: preview,
+            draftDate: dragging ? nil : draftOnFocus?.date,
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
             editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,
             pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text)
@@ -1081,9 +1107,10 @@ public final class ScenarioStore {
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
                                readoutNote: "Paused", focusValue: nil, laneValues: laneValues)
         }
+        let observed = readingSpan(ofSlotAt: focusedIndex).map { cursor >= $0.first && cursor <= $0.last } ?? false
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
                            readoutValue: ready ? (focusValue.map(focusSlot.format.full) ?? "—") : "…",
-                           readoutNote: !ready ? "Computing" : cursor > now ? "Projection" : "Model",
+                           readoutNote: !ready ? "Computing" : observed ? "Reading" : cursor > now ? "Projection" : "Model",
                            focusValue: focusValue, laneValues: laneValues)
     }
 

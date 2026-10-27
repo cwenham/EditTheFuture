@@ -61,17 +61,61 @@ struct SlotConfig: Sendable, Equatable {
     }
 }
 
-/// Where a slot's readings come from, and what they say (docs/DESIGN.md, 15.3 and 15.4).
+/// Where a slot's readings come from, and what they say (docs/DESIGN.md, 15.3, 15.4 and 15.8).
 public struct SlotReadings: Sendable, Equatable {
-    public var sources: [ReadingSource]
-    public var set: ReadingSet
+    public private(set) var sources: [ReadingSource]
+    /// What each source gave, in the order of the sources.
+    public private(set) var parts: [ReadingSet]
+    /// All of them together.
+    public private(set) var set: ReadingSet
 
-    public init(sources: [ReadingSource], set: ReadingSet) {
+    public init(sources: [ReadingSource], parts: [ReadingSet]) {
         self.sources = sources
-        self.set = set
+        self.parts = sources.indices.map { parts.indices.contains($0) ? parts[$0] : .empty }
+        set = Self.combined(self.parts)
     }
 
-    public static let none = SlotReadings(sources: [], set: .empty)
+    /// Readings that aren't split by source yet: they count as the first source's.
+    public init(sources: [ReadingSource], set: ReadingSet) {
+        self.init(sources: sources, parts: sources.isEmpty ? [] : [set])
+    }
+
+    public static let none = SlotReadings(sources: [], parts: [])
+
+    private static func combined(_ parts: [ReadingSet]) -> ReadingSet {
+        let filled = parts.filter { !$0.readings.isEmpty }
+        if filled.isEmpty { return .empty }
+        if filled.count == 1 { return filled[0] }
+        return ReadingSet(filled.flatMap(\.readings))
+    }
+
+    /// The same sources with one source's readings replaced.
+    public func replacing(part index: Int, with readings: ReadingSet) -> SlotReadings {
+        guard parts.indices.contains(index), parts[index] != readings else { return self }
+        var parts = self.parts
+        parts[index] = readings
+        return SlotReadings(sources: sources, parts: parts)
+    }
+
+    /// Other sources. Sources it already had keep their readings; new ones have none until they're read.
+    public func with(sources new: [ReadingSource]) -> SlotReadings {
+        var unused = Array(zip(sources, parts))
+        let parts = new.map { source -> ReadingSet in
+            guard let found = unused.firstIndex(where: { $0.0 == source }) else { return .empty }
+            return unused.remove(at: found).1
+        }
+        return SlotReadings(sources: new, parts: parts)
+    }
+
+    /// These sources, with the readings of the same sources in `newer` wherever it has them.
+    func keepingReadings(of newer: SlotReadings) -> SlotReadings {
+        var unused = Array(zip(newer.sources, newer.parts))
+        var parts = self.parts
+        for (index, source) in sources.enumerated() {
+            if let found = unused.firstIndex(where: { $0.0 == source }) { parts[index] = unused.remove(at: found).1 }
+        }
+        return SlotReadings(sources: sources, parts: parts)
+    }
 }
 
 /// A parameter or starting value as the Slot tab shows it (docs/UI.md, 5.7).

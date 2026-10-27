@@ -85,6 +85,9 @@ Models declare capabilities so the engine can take shortcuts:
 ### 4.6 Past, present and future
 
 - **Past**: real readings, used to correct the model's state up to "now" (data assimilation, for example a Kalman filter or simple nudging). Before the first reading, a model can run backwards when its maths allows it (hindcast). Otherwise the graph starts at the scenario start.
+  - **Built so far** (October 2026): the simplest assimilation, direct insertion, for formulas and scripts alike. A reading of a parameter sets it at the start of its step, as a `set` event would. A reading of a value replaces what the step worked out, so the next step carries on from what was observed. When a step has several readings of one name, the latest wins. The start takes the latest reading of each name at or before it, so a scenario that starts after its readings begin starts from them.
+  - Values worked out from a replaced value in the same step (a definition without `[t-1]` that reads it) see the reading from the next step on.
+  - Nudging, Kalman filters and refitting parameters (UI.md, 5.6) are still to do.
 - **Now**: a vertical line. To its left the graph is anchored by observations, to its right it's a projection.
 - **Future**: for stochastic models, run an ensemble of seeded runs and draw a fan of percentile bands (for example 10–90% and 25–75%) around the median. Compute the median first and refine the bands progressively as the user pauses.
 
@@ -669,26 +672,30 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 
    Any web page can open an `etf://` link, so links can navigate but can't edit data or overwrite the clipboard without confirmation. Plug-ins can never be installed from a URL.
 2. **XPC (CLI):** the app's Mach service accepts only clients signed by the same team (`setCodeSigningRequirement`).
-3. **Network:** off by default and used only for paired devices. Explicit pairing, TLS-PSK, permissions per capability, revocable. No anonymous HTTP server.
+3. **Network:** nothing listens. The app connects out only to paired devices and to the sources of a scenario's feeds (15.8).
+   - Paired devices: explicit pairing, TLS-PSK, permissions per capability, revocable. No anonymous HTTP server.
+   - Feeds fetch data (CSV and JSON), never code. Answers are capped at 64 MB, and requests have time limits. Cookies and caches aren't kept.
+   - **Sign-ins** for feeds (API keys, tokens, usernames and passwords) are kept in the Keychain, never in `scenario.md`, which names a sign-in only by its name. Each sign-in is tied to the hosts it was saved for, and is sent only to them, only over HTTPS, and never through a redirect to another host. So a scenario from someone else can't send your key anywhere else, even by naming it (`credential: fred` on a feed at their own address).
 4. **Plug-ins** are sandboxed: WebAssembly gets no file or network access by default, and native plug-ins run in a separate sandboxed process. Data reaches a plug-in only through connections the user created.
 5. **Scripts** are the user's own code, so they run in the app's process with guard rails: time and memory limits, Lua without its `os`, `io` and `debug` libraries, and audit hooks that keep Python off the network and from writing files (6.4).
 6. **Hardware** can send only commands from the vocabulary. Destructive edits (delete) always need on-screen confirmation.
 7. **Siri and Shortcuts** go through App Intents, which have system-level consent. Editing intents ask for confirmation.
-8. **Saved scenarios** can come from other people. Opening one runs its scripts (15.1). Its readings can name a database, which the app opens read-only, and only once the user has picked it (15.4).
+8. **Saved scenarios** can come from other people. Opening one runs its scripts (15.1). Its readings can name a database, which the app opens read-only, and only once the user has picked it (15.4). Its feeds are fetched, which tells their sources that someone opened it (17).
 
 ## 14. Sources of readings
 
 - CSV or clipboard import; a Shortcuts "Add reading" action
 - SQLite databases, read through a query (15.4)
+- Feeds from public sources, fetched as they update (15.8): FRED, the US Treasury, the World Bank, the Bureau of Labor Statistics, NOAA, Open-Meteo, open data portals such as the CDC's, Tiingo, and CSV or JSON at any web address
 - HealthKit (weight, for a body-weight model). The data lives on the iPhone, so it can be borrowed through section 7.
 - WeatherKit historical weather
 - FinanceKit (Apple Card, Apple Cash, Savings; US only, needs an entitlement)
-- Market data APIs for securities (paid providers; check licensing)
+- Market data APIs for securities. FRED has the main US indexes free (the S&P 500 and the Dow for the last 10 years only, under their licences); Tiingo has any ticker with a free key. Others are paid; check their licences.
 - Sensors over the hardware or network protocols
 
 ## 15. Persistence and sync
 
-Decided and built in October 2026, on the Mac. The code is `FutureDocument` (reading and writing the folder) and `ScenarioDocument` in `FutureUI` (saving, reloading and the cache). Not built yet: sync, iOS, branches, and drawing readings.
+Decided and built in October 2026, on the Mac. The code is `FutureDocument` (reading and writing the folder), `FutureFeeds` (fetching feeds, 15.8) and `ScenarioDocument` in `FutureUI` (saving, reloading, feeds and the cache). Not built yet: sync, iOS and branches.
 
 A scenario is saved as plain text that people can read, edit in any editor and keep in git, the way [KeybowNotes](https://github.com/cwenham/KeybowNotes) keeps its key trees in a Markdown outline. Values the models computed are saved beside it, so slow models don't have to run again.
 
@@ -699,8 +706,9 @@ Each scenario is a folder with the extension `.etf`. The Mac and iOS show it as 
 ```
 Home & money.etf/
   scenario.md       everything a person writes (15.2)
-  readings/         imported history as CSV, and copies of readings from databases (15.3, 15.4)
+  readings/         imported history as CSV, and copies of readings from databases and feeds (15.3, 15.4, 15.8)
     sp500.csv
+    Rates-fred-DGS10.csv
   cache/            values the models computed; safe to delete (15.5)
     Market.etfcache
 ```
@@ -758,6 +766,7 @@ def step(s, t):
 
 ### Readings
 - [S&P 500 monthly closes](readings/sp500.csv)
+- S&P 500 daily closes [feed: fred, series: SP500, into: price]
 
 ## 5. Kitchen [Room cooling, shows: temp]
 
@@ -786,7 +795,7 @@ select ts as date, temp_c as temp from readings where sensor = 'kitchen'
 | The model | The first fenced block in a model's language in the slot's section (not under Readings), exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). A part such as Values ends where the model's block starts. |
 | The slot's own values | `### Values`: one `- name: value` line for each parameter or starting value that differs from the model's default (6.2). |
 | Events | `### Events`: one line per event or recurring rule. |
-| Readings | `### Readings`: a `csv` block, a link to a CSV file (15.3), or a link to a SQLite database followed by a `sql` block (15.4). |
+| Readings | `### Readings`: a `csv` block, a link to a CSV file (15.3), a link to a SQLite database followed by a `sql` block (15.4), or a feed's line (15.8). |
 | Links between slots | Nothing extra. They're in the formulas and scripts already (`Climate.temp`). |
 | Notes | Any other text, kept as written. |
 
@@ -851,7 +860,7 @@ Readings can come straight from a SQLite database, such as a sensor logger's, Ho
 
   Reading databases avoids both problems. Writing them by default would bring them in.
 
-**What readings do so far:** they reach the slot's model with each step (`StepContext.readings`, found by binary search), and changing them recomputes from the first reading that changed. No model uses them yet, and the graph doesn't draw them yet (UI.md, 2.4).
+**What readings do:** they reach the slot's model with each step (`StepContext.readings`, found by binary search), and changing them recomputes from the first reading that changed. Formulas and scripts take them as corrections (4.6). The focused graph draws the readings of the value it shows (UI.md, 2.4).
 
 ### 15.5 The cache
 
@@ -899,6 +908,66 @@ Some models take a long time to compute: ensembles (4.6), slow scripts, and remo
 
 CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked from a database on one Mac reach other devices through their CSV copy (15.4).
 
+### 15.8 Readings from feeds
+
+Built in October 2026. A feed fetches readings from a public source: market closes, Treasury yields and auction prices, the national debt, consumer prices, temperatures, migration, disease. The app fetches the history once, then checks for new readings as the source updates. The code is `FutureFeeds` (sources, sign-ins, fetching), `FeedSpec` and `FeedCopy` in `FutureDocument`, and `FeedCenter` in `FutureUI`.
+
+**In `scenario.md`**, a feed is one line under `### Readings`: its title, then its settings in brackets, starting with `feed:` and the source.
+
+```markdown
+### Readings
+- 10-year Treasury yield [feed: fred, series: DGS10, into: rate, convert: percent]
+- US national debt [feed: treasury, dataset: v2/accounting/od/debt_to_penny, field: tot_pub_debt_out_amt, into: value]
+- Statements [feed: csv, url: "https://bank.example/statements.csv", date: Posted, value: Balance, into: balance]
+```
+
+| Setting | Meaning |
+|---|---|
+| `feed` | The source: `fred`, `treasury`, `worldbank`, `bls`, `noaa`, `openmeteo`, `socrata`, `tiingo`, `csv` or `json`. |
+| The source's own | What to fetch: `series`, `dataset` and `field`, `indicator` and `country`, `latitude` and `longitude`, `url`… |
+| `into` | The slot's variable the readings are of: a parameter, such as `rate`, or a value, such as `balance`. Without it, the variable the graph shows. |
+| `convert` | `percent` when the source gives percent points (4.5) and the slot takes a fraction (0.045); `fahrenheit` for °F into °C. Percent points convert exactly: 4.98 becomes 0.0498 as if it were typed. |
+| `scale` | A plain multiplier, after `convert`. |
+| `every` | How often to check for new readings, in the formula language's units (`1 day`). Without it, as often as the source updates. Never more than hourly. |
+| `from` | The earliest reading to fetch. |
+| `credential` | A saved sign-in to use, when it isn't the source's own. |
+
+Mistakes in a feed's line are reported with the line, and the feed is skipped, as other mistakes are (15.2).
+
+**The copy.** What a feed fetched is kept in `readings/`, named for the slot and what's fetched: `readings/Rates-fred-DGS10.csv`. A name that lost characters on the way (spaces, colons) gets a short hash, so two feeds never share a copy.
+- The copy holds the readings as the source gives them, before `convert` and `scale`, with a `date` and a `value` column. Changing `into`, `convert`, `scale`, `every` or `credential` fetches nothing.
+- Opening a scenario reads the copies, so it opens at once and works offline, on another device or for someone else. The copies travel with the scenario and can go in git.
+- Renaming a slot takes its feeds' copies along.
+
+**Fetching** (`FeedCenter`):
+- When the scenario opens, and whenever its slots change, the app reads each feed's copy off the main thread. A feed with no copy, or whose copy is older than its refresh interval, is fetched. The app also looks for feeds that are due every ten minutes. Refresh Data Feeds in the menu bar item, and the refresh button in the Slot tab, fetch now.
+- Fetches run one at a time. Each asks for the readings since 400 days before the latest one in the copy, because sources revise recent readings (consumer prices, yearly figures). The new readings replace the copy's from the first new one on, and older ones stay. The copy is written even when nothing changed, so its date says when it was checked.
+- New readings aren't an edit. Nothing in `scenario.md` changes, and undo leaves them: undoing another change keeps the newest readings (`SlotReadings.keepingReadings`). The engine recomputes the slot from the first reading that changed.
+- A failed fetch keeps the copy, says why in the Slot tab and the footer, and is tried again within the hour.
+- Requests go through `URLSession`, without cookies or a cache, with a 64 MB limit on each answer and up to 200 pages a fetch. Tests answer from fixtures through `FeedTransport`.
+
+**Sources.** Free ones first. Each was checked against the live service in October 2026; `swift run etf-feed --check` checks them again.
+
+| Source | Covers | Sign-in |
+|---|---|---|
+| FRED (St. Louis Fed) | Market indexes, Treasury yields, mortgage and policy rates, consumer prices, federal debt, 800,000 other series | Optional. Without a key, its CSV download; with a free key, its API |
+| US Treasury Fiscal Data | The debt to the penny (daily since 1993), the debt since 1790, average rates on Treasury securities, auction prices and yields | None |
+| World Bank | Every country's inflation, net migration, migrant stock, government debt, population, tuberculosis, malaria | None |
+| Bureau of Labor Statistics | Consumer prices (CPI), wages, jobs | Optional. Without a key, 10 years a request and 25 a day; a free key goes in the request's body |
+| NOAA Climate at a Glance | Monthly temperatures: the globe, hemispheres and continents since 1850, the US and its states since 1895 | None |
+| Open-Meteo | Daily weather for any place since 1940 | Optional: a commercial key uses its customer servers |
+| Open data portals (Socrata) | Any dataset on data.cdc.gov or another portal, with a filter and sums across rows: emergency visits, hospital patients and wastewater levels for flu, COVID-19 and RSV, by state | Optional app token, in a header |
+| Tiingo | Any stock's or fund's daily close | A free key for personal use |
+| CSV or JSON at a web address | Anything else | Optional: a key in the address or a header, a bearer token, or a username and password |
+
+Sources left out: Stooq now checks for a browser before its downloads; CMU Delphi's Epidata is moving to a new API; the WHO's data API failed on filtered queries. The setup screen lists 53 ready-made feeds across these sources (`FeedCatalog`).
+
+**Sign-ins** are kept in the Keychain as generic passwords (service `com.editthefuture.feeds`, one item per sign-in, the credential as JSON). A built-in source's sign-in is named after the source (`fred`); a feed at a web address uses its host. Each is tied to its hosts (13.3). Checking whether one is saved reads only its attributes, which never asks the user. The sandbox (when the app has one) needs the outgoing network entitlement.
+
+**A slot of its own.** A feed can be added as a new slot with the "Data series" model: `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does.
+
+**Running a feed without the app:** `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01` prints its readings as CSV, using the Keychain's sign-ins; `--key KEY` uses a key just once. `etf-feed treasury10` runs a ready-made feed, `--list` lists them, and `--check` fetches the last 120 days of each one that needs no key.
+
 ## 16. Roadmap
 
 | Milestone | Contents |
@@ -907,7 +976,7 @@ CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked fro
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
-| M3 | Drag the future UI; readings import; drift alerts |
+| M3 | Drag the future UI; readings import; drift alerts. Feeds and direct-insertion assimilation are done (15.8, 4.6). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -918,7 +987,8 @@ CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked fro
 - Should formulas have units, and should they convert automatically?
 - How should pinned and suppressed generated events be stored so they survive model edits?
 - Ensemble size and progressive refinement budget per frame.
-- Market data provider and licensing.
+- Market data provider and licensing. FRED and Tiingo for now (15.8).
+- Opening a scenario from someone else fetches its feeds, which tells their sources that it was opened. A feed at a web address could point at the scenario's author. Should the app ask first, as for scripts?
 - Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 - Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
@@ -953,19 +1023,22 @@ Sources/
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
   FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
-  FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, cache files, the scenario folder
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
+  FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, feeds' lines and copies, cache files, the scenario folder
+  FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
   etf-script/        runs a script model without the app and prints CSV
+  etf-feed/          fetches a feed without the app and prints CSV
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups
-  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism
-  FutureScriptTests/    both languages side by side: results, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks; colouring and completion
+  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections
+  FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
-  FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; cache files; restored results
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents
+  FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
+  FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario
 scripts/
   build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, and the .etf document type
   fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
