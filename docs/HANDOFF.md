@@ -156,6 +156,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The time limit counts wall time, so a very busy Mac could stop a slow script call early. One test hit the default 2 seconds while a first-time `import` ran under full load; that test now has a longer limit.
   - `FutureUI` imports AppKit, so only `FutureEngine`, `FutureFormula` and `FutureScript` build for iOS so far.
   - Python's bundled packages are the standard library only.
+  - A library imported inside `step`, rather than at the top of the script, can still fail now and then: another script loading at that moment takes the library's modules out of `sys.modules` to import them afresh. Imports at the top happen while loading, one script at a time, so they're safe.
 
 ## How the code fits together
 
@@ -220,6 +221,10 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **Freezing Lua's globals:** `__newindex` only fires for keys that aren't there, so the globals move to a backing table. Keep a local reference to `_G` while doing it: clearing the `_G` key mid-loop made the global lookup return nil.
 - **Python audit hooks** run during CPython's own start, when it opens its output streams for writing, so the hook only applies once the start is done. `import ctypes` catches the `PermissionError` from loading a library (it's an `OSError`), so the import itself has to be blocked.
 - **A Python time limit** is an async exception set from a watchdog thread, holding the GIL. One that never got raised is cleared at the end of the call, so it can't leak into the next call on that thread.
+- **The GIL doesn't make Python code run in one piece.** It passes between threads every few milliseconds and during file reads. "Libraries load from the Libraries folder" failed about one run in three because of two races on the shared `sys.path`:
+  - Two scripts loading at once each rewrote `sys.path`, so a load without libraries removed the folder while another load was importing from it. Loads now take a lock in `etf_py_load`, before the GIL, so waiting doesn't hold the GIL or count against the time limit.
+  - Taking an entry out of `sys.path` shifts the rest, so an import on another thread that was part-way through the list skipped one, usually the standard library. Each load now gives `sys.path` a new list.
+  - The tests "Scripts loading at the same time each find their libraries" and "Scripts loading on other threads don't hide the standard library from imports" fail without each fix.
 - **Writing Swift with Python:** a `"\n"` in a Python string becomes a real line break in the Swift file. Use a raw string or `\\n`.
 - **SwiftUI's global coordinates start at the window's top,** not the hosting view's: in a window with a title bar they're 28 points lower. Measure in a space named on the panel's root (`PanelView.panelSpace`), which matches `hosting.convert(event.locationInWindow, from: nil)`.
 - **Popovers from the panel:** a SwiftUI `.popover` works from the non-activating `NSPanel`. To check one in a test, put the view in an on-screen `NSPanel` (`orderFrontRegardless`) and look for an `_NSPopoverWindow` in `NSApp.windows`; offscreen windows don't show popovers.

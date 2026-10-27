@@ -339,6 +339,7 @@ Decided in October 2026. Scripts are models written in Lua or Python, edited in 
   - Python adds the folder to `sys.path`, so modules and packages import as usual.
   - After changing files there, scripts load again once Reload Script Libraries is chosen in the menu bar item (`ScriptPrograms.reloadLibraries()`). Open Script Libraries Folder makes the folders and opens them.
   - Python imports library modules afresh for each script, so two scripts never share a module's variables.
+  - Python scripts load one at a time, since `sys.path` and `sys.modules` are shared by every thread. Each load gives `sys.path` a new list rather than changing the old one, so an import running in another script isn't disturbed.
 - **Native Python packages** have to be compiled for each platform and signed into the app. So they're a list the app chooses and tests. numpy is the first candidate: it now publishes iOS builds. Each one makes the app bigger.
 
 #### The script API

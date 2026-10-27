@@ -111,6 +111,24 @@ func time(_ index: Int) -> ScriptTime {
     ScriptTime(numbers: [Double(index), 2026, 1, 1, 1, 0, 1], date: "2026-01-01", seed: 1, index: index)
 }
 
+/// Collects what went wrong on several threads at once.
+final class Failures: @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [String] = []
+
+    func add(_ failure: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        list.append(failure)
+    }
+
+    var all: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return list
+    }
+}
+
 @Suite("Scripts")
 struct ScriptTests {
     let start = utc(2026, 1, 1)
@@ -304,6 +322,44 @@ struct ScriptTests {
             throws: { ($0 as? ScriptError)?.message.contains("nowhere") == true }
     }
 
+    @Test("Scripts loading at the same time each find their libraries", arguments: languages)
+    func librariesWhileOthersLoad(_ language: ScriptLanguage) throws {
+        // Python's sys.path is shared by every script. Scripts loading on other threads, without
+        // libraries, mustn't take the folder away while another script imports from it.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("etf-libraries-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let withLibrary: String, plain: String
+        switch language {
+        case .lua:
+            try "return { double = function(x) return x * 2 end }".write(to: folder.appendingPathComponent("twice.lua"), atomically: true, encoding: .utf8)
+            withLibrary = "local twice = require \"twice\"\nevery \"1 month\"\ninit(\"x\", 1)\nfunction step(s, t) s.x = twice.double(s.x) end"
+            plain = "every \"1 month\"\ninit(\"x\", 1)\nfunction step(s, t) s.x = s.x + 1 end"
+        case .python:
+            try "def double(x):\n    return x * 2\n".write(to: folder.appendingPathComponent("twice.py"), atomically: true, encoding: .utf8)
+            withLibrary = "from twice import double\nevery(\"1 month\")\ninit(\"x\", 1)\ndef step(s, t):\n    s.x = double(s.x)\n"
+            plain = "every(\"1 month\")\ninit(\"x\", 1)\ndef step(s, t):\n    s.x = s.x + 1\n"
+        }
+        // Generous limits: loads wait for each other while the whole suite runs.
+        let limits = ScriptLimits(loadSeconds: 60, callSeconds: 60)
+        let failures = Failures()
+        DispatchQueue.concurrentPerform(iterations: 32) { index in
+            do {
+                if index.isMultiple(of: 2) {
+                    let program = try ScriptProgram(language: language, source: withLibrary, libraries: [folder], limits: limits)
+                    var values = [3.0]
+                    _ = try program.step(&values, inputs: [], time: time(1), events: [])
+                    if values != [6] { failures.add("\(index): \(values)") }
+                } else {
+                    _ = try ScriptProgram(language: language, source: plain, libraries: [], limits: limits)
+                }
+            } catch {
+                failures.add("\(index): \(error)")
+            }
+        }
+        #expect(failures.all.isEmpty, "\(failures.all)")
+    }
+
     @Test("Loading the same text again shares the program")
     func programsAreShared() throws {
         let a = try ScriptModel(savings.lua, language: .lua, name: "A")
@@ -427,6 +483,42 @@ struct PythonScriptTests {
         try "42".write(to: readable, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: readable) }
         #expect(try error(running: "s.x = float(open(\(String(reflecting: readable.path))).read())") == nil)
+    }
+
+    @Test("Scripts loading on other threads don't hide the standard library from imports")
+    func importsWhileOthersLoad() throws {
+        // Each load changes sys.path. An import on another thread may be looking through it at that
+        // moment, and must still find every module. PathFinder looks every time, even for modules
+        // that are already imported.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("etf-libraries-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let finder = """
+            import importlib.machinery
+            every("1 month")
+            output("missing")
+            def step(s, t):
+                names = ("json", "statistics", "fractions") * 50
+                s.missing = sum(importlib.machinery.PathFinder.find_spec(name) is None for name in names)
+            """
+        let plain = "every(\"1 month\")\ninit(\"x\", 1)\ndef step(s, t):\n    s.x = s.x + 1\n"
+        let limits = ScriptLimits(loadSeconds: 60, callSeconds: 60)
+        let failures = Failures()
+        DispatchQueue.concurrentPerform(iterations: 32) { index in
+            do {
+                if index.isMultiple(of: 4) {
+                    let program = try ScriptProgram(language: .python, source: finder, libraries: [], limits: limits)
+                    var values = [0.0]
+                    _ = try program.step(&values, inputs: [], time: time(1), events: [])
+                    if values != [0] { failures.add("\(index): \(values[0]) not found") }
+                } else {
+                    _ = try ScriptProgram(language: .python, source: plain, libraries: index.isMultiple(of: 2) ? [folder] : [], limits: limits)
+                }
+            } catch {
+                failures.add("\(index): \(error)")
+            }
+        }
+        #expect(failures.all.isEmpty, "\(failures.all)")
     }
 
     @Test("pip isn't there")

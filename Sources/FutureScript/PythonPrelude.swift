@@ -401,15 +401,15 @@ _library_paths = []
 
 
 def load(source, library_paths, seconds):
-    """Loads a script. Library modules are imported afresh for each script, so scripts don't share them."""
+    """Loads a script. Library modules are imported afresh for each script, so scripts don't share them.
+    The bridge loads one script at a time, since sys.path and sys.modules are shared by every thread."""
     global time_limit
     time_limit = seconds
     paths = [path for path in library_paths.split("\n") if path]
-    for path in _library_paths:
-        if path in sys.path:
-            sys.path.remove(path)
+    # A new list, not a change to the old one: an import running on another thread may be part-way
+    # through the old list, and taking an entry out of it would make that import skip the next one.
+    sys.path = paths + [path for path in sys.path if path not in _library_paths and path not in paths]
     _library_paths[:] = paths
-    sys.path[:0] = paths
     for name, module in list(sys.modules.items()):
         location = getattr(module, "__file__", None) or ""
         if any(location.startswith(path.rstrip("/") + "/") for path in paths):

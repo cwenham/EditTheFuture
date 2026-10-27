@@ -316,7 +316,14 @@ int etf_py_is_started(void) {
 
 // MARK: Programs
 
+/// Lets one script load at a time. Loading changes sys.path and sys.modules, which every thread
+/// shares, and the GIL alone doesn't stop two loads interleaving: Python passes it between threads
+/// every few milliseconds, and during file reads. Taken before the GIL, so a thread waiting here
+/// doesn't hold it, and before the time limit starts, so waiting doesn't count against the script.
+static pthread_mutex_t load_lock = PTHREAD_MUTEX_INITIALIZER;
+
 void *etf_py_load(const char *source, const char *library_paths, double seconds, char **description, char **error) {
+    pthread_mutex_lock(&load_lock);
     PyGILState_STATE gil = PyGILState_Ensure();
     int slot = begin_call(seconds);
     PyObject *program = PyObject_CallFunction(load_function, "ssd", source, library_paths ? library_paths : "", seconds);
@@ -326,11 +333,13 @@ void *etf_py_load(const char *source, const char *library_paths, double seconds,
         *error = error_json();
         Py_XDECREF(program);
         PyGILState_Release(gil);
+        pthread_mutex_unlock(&load_lock);
         return NULL;
     }
     *description = copy_string(PyUnicode_AsUTF8(described));
     Py_DECREF(described);
     PyGILState_Release(gil);
+    pthread_mutex_unlock(&load_lock);
     return program;
 }
 
