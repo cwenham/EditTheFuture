@@ -135,11 +135,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await old.close()
         }
         document = opened
-        let panel = PanelController(store: opened.store)
+        let panel = PanelController(store: opened.store, scenarios: scenarioMenuActions())
         self.panel = panel
         router = CommandRouter(panel: panel)
         UserDefaults.standard.set(opened.package.url.path, forKey: Self.lastScenarioKey)
+        // Renaming the scenario in the panel can rename its folder (docs/DESIGN.md, 15.1).
+        opened.onMove = { package in
+            UserDefaults.standard.set(package.url.path, forKey: Self.lastScenarioKey)
+        }
         if wasVisible { panel.showFully() }
+    }
+
+    /// What the scenario menu in the panel's header asks of the app (docs/UI.md, 3).
+    private func scenarioMenuActions() -> ScenarioMenuActions {
+        ScenarioMenuActions(
+            folder: ScenarioLibrary.folder,
+            current: { [weak self] in self?.document?.package },
+            save: { [weak self] in self?.document?.save() },
+            open: { [weak self] package in Task { await self?.open(package) } },
+            showInFinder: { [weak self] in self?.showScenarioInFinder() },
+            openOther: { [weak self] in self?.chooseScenario() })
     }
 
     /// Opens a text file in the app the Mac uses for it, or TextEdit when there isn't one.

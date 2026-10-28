@@ -88,7 +88,14 @@ The default color comes from the slot's position and matches the hardware LED fo
 - No click-through mode: the panel always takes clicks while it's visible, and hides with Esc or the hot-key.
 
 **Header:**
-- Scenario menu.
+- **Scenario menu:** the scenario's name, with a down arrow. Long names are cut short so the chips keep their room. Clicking it opens a menu:
+  - Every scenario in the Scenarios folder, in Finder's order, read again each time the menu opens, so folders copied in Finder show up. The open scenario is ticked, and listed even when it's somewhere else. Choosing one saves and closes this one and opens that one in the panel, as Open Scenario… in the menu bar item does.
+  - **New Scenario…** makes a scenario with one blank formula, from a name and a start date (the start of this year to begin with).
+  - **Duplicate "Home & money"…** saves this scenario, then copies its folder, readings included but not its cache, under a new name ("Home & money copy") and start.
+  - **Edit "Home & money"…** changes the scenario's name, start date and seed: what the heading of `scenario.md` holds (DESIGN.md, 15.2). New Seed picks one at random; an empty seed is the engine's own. Save is one change, which ⌘Z takes back, start date included. A new start or seed works everything out again.
+  - **Show in Finder** and **Open Other…** (the same chooser as Open Scenario…).
+
+  New, Duplicate and Edit open a small form in a popover that hangs from the name, with Cancel (Esc) and Create, Duplicate or Save (↩). It says what's wrong instead of saving: no name, square brackets in it (the heading's settings use them), a name another scenario's folder already has, or a seed that isn't a whole number. New and Duplicate open what they made. Renaming renames the scenario's folder too (DESIGN.md, 15.1).
 - Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol.
 - Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider, and Hide.
 
@@ -394,7 +401,7 @@ This is how the app chooses and fits the model behind a slot's projection (DESIG
 - **Values:** the current scenario's values now and at a pinned date.
 - **Actions:** Show panel, Copy snapshot, Add event at now.
 - **Scenarios** (DESIGN.md, 15):
-  - **Open Scenario…** picks a scenario's `.etf` folder, or the `scenario.md` in it. The one open now is saved and closed first.
+  - **Open Scenario…** picks a scenario's `.etf` folder, or the `scenario.md` in it. The one open now is saved and closed first. The panel's scenario menu (3) switches between the scenarios in the Scenarios folder, and makes new ones.
   - **Edit scenario.md** opens the file in the Mac's editor for Markdown, or TextEdit when there isn't one. Changes saved there show in the panel within a couple of seconds.
   - **Show Scenario in Finder** and **Open Scenarios Folder**.
   - A scenario that can't be opened says why, with Try Again, Edit scenario.md and Cancel (Quit when nothing else is open).
@@ -506,6 +513,12 @@ Sections:
   - Scores are kept by model, values, readings, start and readings chosen (`predictScores`), and why a slot's models can't be compared, the same way (`predictProblems`).
   - The ranking is `PredictState.best(of:)`, so it can be tested without scoring anything.
   - `etf-bench predict readings.csv [start …] [step day|week|month|year] [since …]` scores the Forecast models on a feed's saved readings, as the menu does, and times each.
+- **Scenario menu** (3, DESIGN.md 15.1):
+  - The menu is an `NSMenu` (`ScenarioMenu`), built each time the name is clicked and popped up under it from a plain view behind the button (`MenuAnchorView`). A SwiftUI `Menu` gives no moment to read the folder again as it opens.
+  - What it needs from the app comes in `PanelActions.scenarios` (`ScenarioMenuActions`): the Scenarios folder, the open scenario, saving it, opening another, Show in Finder and Open Other…. Without them the name is plain text, as in tests and benchmarks.
+  - The form's state is `ScenarioStore.scenarioForm` (a `ScenarioForm`), so tests can open, fill and submit it (`submitScenarioForm`). `ScenarioFormView` draws it in a popover from the name.
+  - Edit's Save is `applySettingsChange`, an undo record of its own (`.settings`) holding the old and new name, start and seed. A new start or seed rebuilds the engine's scenario with the slots as they are (`rebuild`), the same way reading a new start from the file does, but undo isn't cleared.
+  - New and Duplicate write the folder off the main thread (`ScenarioLibrary.createBlank`, `duplicate`), then ask the app to open it.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.

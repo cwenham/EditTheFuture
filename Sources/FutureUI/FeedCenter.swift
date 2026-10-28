@@ -231,7 +231,7 @@ public final class FeedCenter {
             running = key
             let url = folder.appendingPathComponent(feed.copyPath)
             let fetcher = FeedFetcher(transport: store.feedTransport, credentials: store.credentials)
-            let spec = feed.spec, specs = specs(for: key), time = now(), overlap = Self.overlap
+            let spec = feed.spec, specs = specs(for: key), time = now(), overlap = Self.overlap, folder = folder
             Task {
                 let result = await Task.detached(priority: .utility) { () -> Result<Fetched, Error> in
                     do {
@@ -240,6 +240,9 @@ public final class FeedCenter {
                         let since = old.last.map { $0.time.addingTimeInterval(-overlap) }
                         let fresh = try await fetcher.fetch(spec, since: since, now: time)
                         let merged = FeedCopy.merge(old, with: fresh)
+                        // The scenario's folder moved (renamed) while fetching: making it again
+                        // here would leave an empty scenario behind.
+                        guard FileManager.default.fileExists(atPath: folder.path) else { throw CocoaError(.fileNoSuchFile) }
                         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                         // Written even when nothing changed, so its date says when it was checked.
                         try Data(FeedCopy.text(merged).utf8).write(to: url, options: .atomic)

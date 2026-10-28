@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import AppKit
 import SwiftUI
+import FutureDocument
 @testable import FutureUI
 
 /// Mounts the real panel in a window and drives it, to catch SwiftUI update crashes.
@@ -206,6 +207,79 @@ struct PanelViewTests {
         store.showFormulaEditor()
         settle(view)
         #expect(abs((frame.width - store.timelineFrame.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+    }
+
+    @Test("The scenario menu lists the scenarios, and its items switch, edit, add and duplicate without crashing")
+    func scenarioMenu() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("etf-panel-" + UUID().uuidString, isDirectory: true)
+        let package = ScenarioLibrary.package(named: "Home & money", in: folder)
+        try ScenarioDocument.create(.homeAndMoney, at: package)
+        let another = ScenarioLibrary.package(named: "Another", in: folder)
+        try ScenarioDocument.create(.homeAndMoney, at: another)
+        let document = try await ScenarioDocument.open(package, now: utc(2026, 10, 25), watch: false)
+        let store = document.store
+        var opened: [ScenarioPackage] = []
+        var finder = 0, other = 0
+        let actions = ScenarioMenuActions(folder: folder, current: { document.package }, save: { document.save() },
+                                          open: { opened.append($0) }, showInFinder: { finder += 1 }, openOther: { other += 1 })
+        let view = NSHostingView(rootView: PanelView(store: store, actions: PanelActions(hide: {}, copySnapshot: {}, scenarios: actions)))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 820), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        defer { window.close() }
+        await store.waitUntilIdle()
+        settle(view)
+
+        let menu = ScenarioMenu.make(store: store, actions: actions)
+        #expect(menu.items.map(\.title) == ["Another", "Home & money", "", "New Scenario…", "Duplicate “Home & money”…",
+                                            "Edit “Home & money”…", "", "Show in Finder", "Open Other…"])
+        #expect(menu.items.map(\.state) == [.off, .on, .off, .off, .off, .off, .off, .off, .off])
+        menu.performActionForItem(at: 0)
+        #expect(opened == [another])
+
+        // Edit: a new name and start, drawn in the header, saved, and the folder follows.
+        menu.performActionForItem(at: 5)
+        #expect(store.scenarioForm?.mode == .edit)
+        settle(view)
+        store.scenarioForm?.name = "Retirement"
+        store.scenarioForm?.start = utc(2023, 1)
+        settle(view)
+        #expect(await store.submitScenarioForm(actions))
+        await store.waitUntilIdle()
+        settle(view)
+        #expect(store.name == "Retirement")
+        #expect(document.save())
+        let renamed = ScenarioMenu.make(store: store, actions: actions)
+        #expect(renamed.items.prefix(2).map(\.title) == ["Another", "Retirement"])
+        #expect(renamed.items[1].state == .on)
+        #expect(renamed.items[5].title == "Edit “Retirement”…")
+
+        // New and Duplicate open what they made.
+        renamed.performActionForItem(at: 3)
+        #expect(store.scenarioForm?.mode == .new)
+        settle(view)
+        #expect(await store.submitScenarioForm(actions))
+        renamed.performActionForItem(at: 4)
+        #expect(store.scenarioForm?.name == "Retirement copy")
+        settle(view)
+        #expect(await store.submitScenarioForm(actions))
+        #expect(opened.map(\.name) == ["Another", "New scenario", "Retirement copy"])
+        renamed.performActionForItem(at: 7)
+        renamed.performActionForItem(at: 8)
+        #expect(finder == 1 && other == 1)
+
+        // Cancelling leaves things as they were; undo takes the edit back.
+        renamed.performActionForItem(at: 5)
+        store.scenarioForm?.name = ""
+        settle(view)
+        store.closeScenarioForm()
+        settle(view)
+        store.undo()
+        await store.waitUntilIdle()
+        settle(view)
+        #expect(store.name == "Home & money")
+        #expect(store.start == utc(2022, 1))
+        await document.close()
     }
 
     @Test("Values too big for whole numbers, infinite or NaN still draw, focused or in a lane")

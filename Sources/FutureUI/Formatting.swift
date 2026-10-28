@@ -137,6 +137,12 @@ enum DateText {
         return monthNames[civil.month - 1] + " " + String(civil.year)
     }
 
+    /// "15 Mar 2031" in UTC.
+    static func dayMonthYear(_ date: Date) -> String {
+        let civil = CivilDate(date)
+        return "\(civil.day) " + monthNames[civil.month - 1] + " " + String(civil.year)
+    }
+
     /// "2031-03-15" in UTC.
     static func iso(_ date: Date) -> String {
         let civil = CivilDate(date)
