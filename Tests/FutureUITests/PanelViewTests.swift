@@ -240,6 +240,28 @@ struct PanelViewTests {
         let decoded = try SnapshotData.decode(try data.json())
         #expect(decoded.slots.map(\.points.count) == data.slots.map(\.points.count))
     }
+
+    @Test("Scrolling back before the start, with readings there, draws without crashing")
+    func beforeTheStart() async throws {
+        let tests = BeforeStartTests()
+        let store = try await tests.makeStore()
+        let (window, view) = mount(store)
+        defer { window.close() }
+        settle(view)
+        for zoom in [1.0, 1e6, 1e-6] {
+            store.zoom(by: zoom)
+            store.pan(by: -100)
+            for date in [utc(1990, 1), utc(2010, 6), utc(2019, 12, 31), utc(2020, 1), utc(2030, 1)] {
+                store.show(date)
+                await store.waitUntilIdle()
+                for slot in store.slots.indices {
+                    store.focus(index: slot)
+                    settle(view)
+                }
+            }
+        }
+        #expect(store.frame.start >= tests.firstReading)
+    }
 }
 
 extension ScenarioDefinition {

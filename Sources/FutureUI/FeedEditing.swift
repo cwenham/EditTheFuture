@@ -198,6 +198,14 @@ extension ScenarioStore {
         return (first.time, last.time)
     }
 
+    /// The slot's latest reading of the value its graph shows at or before `date`, while `date` is
+    /// within its readings: the readout before the scenario's start (docs/UI.md, 5.1).
+    func reading(ofSlotAt index: Int, at date: Date) -> Double? {
+        let all = readingSamples(ofSlotAt: index)
+        guard let last = all.last, date <= last.time else { return nil }
+        return Self.held(all, at: date)
+    }
+
     private func readingSamples(ofSlotAt index: Int) -> [Sample] {
         guard isSlot(index) else { return [] }
         let set = configs[index].readings.set

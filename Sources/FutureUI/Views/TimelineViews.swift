@@ -43,6 +43,7 @@ struct TimelineRows: View {
                 FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
+                    .overlay { if timeline.showsStart { StartLabel(timeline: timeline) } }
                     .overlay {
                         if let reason = timeline.focus.pausedReason { PausedNote(reason: reason, large: true) }
                     }
@@ -165,7 +166,8 @@ struct FocusChart: View {
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
                           series: series, rules: rules,
-                          readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading))
+                          readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
+                          modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(focus.name) from \(DateText.monthYear(timeline.frame.start)) to \(DateText.monthYear(timeline.frame.end))")
             .accessibilityHint("Click to pick this date for a new event")
@@ -231,6 +233,41 @@ struct NowLabel: View {
                 .offset(x: timeline.frame.x(timeline.now, width: width) + 6, y: 4)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// "Start · Jan 2022", just left of the dashed line where the models' lines begin, while the view
+/// reaches back before the start (docs/UI.md, 2.4). Left out when there isn't room for it there, or
+/// where it would cover the Now label.
+struct StartLabel: View {
+    let timeline: TimelineState
+
+    var body: some View {
+        Canvas { context, size in
+            let font = Font.system(size: 11, weight: .semibold)
+            let label = context.resolve(Text(timeline.startText).font(font).foregroundStyle(Theme.secondary))
+            let startX = timeline.frame.x(timeline.start, width: size.width)
+            var nowLabel: (from: CGFloat, to: CGFloat)?
+            if timeline.frame.contains(timeline.now) {
+                let nowX = timeline.frame.x(timeline.now, width: size.width) + 6
+                nowLabel = (nowX, nowX + context.resolve(Text(timeline.nowText).font(font)).measure(in: size).width)
+            }
+            guard let edge = Self.trailingEdge(startX: startX, labelWidth: label.measure(in: size).width, nowLabel: nowLabel)
+            else { return }
+            context.draw(label, at: CGPoint(x: edge, y: 4), anchor: .topTrailing)
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(timeline.startText)
+    }
+
+    /// Where the label ends: 6 points left of the start line. Nil when it would run off the left
+    /// edge, or come within 8 points of the Now label.
+    static func trailingEdge(startX: CGFloat, labelWidth: CGFloat, nowLabel: (from: CGFloat, to: CGFloat)?) -> CGFloat? {
+        let edge = startX - 6, left = edge - labelWidth
+        guard left >= 0 else { return nil }
+        if let nowLabel, nowLabel.from - 8 < edge, nowLabel.to + 8 > left { return nil }
+        return edge
     }
 }
 
@@ -436,7 +473,7 @@ struct LaneRow: View {
 
             PlotCanvas(frame: timeline.frame, domain: lane.yDomain, now: timeline.now,
                        series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
-                       rules: [PlotRule(date: timeline.now, color: Theme.nowLine)])
+                       rules: [PlotRule(date: timeline.now, color: Theme.nowLine)], modelStart: timeline.start)
                 .frame(width: plotWidth, height: 36)
                 .overlay(alignment: .leading) {
                     if let reason = lane.pausedReason { PausedNote(reason: reason, large: false) }

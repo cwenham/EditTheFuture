@@ -87,6 +87,7 @@ Models declare capabilities so the engine can take shortcuts:
 ### 4.6 Past, present and future
 
 - **Past**: real readings, used to correct the model's state up to "now" (data assimilation, for example a Kalman filter or simple nudging). Before the first reading, a model can run backwards when its maths allows it (hindcast). Otherwise the graph starts at the scenario start.
+  - **Before the start** (October 2026): every model's line begins at the scenario's start, but the graph reaches back to the earliest reading of a value a slot's graph shows, and draws the readings there (UI.md 2.4, 5.1). The engine computes nothing before the start, so that part of the graph is readings only. Hindcast is still to do: it would work for models whose steps can be undone, such as compound interest, but not for ones with `max`, events or randomness.
   - **Built so far** (October 2026): the simplest assimilation, direct insertion, for formulas and scripts alike. A reading of a parameter sets it at the start of its step, as a `set` event would. A reading of a value replaces what the step worked out, so the next step carries on from what was observed. When a step has several readings of one name, the latest wins. The start takes the latest reading of each name at or before it, so a scenario that starts after its readings begin starts from them. Until October 2026 a reading at the start instant was applied again at the first step, so the first step repeated it; it now belongs only to the start, and `Scenario.engineVersion` is 3.
   - Values worked out from a replaced value in the same step (a definition without `[t-1]` that reads it) see the reading from the next step on.
   - Nudging and Kalman filters are still to do. Refitting parameters to readings is built in the engine, and choosing which model makes the projection is designed (8.4).
@@ -1109,7 +1110,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 
 ## 17. Open questions
 
-- How far into the past should graphs go before the first reading (hindcast vs a hard start)?
+- Should models run backwards from the start (hindcast, 4.6), so their lines reach back beside the readings? The graph already reaches back to the first reading.
 - Should formulas have units, and should they convert automatically?
 - How should pinned and suppressed generated events be stored so they survive model edits?
 - Ensemble size and progressive refinement budget per frame.

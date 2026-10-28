@@ -37,7 +37,9 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 | `text` | `#ECEEF1` | Primary text, values |
 | `text.secondary` | `#A3A9B1` | Labels, axes, metadata. At least 4.5:1 at α ≥ 0.60 over a light window |
 | `future` | `rgba(255,255,255,0.03)` | Tint right of the now line |
+| `before start` | `rgba(0,0,0,0.18)` | Shade left of the scenario's start, where there are only readings |
 | `now` | `rgba(255,255,255,0.45)` | Now line |
+| `start` | `rgba(255,255,255,0.30)`, dashed 4–4 | Start line, where the models' lines begin |
 | `cursor` | `rgba(255,255,255,0.85)` | Shared cursor line; date flag uses `text` on dark |
 | `proposal` | `#A9D0FF` | Drag the future, previews, selected fix |
 | `warning` | `#FFC77A` on `rgba(255,180,84,0.16)` | Drift alerts |
@@ -66,7 +68,8 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 | Mark | Drawn as |
 |---|---|
-| Readings (past) | Dots on a thin line in `reading`, 85% opacity. The dots show while they're at least 6 points apart; closer, just the line. Built for the focused graph, for readings of the value it shows. |
+| Readings (past) | Dots on a thin line in `reading`, 85% opacity. The dots show while they're at least 6 points apart; closer, just the line. Built for the focused graph, for readings of the value it shows, including readings from before the scenario's start. |
+| Before the start | When the view reaches back before the scenario's start, that part of every plot is shaded with `before start`, and a dashed `start` line marks where the models' lines begin. The focused graph labels it "Start · Jan 2020" in `text.secondary`, just left of the line, when there's room there and it doesn't cover the Now label. Only readings are drawn before the start. |
 | Projection (future) | Thicker solid line |
 | Bands | 25–75% at 16% fill, 10–90% at 12% fill |
 | Preview or proposal | Dashed line in `proposal` |
@@ -96,7 +99,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - Slot name and model summary ("Market model · monthly · median with bands").
 - Toggles for Bands, Readings and Events.
 - The graph with its y axis.
-- A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection), and the 10–90% range when there is one. "Reading" shows while the cursor is within the slot's readings of the value the graph shows. Long values shrink to fit.
+- A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection, Before the start), and the 10–90% range when there is one. "Reading" shows while the cursor is within the slot's readings of the value the graph shows. Long values shrink to fit.
 
 **Now line:** labelled "Now · Oct 2026". When the latest readings leave the projected band, a drift pill sits to its left.
 
@@ -185,6 +188,12 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 ### 5.1 Scrubbing and the cursor
 
 - Scrubbing is free; computation follows lazily. If the cursor moves past what's computed, the readout shows a small spinner and the lanes fill in as results arrive.
+- **Before the start:** the models' lines begin at the scenario's start, but readings often go back further (a feed of Europe's temperatures starts in 1850).
+  - **How far back:** the view and the cursor reach back to the earliest reading of the value any slot's graph shows. Without readings before the start, they stop at the start, as before. Taking readings away brings the view back within reach.
+  - **Opening:** the panel still opens at the start at the earliest, so readings before it are a scroll away. Opening a few months before the start showed only a sliver of shade at the left edge, too narrow for its label.
+  - **The readout:** before the start, the focused slot's latest reading at the cursor, with "Reading", while the cursor is within its readings. Otherwise "—" and "Before the start". The lanes show "—".
+  - **Clicking** before the start picks the start for a new event, the earliest date the Event tab takes.
+  - Models don't run backwards from the start yet (hindcast, DESIGN.md 4.6).
 - **Go to a date or a value:** the command bar's `goto` moves the cursor.
   - **Dates:** `goto 2035`, `goto Jun 2035`.
   - **Values:** `goto 100°C`, `goto mortgage $0`. The cursor lands where the line first reaches the value, looking ahead from now, rising or falling depending on where it starts. The slot is focused, and the footer says when ("Climate reaches 100.0 °C in Jul 4699").
@@ -494,6 +503,7 @@ Sections:
   - The store keeps each slot's readings by source (`SlotReadings.parts`), so a feed's new readings replace only its own. They reach the engine as a readings change (`ScenarioEngine.Mutation.readings`), not a layout, and aren't an edit.
   - `FeedCenter` belongs to the `ScenarioDocument`. It keeps each feed's state in `store.feedStatuses`, by slot and what the feed fetches (`FeedKey`), which the Slot tab reads.
   - The focused graph's readings are turned into samples once per readings set and variable (`readingSamples`), not every frame.
+  - **Before the start** (5.1): `ScenarioStore.earliest` is how far back the view and cursor reach. It's worked out again whenever slots or readings change, and the view and cursor are moved within it. `PlotCanvas.modelStart` shades the plot before the start and draws the dashed line; `StartLabel` places the label (`trailingEdge`). Fetches still begin at the start, since the engine has nothing before it.
   - The setup screen's sign-in section avoids a segmented control: with four kinds it was wider than the pane and pushed the popover's columns off its edges.
 - **Refit** (5.11, DESIGN.md 8.4):
   - `Refitting.swift` keeps the sheet's state (`ScenarioStore.refit`, a `RefitState`) and which slots can be refitted (`refittable`, kept up to date as slots and readings change). `RefitSheet` draws it.
@@ -520,5 +530,6 @@ Sections:
 - Comparing branches: ghost lines plus a difference lane? Needs its own artboard.
 - Showing more than one bank at once, perhaps a compact overview strip.
 - Axis units and mixed units when lanes are overlaid instead of stacked.
-- What the graph shows before the scenario's start date.
+- Before the start, the lanes are empty until readings in the lanes are built (section 3). Should a lane show its slot's reading at the cursor there, rather than "—"?
+- The widest view is 80 years, so a feed going back to 1850 can't be seen all at once. Should the widest view reach to the earliest reading?
 - The pairing flow and "Lend to Mac" screens on iPhone.

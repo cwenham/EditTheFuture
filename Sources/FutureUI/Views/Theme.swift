@@ -8,6 +8,10 @@ public enum Theme {
     public static let hairline = Color.white.opacity(0.08)
     public static let chipBorder = Color.white.opacity(0.14)
     public static let futureTint = Color.white.opacity(0.03)
+    /// Shade left of the scenario's start, where there are only readings (docs/UI.md, 2.4).
+    public static let beforeStart = Color.black.opacity(0.18)
+    /// The dashed line at the scenario's start, where the models' lines begin.
+    public static let startLine = Color.white.opacity(0.3)
     public static let grid = Color.white.opacity(0.07)
     public static let nowLine = Color.white.opacity(0.45)
     public static let cursorLine = Color.white.opacity(0.85)

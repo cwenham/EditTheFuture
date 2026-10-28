@@ -48,6 +48,9 @@ struct PlotCanvas: View {
     var rules: [PlotRule] = []
     var readings: PlotReadings?
     var marker: PlotMarker?
+    /// The scenario's start, where the models' lines begin. When the frame reaches back before it,
+    /// that part is shaded and a dashed line marks the start (docs/UI.md, 2.4).
+    var modelStart: Date?
 
     var body: some View {
         Canvas { context, size in
@@ -63,6 +66,10 @@ struct PlotCanvas: View {
             if now < frame.end {
                 let start = max(0, x(now))
                 context.fill(Path(CGRect(x: start, y: 0, width: size.width - start, height: size.height)), with: .color(Theme.futureTint))
+            }
+            let startX = modelStart.flatMap { $0 > frame.start ? min(x($0), size.width) : nil }
+            if let startX {
+                context.fill(Path(CGRect(x: 0, y: 0, width: startX, height: size.height)), with: .color(Theme.beforeStart))
             }
             if !gridValues.isEmpty {
                 var grid = Path()
@@ -94,6 +101,12 @@ struct PlotCanvas: View {
                     context.fill(dots, with: .color(color))
                     context.stroke(dots, with: .color(Theme.panel.opacity(0.6)), lineWidth: 0.75)
                 }
+            }
+            if let startX, startX < size.width {
+                var path = Path()
+                path.move(to: CGPoint(x: startX, y: 0))
+                path.addLine(to: CGPoint(x: startX, y: size.height))
+                context.stroke(path, with: .color(Theme.startLine), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
             for rule in rules where frame.contains(rule.date) {
                 var path = Path()

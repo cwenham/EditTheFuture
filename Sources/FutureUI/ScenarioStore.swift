@@ -124,6 +124,9 @@ public final class ScenarioStore {
     public private(set) var slots: [SlotInfo]
     public let now: Date
     public private(set) var start: Date
+    /// How far back the view and the cursor reach: the scenario's start, or the first reading a
+    /// slot's graph draws when that's earlier. Before the start there are only readings (docs/UI.md, 5.1).
+    @ObservationIgnored public private(set) var earliest: Date
     /// The scenario's own seed, or nil for the engine's (docs/DESIGN.md, 4.4).
     public private(set) var seed: UInt64?
     /// Connections and event routes between the slots that run.
@@ -281,10 +284,13 @@ public final class ScenarioStore {
         self.computedSlots = assembly.slots.map(\.id)
         self.name = definition.name
         self.start = definition.start
+        self.earliest = Self.earliest(start: definition.start, configs: configs)
         self.seed = definition.seed
         self.now = now
         self.cursor = max(now, definition.start)
         let year = 365.2425 * 86_400
+        // Opens at the start at the earliest, as without readings before it: they're a scroll away.
+        // Opening a little before the start showed only a sliver of it at the left edge.
         let frameStart = max(definition.start, now.addingTimeInterval(-5 * year))
         self.frame = TimeFrame(start: frameStart, end: frameStart.addingTimeInterval(19 * year))
         self.eventDraft = makeDraft(slotIndex: 0, date: cursor)
@@ -432,6 +438,7 @@ public final class ScenarioStore {
         retargetDraft(force: true)
         revision += 1
         enqueue(.mutate(.layout(assembly.layout)))
+        updateEarliest()
         requestData()
         updateDraftPreview()
         updateRefittable()
@@ -485,7 +492,7 @@ public final class ScenarioStore {
     }
 
     public func setCursor(_ date: Date) {
-        cursor = max(start, date)
+        cursor = max(earliest, date)
     }
 
     /// Moves the cursor to a fraction (0...1) of the visible width.
@@ -515,13 +522,13 @@ public final class ScenarioStore {
     /// Scrolls by a fraction of the visible span (positive = later).
     public func pan(by fraction: Double) {
         let shift = frame.span * fraction
-        let newStart = max(start, frame.start.addingTimeInterval(shift))
+        let newStart = max(earliest, frame.start.addingTimeInterval(shift))
         let newFrame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
-        guard newFrame != frame else { return }  // at the start already: don't redraw for nothing
+        guard newFrame != frame else { return }  // as far back as it goes already: don't redraw for nothing
         if fraction != 0 { scrollDirection = fraction > 0 ? 1 : -1 }
         // The cursor moves with the view so it stays under the pointer (which doesn't move while
         // the wheel scrolls), and the readout shows the date being pointed at.
-        if frame.contains(cursor) { cursor = max(start, cursor.addingTimeInterval(newStart.timeIntervalSince(frame.start))) }
+        if frame.contains(cursor) { cursor = max(earliest, cursor.addingTimeInterval(newStart.timeIntervalSince(frame.start))) }
         frame = newFrame
         frameChanged()
     }
@@ -531,16 +538,36 @@ public final class ScenarioStore {
         let span = min(max(frame.span * factor, Self.minimumSpan), Self.maximumSpan)
         let anchor = anchor ?? (frame.contains(cursor) ? cursor : frame.date(atFraction: 0.5))
         let proportion = anchor.timeIntervalSince(frame.start) / frame.span
-        let newStart = max(start, anchor.addingTimeInterval(-proportion * span))
+        let newStart = max(earliest, anchor.addingTimeInterval(-proportion * span))
         frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(span))
         frameChanged()
     }
 
     private func reveal(_ date: Date) {
         guard !frame.contains(date) else { return }
-        let newStart = max(start, date.addingTimeInterval(-frame.span / 2))
+        let newStart = max(earliest, date.addingTimeInterval(-frame.span / 2))
         frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
         frameChanged()
+    }
+
+    /// The scenario's start, or the first reading of the value a slot's graph shows when that's earlier.
+    nonisolated static func earliest(start: Date, configs: [SlotConfig]) -> Date {
+        var earliest = start
+        for config in configs {
+            // Readings are in time order, so the first one of the value is the earliest.
+            if let first = config.readings.set.readings.first(where: { $0.variable == config.variable }), first.time < earliest {
+                earliest = first.time
+            }
+        }
+        return earliest
+    }
+
+    /// Works out `earliest` again after the slots, their readings or the start change, and keeps the
+    /// view and the cursor within it.
+    private func updateEarliest() {
+        earliest = Self.earliest(start: start, configs: configs)
+        if frame.start < earliest { frame = TimeFrame(start: earliest, end: earliest.addingTimeInterval(frame.span)) }
+        if cursor < earliest { cursor = earliest }
     }
 
     /// After the view moves: fetch whatever isn't computed yet and extend the preview.
@@ -709,6 +736,7 @@ public final class ScenarioStore {
         configs[index].readings = readings
         revision += 1
         enqueue(.mutate(.readings(slot: index, readings.set)))
+        updateEarliest()
         requestData()
         updateDraftPreview()
         updateRefittable()
@@ -730,9 +758,7 @@ public final class ScenarioStore {
         clearUndo()
         let assembly = Self.assemble(configs)
         enqueue(.mutate(.rebuild(start: start, seed: seed ?? Scenario.defaultSeed, layout: assembly.layout)))
-        if cursor < start { cursor = start }
-        if frame.start < start { frame = TimeFrame(start: start, end: start.addingTimeInterval(frame.span)) }
-        refreshSlots(focus: focus)
+        refreshSlots(focus: focus)  // which keeps the view and cursor within the new start's reach
     }
 
     /// A copy of a slot for Refit, made after everything already queued (docs/DESIGN.md, 8.4).
@@ -1150,7 +1176,7 @@ public final class ScenarioStore {
                              pausedReason: slot.pausedReason, stoppedReason: slotFailures[slot.id]?.text)
         }
 
-        return TimelineState(scenarioName: name, frame: frame, now: now, focus: focus, lanes: lanes,
+        return TimelineState(scenarioName: name, frame: frame, now: now, start: start, focus: focus, lanes: lanes,
                              yearTicks: TimelineState.yearTicks(for: frame))
     }
 
@@ -1158,7 +1184,9 @@ public final class ScenarioStore {
     /// cursor is past what's been computed.
     public func cursorState() -> CursorState {
         let computed = self.computed
-        let ready = computed.map { cursor >= start && cursor <= $0.through } ?? false
+        // Before the start there's no model, only readings (docs/UI.md, 5.1).
+        let beforeStart = cursor < start
+        let ready = computed.map { !beforeStart && cursor <= $0.through } ?? false
         func value(_ index: Int) -> Double? {
             guard ready, !slots[index].isPaused, let all = computed?.series, all.indices.contains(index) else { return nil }
             return Self.held(all[index], at: cursor)
@@ -1167,11 +1195,18 @@ public final class ScenarioStore {
         let focusValue = value(focusedIndex)
         var laneValues: [Int: String] = [:]
         for (index, slot) in slots.enumerated() where index != focusedIndex {
-            laneValues[index] = slot.isPaused ? "Paused" : ready ? (value(index).map(slot.format.full) ?? "—") : "…"
+            laneValues[index] = slot.isPaused ? "Paused" : beforeStart ? "—" : ready ? (value(index).map(slot.format.full) ?? "—") : "…"
         }
         if focusSlot.isPaused {
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
                                readoutNote: "Paused", focusValue: nil, laneValues: laneValues)
+        }
+        if beforeStart {
+            let reading = reading(ofSlotAt: focusedIndex, at: cursor)
+            return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
+                               readoutValue: reading.map(focusSlot.format.full) ?? "—",
+                               readoutNote: reading == nil ? "Before the start" : "Reading",
+                               focusValue: reading, laneValues: laneValues)
         }
         let observed = readingSpan(ofSlotAt: focusedIndex).map { cursor >= $0.first && cursor <= $0.last } ?? false
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),

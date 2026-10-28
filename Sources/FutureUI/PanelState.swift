@@ -91,11 +91,17 @@ public struct TimelineState: Sendable {
     public let scenarioName: String
     public let frame: TimeFrame
     public let now: Date
+    /// The scenario's start, where the models' lines begin. Before it the graph shows only
+    /// readings, shaded, with a dashed line at the start (docs/UI.md, 2.4).
+    public let start: Date
     public let focus: FocusedSlotState
     public let lanes: [LaneState]
     public let yearTicks: [YearTick]
 
     public var nowText: String { "Now · " + DateText.monthYear(now) }
+    public var startText: String { "Start · " + DateText.monthYear(start) }
+    /// Whether the view reaches back before the start, so the start is marked.
+    public var showsStart: Bool { frame.start < start && start <= frame.end }
 }
 
 /// Everything that follows the cursor: the readout, each lane's value and the dot on the line.
