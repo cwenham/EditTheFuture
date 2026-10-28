@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `3f2fd0e` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `969f7c8` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -43,6 +43,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `78f4827` | Refit and Predict with in the panel: eight Forecast models (Trend line among them), each scored on readings it didn't see, with the best tagged. Fits use readings from before the scenario's start. Merged from `feature/predict-with`. |
 | `dd77c64` | The graph scrolls back before the scenario's start, to the earliest reading, with the part before the start shaded and a dashed "Start" line. |
 | `3f2fd0e` | The scenario menu: switching, New, Duplicate and Edit (name, start date and seed) from the scenario's name in the panel. Merged from `feature/scenario-menu` (`b4e39a2`) and `feature/history-before-start`. |
+| `969f7c8` | Currencies, exchange rates and regional number styles: a currency for each scenario and slot, money converted between slots at the ECB's daily rates or live ones from Open Exchange Rates, and each currency written in its usual style (DESIGN.md 5.11). Merged from `feature/currencies`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -68,7 +69,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The feed setup screen: Add a feed… in the Slot tab's new Readings section, Edit… on a feed, Add a data feed… on an empty chip, and Data feed… in the model picker. Categories, ready-made feeds, the source's settings, how to use the readings, the sign-in with a box to paste a key, and Test, which fetches a year of readings without adding anything.
   - A feed in a slot of its own gets the "Hold the latest" model, once called "Data series" (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
   - Menu bar item: Refresh Data Feeds. `swift run etf-feed` fetches a feed without the app.
-- **Currencies** (DESIGN.md 15.2, UI.md 3 and 5.7), on `feature/currencies`:
+- **Currencies** (DESIGN.md 5.11 and 15.2, UI.md 3 and 5.7):
   - A scenario has a currency (`# Budget [start: 2024-01-01, currency: GBP]`), chosen in the scenario menu's Edit…, New… and Duplicate… forms. Without one it's in US dollars, as every scenario was before. New scenarios take the open scenario's; the built-in "Home & money" starts in the Mac's own (`Currency.local`).
   - A slot can have its own (`## 3. Oil [Hold the latest, currency: USD]`), from the Slot tab's Currency menu, which shows when anything in the slot is money. Ready-made feeds in US dollars get their slot in dollars.
   - Formulas and scripts are unchanged: `as currency` means the slot's currency, so every Money model works in any currency.
@@ -345,7 +346,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events`, `feature/data-feeds` and `feature/predict-with`, all merged by fast-forward.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events`, `feature/data-feeds`, `feature/predict-with` and `feature/currencies`, all merged by fast-forward. `feature/scenario-menu` and `feature/history-before-start` were merged together in a merge commit.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
