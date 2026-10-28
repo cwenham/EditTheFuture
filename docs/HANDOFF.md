@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-27, on the `feature/predict-with` branch (not merged into `main` yet).
+Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `78f4827` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -38,6 +38,9 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `2f244a9` | Python scripts load one at a time, which fixed a flaky libraries test: loads on different threads raced on `sys.path`. |
 | `b6d51e4` | Clicking an event's diamond edits it in the Event tab, with Save, Cancel and Delete (UI.md, 5.4). Merged from `feature/edit-events`. |
 | `500e406` | Data feeds: readings fetched from public sources and kept up to date, with sign-ins in the Keychain and a setup screen (DESIGN.md 15.8, UI.md 5.10). Readings now correct formulas and scripts (DESIGN.md 4.6) and show on the focused graph. Merged from `feature/data-feeds`. |
+| `ca33769` | Predict with, Refit and the automatic pick designed (DESIGN.md 8.4, UI.md 5.11). |
+| `cd09c0c` | Fitting in the engine: `fit` on params and inits, misses, a bounded least-squares solver, and Refit on a copy of the slot, in formulas, Lua and Python. |
+| `78f4827` | Refit and Predict with in the panel: eight Forecast models (Trend line among them), each scored on readings it didn't see, with the best tagged. Fits use readings from before the scenario's start. Merged from `feature/predict-with`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -63,7 +66,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - A feed in a slot of its own gets the "Hold the latest" model, once called "Data series" (`value[t] = value[t-1]` at the feed's step), which follows the readings and holds the latest.
   - Menu bar item: Refresh Data Feeds. `swift run etf-feed` fetches a feed without the app.
 - **Readings correct models** (DESIGN.md 4.6): direct insertion, the same for formulas, Lua and Python. A reading of a parameter sets it at its step, as a `set` event would; a reading of a value replaces what the step worked out. The start takes the latest readings before it. `Scenario.engineVersion` is now 2, so older caches are recomputed.
-- **Fitting to readings, in the engine** (DESIGN.md 8.4, on `feature/predict-with`):
+- **Fitting to readings, and choosing models** (DESIGN.md 8.4):
   - `fit` marks a param or init as one Refit may change: `param growth = 3% range -50%..100% fit`, `{ fit = true }` in Lua, `fit=True` in Python. It becomes `Variable.fittable`.
   - Formulas and scripts report what each step worked out before a reading replaced it (`doStep(_:_:replaced:)`, `Prediction`). A scenario with `recordsMisses` on keeps them as `Miss`es.
   - `Scenario.refit(slot, FitSettings(values:since:))` fits values to the slot's readings with Levenberg–Marquardt (`LeastSquares`), from the slot's own values and from the middle of each range. It runs on a copy of the slot (`copyForFitting`, then `SlotCopy.fit` on any thread), with recordings of the slots it reads, and never changes the scenario. The `FitOutcome` has the values, the typical miss before and after, and whether it improved.
@@ -308,7 +311,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events` and `feature/data-feeds`, all merged by fast-forward.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events`, `feature/data-feeds` and `feature/predict-with`, all merged by fast-forward.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
