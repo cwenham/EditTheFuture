@@ -8,12 +8,22 @@ public struct ScenarioFile: Sendable, Equatable {
     public var start: Date
     /// nil for the engine's own seed.
     public var seed: UInt64?
+    /// What the scenario's money is in. nil when the heading doesn't say, which means US dollars.
+    public var currency: Currency?
+    /// Where exchange rates come from. nil when the heading doesn't say, which means the ECB's.
+    public var rates: ExchangeRateSource?
+    /// How numbers are written. nil when the heading doesn't say: each currency in its own style.
+    public var numbers: NumberStyle?
     public var slots: [SlotFile]
 
-    public init(name: String, start: Date, seed: UInt64? = nil, slots: [SlotFile] = []) {
+    public init(name: String, start: Date, seed: UInt64? = nil, currency: Currency? = nil, rates: ExchangeRateSource? = nil,
+                numbers: NumberStyle? = nil, slots: [SlotFile] = []) {
         self.name = name
         self.start = start
         self.seed = seed
+        self.currency = currency
+        self.rates = rates
+        self.numbers = numbers
         self.slots = slots
     }
 }
@@ -33,6 +43,8 @@ public struct SlotFile: Sendable, Equatable {
     public var shows: String?
     /// `number`, `percent`, `currency` or `temperature`.
     public var format: String?
+    /// A currency of the slot's own for its money, or nil for the scenario's.
+    public var currency: Currency?
     /// Hex, without the "#": "5AA9FF".
     public var color: String?
     /// The slot's own parameter and starting values, in place of the model's defaults.
@@ -46,7 +58,8 @@ public struct SlotFile: Sendable, Equatable {
     public var problem: String?
 
     public init(position: Int, name: String, model: String = "", language: ModelLanguage = .formula, source: String = "",
-                shows: String? = nil, format: String? = nil, color: String? = nil, values: [String: Double] = [:],
+                shows: String? = nil, format: String? = nil, currency: Currency? = nil, color: String? = nil,
+                values: [String: Double] = [:],
                 percentNames: Set<String> = [], events: [Event] = [], rules: [RecurringEvent] = [],
                 readings: [ReadingSource] = [], problem: String? = nil) {
         self.position = position
@@ -56,6 +69,7 @@ public struct SlotFile: Sendable, Equatable {
         self.source = source
         self.shows = shows
         self.format = format
+        self.currency = currency
         self.color = color
         self.values = values
         self.percentNames = percentNames

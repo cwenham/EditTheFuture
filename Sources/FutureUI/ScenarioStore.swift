@@ -34,6 +34,14 @@ public final class ScenarioStore {
         /// Whether the color was chosen, rather than taken from the slot's position.
         public let hasOwnColor: Bool
         public let format: ValueFormat
+        /// What its money is in: its own currency, else the scenario's.
+        public let currency: Currency
+        /// A currency of its own, or nil when it follows the scenario's.
+        public let ownCurrency: Currency?
+        /// How its numbers and money are written: its currency's own style, or the scenario's choice.
+        public let writing: MoneyWriting
+        /// Money it reads from slots in other currencies, converted as it's read (docs/DESIGN.md, 5.11).
+        public let conversions: [SlotConversion]
         /// "Savings account · Formula · monthly".
         public let summary: String
         public let reads: String?
@@ -54,6 +62,18 @@ public final class ScenarioStore {
 
         public var color: Color { Color(hex: colorHex) }
         public var isPaused: Bool { pausedReason != nil }
+
+        /// How the graph's values are written: "£41,223", "41.223 €".
+        public var style: ValueStyle { ValueStyle(format, currency: currency, writing: writing) }
+
+        /// How its money is written, whatever the graph shows.
+        public var money: ValueStyle { ValueStyle(.currency, currency: currency, writing: writing) }
+
+        /// Whether anything in the slot is money: what the graph shows, a parameter or starting
+        /// value, or money it reads from another slot. The Slot tab offers a currency only then.
+        public var hasMoney: Bool {
+            format == .currency || !conversions.isEmpty || (parameterValues + startingValues).contains { $0.quantity == .currency }
+        }
 
         public var isScript: Bool {
             if case .script = kind { return true }
@@ -131,6 +151,25 @@ public final class ScenarioStore {
     @ObservationIgnored public private(set) var earliest: Date
     /// The scenario's own seed, or nil for the engine's (docs/DESIGN.md, 4.4).
     public private(set) var seed: UInt64?
+    /// The currency the scenario's file names, or nil when it doesn't name one (docs/DESIGN.md, 15.2).
+    public private(set) var currencySetting: Currency?
+    /// What the scenario's money is in, unless a slot has a currency of its own. US dollars when
+    /// the file doesn't say, as before scenarios had currencies.
+    public var currency: Currency { currencySetting ?? .usd }
+    /// Where exchange rates come from, as the file says: nil for the ECB's (docs/DESIGN.md, 5.11).
+    public private(set) var rateSetting: ExchangeRateSource?
+    public var rateSource: ExchangeRateSource { rateSetting ?? .ecb }
+    /// How numbers are written, as the file says: nil for each currency in its own style.
+    public private(set) var numberSetting: NumberStyle?
+    /// The rates money is converted at when one slot reads it from a slot in another currency.
+    public internal(set) var exchangeRates = ExchangeRates.none
+    /// Whether rates are being fetched, when they were checked, and what went wrong.
+    public internal(set) var rateStatus = RateStatus()
+
+    /// The scenario's money settings, for building slots.
+    var money: ScenarioMoney {
+        ScenarioMoney(currency: currency, numbers: numberSetting, converts: rateSource != .none, rates: exchangeRates)
+    }
     /// Connections and event routes between the slots that run.
     public private(set) var linkCount: Int
 
@@ -277,10 +316,12 @@ public final class ScenarioStore {
     public init(definition: ScenarioDefinition, now: Date = Date(), savedResults: [String: SlotHistory] = [:]) throws {
         let configs = Self.configs(from: definition)
         guard !configs.isEmpty else { throw EngineError.invalidSlotName("") }
-        let assembly = Self.assemble(configs)
+        let money = ScenarioMoney(currency: definition.currency ?? .usd, numbers: definition.numbers,
+                                  converts: definition.rates != ExchangeRateSource.none, rates: definition.exchangeRates)
+        let assembly = Self.assemble(configs, money: money)
 
         self.engine = try ScenarioEngine(start: definition.start, seed: definition.seed ?? Scenario.defaultSeed,
-                                         layout: assembly.layout)
+                                         layout: assembly.layout, rates: definition.exchangeRates)
         self.configs = configs
         self.slots = assembly.slots
         self.linkCount = assembly.linkCount
@@ -290,6 +331,10 @@ public final class ScenarioStore {
         self.start = definition.start
         self.earliest = Self.earliest(start: definition.start, configs: configs)
         self.seed = definition.seed
+        self.currencySetting = definition.currency
+        self.rateSetting = definition.rates
+        self.numberSetting = definition.numbers
+        self.exchangeRates = definition.exchangeRates
         self.now = now
         self.cursor = max(now, definition.start)
         let year = 365.2425 * 86_400
@@ -315,7 +360,8 @@ public final class ScenarioStore {
                     ?? (0..<Scenario.bankSize).first(where: { !taken.contains($0) }) else { break }
             var config = SlotConfig(position: position, name: spec.name, model: spec.model, kind: spec.kind,
                                     formula: spec.formula, variable: spec.variable, color: spec.color,
-                                    format: spec.format, values: spec.values, events: spec.events, rules: spec.rules)
+                                    format: spec.format, currency: spec.currency, values: spec.values,
+                                    events: spec.events, rules: spec.rules)
             config.readings = spec.readings
             config.problem = spec.problem
             config.showsInFile = spec.showsInFile
@@ -338,11 +384,15 @@ public final class ScenarioStore {
         let layout: ScenarioEngine.Layout
         let linkCount: Int
         let descriptors: [ModelDescriptor?]
+        /// Money each slot reads from slots in other currencies.
+        let conversions: [[SlotConversion]]
     }
 
     /// Compiles each slot's model, checks how the slots read each other, and describes the result
-    /// for the views and the engine. Slots that can't run are paused, not dropped.
-    nonisolated static func assemble(_ configs: [SlotConfig]) -> Assembly {
+    /// for the views and the engine. Slots that can't run are paused, not dropped. `money` gives
+    /// the scenario's currency, for slots without one of their own, how numbers are written, and
+    /// the rates: a slot that reads money in another currency waits until there are rates for it.
+    nonisolated static func assemble(_ configs: [SlotConfig], money: ScenarioMoney = .plain) -> Assembly {
         var models: [(any AuthoredModel)?] = []
         var errors: [Int: String] = [:]
         for (index, config) in configs.enumerated() {
@@ -358,7 +408,19 @@ public final class ScenarioStore {
                 errors[index] = String(describing: error)
             }
         }
-        let report = Wiring.check(configs.indices.map { (configs[$0].name, models[$0]?.descriptor) })
+        let descriptors = models.map { $0?.descriptor }
+        let currencies = configs.map { $0.currency ?? money.currency }
+        let conversions = money.converts ? conversions(configs, descriptors: descriptors, currencies: currencies)
+            : configs.map { _ in [] }
+        // A slot waiting for rates can't run yet, and neither can the slots that read it.
+        var checked = descriptors
+        for index in configs.indices where errors[index] == nil {
+            guard let reason = waitingReason(conversions[index], rates: money.rates) else { continue }
+            errors[index] = reason
+            checked[index] = nil
+        }
+        let report = Wiring.check(configs.indices.map { (configs[$0].name, checked[$0]) })
+        let writings = writings(for: Set(currencies + [money.currency]), numbers: money.numbers)
 
         var slots: [SlotInfo] = []
         var setups: [ScenarioEngine.SlotSetup?] = []
@@ -366,21 +428,33 @@ public final class ScenarioStore {
             let model = models[index]
             let paused = errors[index] ?? report.problems[index]?.description
             setups.append(paused == nil ? model.map {
-                ScenarioEngine.SlotSetup(name: config.name, variable: config.variable, model: $0, key: config.modelKey)
+                ScenarioEngine.SlotSetup(name: config.name, variable: config.variable, model: $0, key: config.modelKey,
+                                         currency: money.converts ? currencies[index] : nil)
             } : nil)
-            slots.append(slotInfo(config, model: model, paused: paused))
+            slots.append(slotInfo(config, model: model, paused: paused, currency: currencies[index],
+                                  writing: writings[currencies[index]]!, conversions: conversions[index]))
         }
         let layout = ScenarioEngine.Layout(slots: setups, events: configs.map(\.events), rules: configs.map(\.rules),
                                            readings: configs.map(\.readings.set))
-        return Assembly(slots: slots, layout: layout, linkCount: report.linkCount, descriptors: models.map { $0?.descriptor })
+        return Assembly(slots: slots, layout: layout, linkCount: report.linkCount, descriptors: descriptors,
+                        conversions: conversions)
     }
 
-    nonisolated private static func slotInfo(_ config: SlotConfig, model: (any AuthoredModel)?, paused: String?) -> SlotInfo {
+    nonisolated private static func slotInfo(_ config: SlotConfig, model: (any AuthoredModel)?, paused: String?,
+                                             currency: Currency, writing: MoneyWriting, conversions: [SlotConversion]) -> SlotInfo {
         let descriptor = model?.descriptor
-        let reads = descriptor?.inputs.compactMap { $0.source?.text } ?? []
+        // A reading that's converted says so: "← IndexFund.value ($→£)".
+        let reads = descriptor?.inputs.compactMap { input -> String? in
+            guard let source = input.source else { return nil }
+            guard let pair = conversions.first(where: { $0.slot == source.slot && $0.variable == source.variable })?.pair else {
+                return source.text
+            }
+            return source.text + " (\(pair.from.symbol)→\(pair.to.symbol))"
+        } ?? []
+        let money = ValueStyle(.currency, currency: currency, writing: writing)
         func value(_ variable: Variable) -> SlotValue {
             SlotValue(name: variable.name, label: variable.label ?? variable.name, quantity: variable.quantity ?? .number,
-                      minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
+                      money: money, minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
                       value: model?.startingValues[variable.name], defaultValue: model?.declaredDefaults[variable.name],
                       isChanged: config.values[variable.name] != nil)
         }
@@ -393,7 +467,9 @@ public final class ScenarioStore {
         return SlotInfo(id: config.id, key: config.position + 1, name: config.name, title: displayName(config.name),
                         model: config.model, kind: config.kind, variable: config.variable,
                         colorHex: config.color ?? SlotPalette.color(forSlotAt: config.position), hasOwnColor: config.color != nil,
-                        format: config.format, summary: summary.joined(separator: " · "),
+                        format: config.format, currency: currency, ownCurrency: config.currency, writing: writing,
+                        conversions: conversions,
+                        summary: summary.joined(separator: " · "),
                         reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
                         eventKinds: model?.handledEventKinds ?? [], parameters: model?.parameterNames ?? [],
                         parameterValues: parameters.map(value), startingValues: starting.map(value),
@@ -415,7 +491,7 @@ public final class ScenarioStore {
     /// follow their slots, so lines stay on screen until the engine has the new ones.
     private func refreshSlots(focus: UUID?) {
         let wanted = focus ?? (slots.indices.contains(focusedIndex) ? focused.id : nil)
-        let assembly = Self.assemble(configs)
+        let assembly = Self.assemble(configs, money: money)
         let order = assembly.slots.map(\.id)
         if let computed {
             let old = Dictionary(uniqueKeysWithValues: computedSlots.enumerated().map { ($0.element, $0.offset) })
@@ -756,19 +832,21 @@ public final class ScenarioStore {
         redoStack.removeAll()
     }
 
-    /// Replaces the scenario's name, start and seed, and its slots, building the engine's scenario
-    /// again. Undo starts afresh.
-    func replaceScenario(name: String, start: Date, seed: UInt64?, configs newConfigs: [SlotConfig], focus: UUID?) {
+    /// Replaces the scenario's settings and its slots, building the engine's scenario again. Undo
+    /// starts afresh.
+    func replaceScenario(_ settings: ScenarioSettings, configs newConfigs: [SlotConfig], focus: UUID?) {
         configs = newConfigs.sorted { $0.position < $1.position }
         clearUndo()
-        rebuild(ScenarioSettings(name: name, start: start, seed: seed), focus: focus)
+        rebuild(settings, focus: focus)
     }
 
-    /// The scenario's name, start and seed, as the heading of its file says them.
-    public var settings: ScenarioSettings { ScenarioSettings(name: name, start: start, seed: seed) }
+    /// The scenario's name, start, seed and currency, as the heading of its file says them.
+    public var settings: ScenarioSettings {
+        ScenarioSettings(name: name, start: start, seed: seed, currency: currencySetting, rates: rateSetting, numbers: numberSetting)
+    }
 
-    /// Changes the scenario's name, start or seed as one change, which undo takes back. A new
-    /// start or seed builds the engine's scenario again (docs/UI.md, 3).
+    /// Changes the scenario's settings as one change, which undo takes back. A new start or seed
+    /// builds the engine's scenario again (docs/UI.md, 3).
     func applySettingsChange(_ new: ScenarioSettings) {
         guard new != settings else { return }
         undoStack.append(.settings(before: settings, after: new))
@@ -776,22 +854,53 @@ public final class ScenarioStore {
         apply(new)
     }
 
-    /// Sets the name, start and seed. Only a new start or seed needs the scenario built again.
+    /// Sets the settings. Only a new start or seed needs the scenario built again; a new currency,
+    /// source of rates or way of writing numbers builds only the slots' descriptions again, and
+    /// computes again only what's converted differently.
     private func apply(_ new: ScenarioSettings) {
         guard new.start != start || new.seed != seed else {
             if name != new.name { name = new.name }
-            onScenarioChange?()
+            if !setMoneySettings(currency: new.currency, rates: new.rates, numbers: new.numbers) { onScenarioChange?() }
             return
         }
         rebuild(new, focus: nil)
     }
 
-    /// Sets the name, start and seed, and builds the engine's scenario again with the slots as they are.
+    /// The scenario's currency, source of rates and way of writing numbers, with the slots built
+    /// again for them. Not an edit of its own: settings changes and reloads record it. Returns
+    /// whether anything changed.
+    @discardableResult
+    func setMoneySettings(currency: Currency?, rates: ExchangeRateSource?, numbers: NumberStyle?) -> Bool {
+        guard currencySetting != currency || rateSetting != rates || numberSetting != numbers else { return false }
+        if currencySetting != currency { currencySetting = currency }
+        if rateSetting != rates { rateSetting = rates }
+        if numberSetting != numbers { numberSetting = numbers }
+        refreshSlots(focus: nil)
+        return true
+    }
+
+    /// Gives the engine new exchange rates. When slots start or stop waiting for rates, they're
+    /// built again; otherwise only what converts differently is computed again.
+    func sendExchangeRates(_ rates: ExchangeRates, rebuildingSlots: Bool) {
+        enqueue(.mutate(.rates(rates)))
+        if rebuildingSlots {
+            refreshSlots(focus: nil)
+        } else {
+            revision += 1
+            requestData()
+            updateDraftPreview()
+        }
+    }
+
+    /// Sets the settings, and builds the engine's scenario again with the slots as they are.
     private func rebuild(_ new: ScenarioSettings, focus: UUID?) {
         if name != new.name { name = new.name }
         if start != new.start { start = new.start }
         if seed != new.seed { seed = new.seed }
-        let assembly = Self.assemble(configs)
+        if currencySetting != new.currency { currencySetting = new.currency }
+        if rateSetting != new.rates { rateSetting = new.rates }
+        if numberSetting != new.numbers { numberSetting = new.numbers }
+        let assembly = Self.assemble(configs, money: money)
         enqueue(.mutate(.rebuild(start: start, seed: seed ?? Scenario.defaultSeed, layout: assembly.layout)))
         refreshSlots(focus: focus)  // which keeps the view and cursor within the new start's reach
     }
@@ -945,7 +1054,7 @@ public final class ScenarioStore {
     @discardableResult
     public func runCommand() -> CommandBarAction? {
         do {
-            let action = try CommandBarParser.parse(commandText)
+            let action = try CommandBarParser.parse(commandText, numbers: slots.indices.contains(focusedIndex) ? focused.writing.numbers : .commaPoint)
             let handledHere = try perform(action)
             commandText = ""
             return handledHere ? nil : action
@@ -971,17 +1080,23 @@ public final class ScenarioStore {
         case .moveCursor(let date):
             show(date)
             say("Cursor at " + DateText.monthYear(cursor))
-        case .findValue(let name, let value, let format):
-            guard let index = slotForValue(named: name, format: format, value: value) else { return true }
+        case .findValue(let name, let value, let format, let currency):
+            guard let index = slotForValue(named: name, format: format, currency: currency, value: value) else { return true }
             findValue(value, inSlotAt: index)
         case .focus(let text):
             guard focus(named: text) else { throw CommandBarError.notUnderstood("focus " + text) }
             say("Focused " + focused.title)
-        case .addEvent(let kind, let amount, let at, let repeats):
+        case .addEvent(let kind, let amount, let at, let repeats, let typed):
+            let money = focused.currency
+            if let typed, !money.answers(to: typed) {
+                say("\(focused.title) is in \(money.plural). Type the amount in \(focused.money.writing.symbol), or without a currency.",
+                    isError: true)
+                return true
+            }
             let when = at ?? cursor
             let values = ["amount": amount]
             let sign = kind == "deposit" ? "+" : "−"
-            let amountText = sign + ValueFormat.currency.full(amount).replacingOccurrences(of: "−", with: "")
+            let amountText = sign + focused.money.full(amount).replacingOccurrences(of: "−", with: "")
             if let repeats {
                 add(RecurringEvent(kind: kind, values: values, first: when, every: repeats), toSlotAt: focusedIndex)
                 say("Added \(amountText) \(Self.describe(repeats)) from \(DateText.monthYear(when)) to \(focused.title)")
@@ -997,7 +1112,7 @@ public final class ScenarioStore {
             }
             let when = at ?? cursor
             add(Event.set([name: value], at: when), toSlotAt: focusedIndex)
-            say("Set \(name) to \(ValueFormat.number.axis(value)) from \(DateText.monthYear(when)) in \(focused.title)")
+            say("Set \(name) to \(ValueStyle.number.axis(value)) from \(DateText.monthYear(when)) in \(focused.title)")
         case .addModel(let text, let key):
             guard let template = ModelLibrary.named(text) else {
                 say("There's no model called “\(text)”. Try savings account, loan, index fund or seasonal temperature.", isError: true)
@@ -1055,15 +1170,22 @@ public final class ScenarioStore {
     static let findHorizon: TimeInterval = 10_000 * 365.2425 * 86_400
 
     /// The slot a `goto` value refers to: the named one, else the focused slot if it's in the value's
-    /// unit, else the only slot in that unit. Explains the problem and returns nil otherwise.
-    func slotForValue(named name: String?, format: ValueFormat?, value: Double) -> Int? {
-        func unit(_ format: ValueFormat) -> String {
+    /// unit, else the only slot in that unit. A currency typed with the value must be the slot's:
+    /// nothing converts between them. Explains the problem and returns nil otherwise.
+    func slotForValue(named name: String?, format: ValueFormat?, currency typed: String? = nil, value: Double) -> Int? {
+        func unit(_ format: ValueFormat, _ currency: Currency?) -> String {
             switch format {
-            case .currency: return "dollars"
+            case .currency: return currency?.plural ?? "money"
             case .temperature: return "°C"
             case .number: return "plain numbers"
             case .percent: return "percent"
             }
+        }
+        /// The currency typed, for messages: "pounds" for "£".
+        let typedCurrency = typed.flatMap(Currency.named)
+        func fits(_ slot: SlotInfo) -> Bool {
+            guard let format, slot.format == format else { return format == nil }
+            return typed.map(slot.currency.answers(to:)) ?? true
         }
         if let name {
             guard let index = slotIndex(named: name) else {
@@ -1071,22 +1193,24 @@ public final class ScenarioStore {
                 return nil
             }
             let slot = slots[index]
-            if let format, format != slot.format {
-                say("\(slot.title) is in \(unit(slot.format)), not \(unit(format)).", isError: true)
+            if format != nil, !fits(slot) {
+                say("\(slot.title) is in \(unit(slot.format, slot.currency)), not \(unit(format!, typedCurrency)).", isError: true)
                 return nil
             }
             return index
         }
         guard let format else { return focusedIndex }
-        if focused.format == format { return focusedIndex }
-        let matches = slots.indices.filter { slots[$0].format == format }
+        if fits(focused) { return focusedIndex }
+        let matches = slots.indices.filter { fits(slots[$0]) }
         if matches.count == 1 { return matches[0] }
         if matches.isEmpty {
-            say("No slot is in \(unit(format)).", isError: true)
+            say("No slot is in \(unit(format, typedCurrency)).", isError: true)
         } else {
             let names = matches.map { slots[$0].title }
-            say("Which slot? \(names.dropLast().joined(separator: ", ")) and \(names.last!) are in \(unit(format)). "
-                + "Try goto \(names[0].lowercased()) \(format.axis(value)), or focus one first.", isError: true)
+            let shared = Set(matches.map { slots[$0].currency })
+            let what = unit(format, shared.count == 1 ? shared.first : nil)
+            say("Which slot? \(names.dropLast().joined(separator: ", ")) and \(names.last!) are in \(what). "
+                + "Try goto \(names[0].lowercased()) \(slots[matches[0]].style.axis(value)), or focus one first.", isError: true)
         }
         return nil
     }
@@ -1097,14 +1221,14 @@ public final class ScenarioStore {
         guard slots.indices.contains(index) else { return }
         focus(index: index)
         let from = max(now, start)
-        say("Looking for \(slots[index].format.full(value)) in \(slots[index].title)…")
+        say("Looking for \(slots[index].style.full(value)) in \(slots[index].title)…")
         enqueue(.find(ScenarioEngine.FindRequest(slot: index, target: value, from: from,
                                                  limit: from.addingTimeInterval(Self.findHorizon))))
     }
 
     private func receive(_ result: ScenarioEngine.FindResult) {
         let slot = slots[result.request.slot]
-        let target = slot.format.full(result.request.target)
+        let target = slot.style.full(result.request.target)
         guard let startValue = result.startValue else {
             say("\(slot.title) has no value to start from yet.", isError: true)
             return
@@ -1196,7 +1320,7 @@ public final class ScenarioStore {
         let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
-            format: focusSlot.format, samples: focusSamples, readings: readings, preview: preview,
+            style: focusSlot.style, samples: focusSamples, readings: readings, preview: preview,
             heldBack: held?.line ?? [], cutoff: held?.cutoff,
             draftDate: dragging ? nil : draftOnFocus?.date,
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
@@ -1230,7 +1354,7 @@ public final class ScenarioStore {
         let focusValue = value(focusedIndex)
         var laneValues: [Int: String] = [:]
         for (index, slot) in slots.enumerated() where index != focusedIndex {
-            laneValues[index] = slot.isPaused ? "Paused" : beforeStart ? "—" : ready ? (value(index).map(slot.format.full) ?? "—") : "…"
+            laneValues[index] = slot.isPaused ? "Paused" : beforeStart ? "—" : ready ? (value(index).map(slot.style.full) ?? "—") : "…"
         }
         if focusSlot.isPaused {
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
@@ -1239,13 +1363,13 @@ public final class ScenarioStore {
         if beforeStart {
             let reading = reading(ofSlotAt: focusedIndex, at: cursor)
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
-                               readoutValue: reading.map(focusSlot.format.full) ?? "—",
+                               readoutValue: reading.map(focusSlot.style.full) ?? "—",
                                readoutNote: reading == nil ? "Before the start" : "Reading",
                                focusValue: reading, laneValues: laneValues)
         }
         let observed = readingSpan(ofSlotAt: focusedIndex).map { cursor >= $0.first && cursor <= $0.last } ?? false
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
-                           readoutValue: ready ? (focusValue.map(focusSlot.format.full) ?? "—") : "…",
+                           readoutValue: ready ? (focusValue.map(focusSlot.style.full) ?? "—") : "…",
                            readoutNote: !ready ? "Computing" : observed ? "Reading" : cursor > now ? "Projection" : "Model",
                            focusValue: focusValue, laneValues: laneValues)
     }
@@ -1273,7 +1397,7 @@ public final class ScenarioStore {
         }
         for rule in configs[index].rules where rule.first <= frame.end {
             let end = min(rule.until ?? frame.end, frame.end)
-            let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
+            let amount = rule.values["amount"].map(money(inSlotAt: index).full) ?? ""
             let sign = rule.kind == "withdraw" ? "−" : "+"
             markers.append(EventMarker(id: rule.id, date: rule.first, endDate: end,
                                        label: "\(sign)\(amount) \(Self.describe(rule.every))", kind: .recurring))
@@ -1312,26 +1436,36 @@ public final class ScenarioStore {
         return low
     }
 
-    /// Like `label(for:)`, with a parameter change in the model's words: "Interest rate → 4%".
+    /// Like `label(for:)`, with amounts in the slot's currency and a parameter change in the model's
+    /// words: "+£500", "Interest rate → 4%".
     func label(for event: Event, inSlotAt index: Int) -> String {
-        guard event.kind == Event.setKind, slots.indices.contains(index) else { return Self.label(for: event) }
+        guard event.kind == Event.setKind, slots.indices.contains(index) else {
+            return Self.label(for: event, currency: money(inSlotAt: index).currency)
+        }
         return event.values.sorted { $0.key < $1.key }.map { name, value in
             guard let parameter = slots[index].parameterValues.first(where: { $0.name == name }) else {
-                return "\(name) → \(ValueFormat.number.axis(value))"
+                return "\(name) → \(ValueStyle.number.axis(value))"
             }
             return "\(parameter.label) → \(parameter.text(value))"
         }.joined(separator: ", ")
     }
 
-    static func label(for event: Event) -> String {
-        let amount = event.values["amount"].map { ValueFormat.currency.full($0) }
+    /// How a slot's deposits and withdrawals are written: in its currency and style. Without the
+    /// slot, the scenario's.
+    func money(inSlotAt index: Int) -> ValueStyle {
+        if slots.indices.contains(index) { return slots[index].money }
+        return ValueStyle(.currency, currency: currency, writing: currency.writing(numberSetting))
+    }
+
+    static func label(for event: Event, currency: Currency) -> String {
+        let amount = event.values["amount"].map(ValueStyle.money(currency).full)
         switch event.kind {
         case "deposit": return "+" + (amount ?? "")
         case "withdraw": return "−" + (amount ?? "")
         case "overpay": return "−" + (amount ?? "") + " overpayment"
         case Event.setKind:
             return event.values.sorted { $0.key < $1.key }
-                .map { "\($0.key) → \(ValueFormat.number.axis($0.value))" }.joined(separator: ", ")
+                .map { "\($0.key) → \(ValueStyle.number.axis($0.value))" }.joined(separator: ", ")
         default: return event.kind
         }
     }
@@ -1350,7 +1484,8 @@ public final class ScenarioStore {
                 .filter { frame.contains($0.time) }
                 .map { SnapshotData.Point(t: $0.time, v: $0.value) }
             return SnapshotData.Slot(name: slot.title, variable: slot.variable, color: slot.colorHex,
-                                     format: slot.format, points: points)
+                                     format: slot.format, currency: slot.format == .currency ? slot.currency.code : nil,
+                                     points: points)
         }
         return SnapshotData(scenario: name, createdAt: Date(), start: state.frame.start, end: state.frame.end,
                             cursor: cursor, now: now, slots: slotData)

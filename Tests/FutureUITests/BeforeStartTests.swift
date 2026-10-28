@@ -91,7 +91,7 @@ struct BeforeStartTests {
         let cursor = store.cursorState()
         // June 2010 is the 126th month from January 2000.
         #expect(cursor.focusValue == 1125)
-        #expect(cursor.readoutValue == ValueFormat.number.full(1125))
+        #expect(cursor.readoutValue == ValueStyle.number.full(1125))
         #expect(cursor.readoutNote == "Reading")
         #expect(cursor.laneValues[1] == "—")
 

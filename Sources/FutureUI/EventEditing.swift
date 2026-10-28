@@ -29,14 +29,14 @@ extension ScenarioStore {
             }
             draft.parameter = entry.key
             let percent = slot.parameterValues.first { $0.name == entry.key }?.quantity == .percent
-            draft.valueText = Self.editableText(entry.value, percent: percent)
+            draft.valueText = Self.editableText(entry.value, percent: percent, numbers: slot.writing.numbers)
         } else {
             guard event.values.count == 1, let amount = event.values["amount"] else {
                 say("The Event tab can't change this \(event.kind) event. Change it in scenario.md.", isError: true)
                 return
             }
             draft.kind = .event(event.kind)
-            draft.amountText = Self.editableText(amount, percent: false)
+            draft.amountText = Self.editableText(amount, percent: false, numbers: slot.writing.numbers)
         }
         // Clicking another marker while editing still goes back to the pane as it was before the first.
         let previous = editingEvent?.previousDraft ?? eventDraft
@@ -56,7 +56,7 @@ extension ScenarioStore {
             stopEditingEvent()
             return false
         }
-        switch eventDraft.build() {
+        switch buildDraft() {
         case .failure(let problem):
             draftError = problem.message
             return false
@@ -78,7 +78,7 @@ extension ScenarioStore {
             case .event(let event):
                 say("Changed \(before) to \(label(for: event, inSlotAt: index)) on \(DateText.monthYear(event.time)) in \(title)")
             case .rule(let rule):
-                let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
+                let amount = rule.values["amount"].map(money(inSlotAt: index).full) ?? ""
                 say("Changed \(before) to a \(EventDraft.title(forKind: rule.kind).lowercased()) of \(amount) "
                     + "\(Self.describe(rule.every)) from \(DateText.monthYear(rule.first)) in \(title)")
             }
@@ -142,14 +142,18 @@ extension ScenarioStore {
         if eventDraft.slotIndex != index { eventDraft.slotIndex = index }
     }
 
-    /// A number as the pane's fields show it, reading back exactly: "6,000", "1234.5", "4.5%".
-    static func editableText(_ value: Double, percent: Bool) -> String {
+    /// A number as the pane's fields show it, in the slot's style, reading back exactly: "6,000",
+    /// "1234.5", "4.5%", or "6.000" and "1234,5" where decimals follow a comma.
+    static func editableText(_ value: Double, percent: Bool, numbers: NumberStyle = .commaPoint) -> String {
         var candidates: [String] = []
         if !percent, value.rounded() == value, abs(value) < ValueFormat.writtenOutLimit {
             candidates.append(ValueFormat.grouped(value))
         }
         candidates.append(FileNumber.text(value, percent: percent))
         candidates.append(FileNumber.text(value))
-        return candidates.first { CommandBarParser.parseAmount($0)?.bitPattern == value.bitPattern } ?? FileNumber.text(value)
+        // Exponents and words ("1e+20", "inf") are written as they are, so they read back.
+        let written = candidates.map { $0.contains("e") || $0.contains("n") ? $0 : numbers.localize($0) }
+        return written.first { CommandBarParser.parseAmount($0, numbers: numbers)?.bitPattern == value.bitPattern }
+            ?? FileNumber.text(value)
     }
 }

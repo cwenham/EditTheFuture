@@ -196,6 +196,21 @@ private struct SlotSettings: View {
                     }
                     .labelsHidden()
                 }
+                if slot.hasMoney {
+                    labelled("Currency") {
+                        Picker("Currency", selection: Binding(get: { slot.ownCurrency?.code ?? "" },
+                                                              set: { store.setCurrency(Currency(code: $0), inSlotAt: index) })) {
+                            Text("Scenario's (\(store.currency.symbol))").tag("")
+                            Divider()
+                            ForEach(ScenarioStore.currencyChoices(including: [slot.currency]), id: \.code) {
+                                Text($0.menuTitle).tag($0.code)
+                            }
+                        }
+                        .labelsHidden()
+                        .help("What this slot's money is in. Its own amounts keep their numbers; money it reads from slots in other currencies is converted.")
+                    }
+                    conversionNote
+                }
                 labelled("Color") {
                     HStack(spacing: 3) {
                         ForEach(SlotPalette.colors, id: \.self) { hex in
@@ -270,6 +285,31 @@ private struct SlotSettings: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
             content()
+        }
+    }
+
+    /// What the slot converts, at which rate, and how fetching the rates is going (docs/UI.md, 5.7).
+    @ViewBuilder
+    private var conversionNote: some View {
+        if let note = store.conversionNote(forSlotAt: index) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                let status = store.rateStatus
+                if status.isFetching {
+                    Text("Fetching exchange rates…").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                } else if let error = status.error {
+                    Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Exchange rates…") { store.openScenarioForm(.edit) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.proposal)
+                    .help("Choose where the scenario's exchange rates come from")
+            }
+            .padding(.leading, 60)
         }
     }
 

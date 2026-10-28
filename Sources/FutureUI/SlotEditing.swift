@@ -309,6 +309,23 @@ extension ScenarioStore {
         applySlotChange(configs.replacing(index, with: config), focus: config.id)
     }
 
+    /// A currency of the slot's own for its money, or nil for the scenario's. Amounts keep their
+    /// numbers: nothing is converted (docs/UI.md, 5.7).
+    public func setCurrency(_ currency: Currency?, inSlotAt index: Int) {
+        guard isSlot(index) else { return }
+        var config = configs[index]
+        config.currency = currency
+        applySlotChange(configs.replacing(index, with: config), focus: config.id)
+    }
+
+    /// The currencies a menu offers: the common ones by name, with `extra` among them when it isn't
+    /// one, such as a code from `scenario.md`.
+    public nonisolated static func currencyChoices(including extra: [Currency] = []) -> [Currency] {
+        var list = Currency.common
+        for currency in extra where !list.contains(currency) { list.append(currency) }
+        return list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     /// A color of the slot's own, or nil for its position's palette color.
     public func setColor(_ hex: String?, inSlotAt index: Int) {
         guard isSlot(index) else { return }

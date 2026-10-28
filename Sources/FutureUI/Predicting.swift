@@ -228,7 +228,7 @@ extension ScenarioStore {
             for name in names {
                 guard let variable = model.descriptor.variable(named: name) else { continue }
                 result[name] = SlotValue(name: name, label: variable.label ?? name, quantity: variable.quantity ?? .number,
-                                         minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
+                                         money: slot.money, minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
                                          value: nil, defaultValue: nil, isChanged: false)
             }
             return result
@@ -312,16 +312,22 @@ extension ScenarioStore {
     }
 
     /// A score to three significant figures, so close ones can be told apart: "2.13%",
-    /// "0.753 °C", "$1,240". Larger amounts are written out as the slot writes them.
-    static func scoreAmount(_ value: Double, isRatio: Bool, format: ValueFormat) -> String {
-        guard value.isFinite else { return format.full(value) }
-        if isRatio { return value < 0.0005 ? "less than 0.1%" : String(format: "%.3g%%", value * 100) }
-        let short = String(format: "%.3g", value)
-        switch format {
-        case .percent: return String(format: "%.3g%%", value * 100)
-        case .temperature: return abs(value) < 1000 ? short + " °C" : format.full(value)
-        case .currency: return abs(value) < 1000 ? "$" + short : format.full(value)
-        case .number: return abs(value) < 1000 ? short : format.full(value)
+    /// "0.753 °C", "£1,240". Larger amounts are written out as the slot writes them.
+    static func scoreAmount(_ value: Double, isRatio: Bool, style: ValueStyle) -> String {
+        guard value.isFinite else { return style.full(value) }
+        if isRatio {
+            let numbers = style.writing.numbers
+            return value < 0.0005 ? "less than " + numbers.localize("0.1") + numbers.percentSign
+                : numbers.localize(String(format: "%.3g", value * 100)) + numbers.percentSign
+        }
+        let numbers = style.writing.numbers
+        let short = numbers.localize(String(format: "%.3g", abs(value)))
+        let sign = value < 0 ? "−" : ""
+        switch style.format {
+        case .percent: return sign + numbers.localize(String(format: "%.3g", abs(value) * 100)) + numbers.percentSign
+        case .temperature: return abs(value) < 1000 ? sign + short + " °C" : style.full(value)
+        case .currency: return abs(value) < 1000 ? style.writing.amount(short, negative: value < 0) : style.full(value)
+        case .number: return abs(value) < 1000 ? sign + short : style.full(value)
         }
     }
 
@@ -476,7 +482,7 @@ extension ScenarioStore {
         }
         let miss = outcome.miss
         let format = miss.variable == slot.variable ? slot.format : Self.format(of: candidate.shown.values.first?.quantity) ?? .number
-        let amount = Self.scoreAmount(miss.typical, isRatio: miss.isRatio, format: format)
+        let amount = Self.scoreAmount(miss.typical, isRatio: miss.isRatio, style: slot.style.with(format))
         return PredictState.Score(typical: miss.typical, text: "off by \(amount)", values: values, fitted: fitted,
                                   cutoff: outcome.cutoff, line: outcome.line, compared: miss.count)
     }

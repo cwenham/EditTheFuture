@@ -8,11 +8,13 @@ public enum CommandBarAction: Equatable, Sendable {
     case moveCursor(Date)
     /// Move the cursor to where a slot's line first reaches `value`. `slot` nil means the slot that
     /// `format` (the value's unit) points to; a value without a unit always names its slot.
-    case findValue(slot: String?, value: Double, format: ValueFormat?)
+    /// `currency` is the currency typed with it, as typed: "£", "$", "euros".
+    case findValue(slot: String?, value: Double, format: ValueFormat?, currency: String? = nil)
     /// A slot by name or by its number (1...8).
     case focus(String)
     /// `kind` is "deposit" for `+amount` and "withdraw" for `-amount`. `at` nil means the cursor.
-    case addEvent(kind: String, amount: Double, at: Date?, repeats: StepRate?)
+    /// `currency` is the currency typed with the amount, as typed.
+    case addEvent(kind: String, amount: Double, at: Date?, repeats: StepRate?, currency: String? = nil)
     case setParameter(name: String, value: Double, at: Date?)
     /// Adds a library model by name, to a slot number (1...8) or the first free one.
     case addModel(String, slot: Int?)
@@ -42,7 +44,7 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
         case .notUnderstood(let text): return "I didn't understand “\(text)”. Try +500 monthly, set rate 4% from 2027-06, goto 2035, goto 25°C or now."
         case .badGoto(let text): return "“\(text)” isn't a date, or a value with its unit or slot. Try goto 2035, goto Jun 2035, goto $1M, goto 25°C or goto savings 50000."
         case .badDate(let text): return "“\(text)” isn't a date I know. Use 2035, 2035-06, 2035-06-15 or Jun 2035."
-        case .badAmount(let text): return "“\(text)” isn't an amount. Use 500, $1,200 or 1.5k."
+        case .badAmount(let text): return "“\(text)” isn't an amount. Use 500, 1,200 or 1.5k."
         }
     }
 }
@@ -62,7 +64,9 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
 ///
 /// Natural-language input goes to a language model instead (DESIGN.md, section 7).
 public enum CommandBarParser {
-    public static func parse(_ input: String) throws -> CommandBarAction {
+    /// - Parameter numbers: how the focused slot writes numbers, so `+1.234,50` reads as 1234.5
+    ///   where decimals follow a comma.
+    public static func parse(_ input: String, numbers: NumberStyle = .commaPoint) throws -> CommandBarAction {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw CommandBarError.empty }
         let lower = text.lowercased()
@@ -91,12 +95,13 @@ public enum CommandBarParser {
             // A date wins, so `goto 2035` stays a year. A value needs a unit (`goto $1M`), or a slot
             // name before it (`goto savings 50000`).
             if let date = parseDate(rest) { return .moveCursor(date) }
-            if let (value, format) = parseValue(rest), let format {
-                return .findValue(slot: nil, value: value, format: format)
+            if let parsed = parseValue(rest, numbers: numbers), let format = parsed.format {
+                return .findValue(slot: nil, value: parsed.value, format: format, currency: parsed.currency)
             }
             for split in 1..<max(words.count, 1) {
-                if let (value, format) = parseValue(words[split...].joined(separator: " ")) {
-                    return .findValue(slot: originalWords[..<split].joined(separator: " "), value: value, format: format)
+                if let parsed = parseValue(words[split...].joined(separator: " "), numbers: numbers) {
+                    return .findValue(slot: originalWords[..<split].joined(separator: " "), value: parsed.value,
+                                      format: parsed.format, currency: parsed.currency)
                 }
             }
             throw CommandBarError.badGoto(originalWords.joined(separator: " "))
@@ -139,7 +144,7 @@ public enum CommandBarParser {
         if words.first == "set", words.count >= 3 {
             let originalWords = text.split(whereSeparator: \.isWhitespace).map(String.init)
             let name = originalWords[1]
-            guard let value = parseAmount(words[2]) else { throw CommandBarError.badAmount(words[2]) }
+            guard let value = parseAmount(words[2], numbers: numbers) else { throw CommandBarError.badAmount(words[2]) }
             let at = try parseWhen(Array(words.dropFirst(3)))
             return .setParameter(name: name, value: value, at: at)
         }
@@ -148,7 +153,14 @@ public enum CommandBarParser {
             var first = words.removeFirst()
             first.removeFirst()
             if first.isEmpty, !words.isEmpty { first = words.removeFirst() }
-            guard let amount = parseAmount(first), amount > 0 else { throw CommandBarError.badAmount(first) }
+            // A currency's code or name can follow the amount: `+500 euros monthly`.
+            if let next = words.first, Currency.split("0" + next)?.rest == "0" {
+                first += next
+                words.removeFirst()
+            }
+            guard let (amount, currency) = parseAmountAndCurrency(first, numbers: numbers), amount > 0 else {
+                throw CommandBarError.badAmount(first)
+            }
             var repeats: StepRate?
             if let rate = words.first.flatMap(frequency) {
                 repeats = rate
@@ -158,7 +170,7 @@ public enum CommandBarParser {
                 words.removeFirst(2)
             }
             let at = try parseWhen(words)
-            return .addEvent(kind: sign == "+" ? "deposit" : "withdraw", amount: amount, at: at, repeats: repeats)
+            return .addEvent(kind: sign == "+" ? "deposit" : "withdraw", amount: amount, at: at, repeats: repeats, currency: currency)
         }
 
         throw CommandBarError.notUnderstood(text)
@@ -186,52 +198,60 @@ public enum CommandBarParser {
         }
     }
 
-    /// `500`, `$1,200`, `1.5k`, `2m`, `4%` (→ 0.04).
-    static func parseAmount(_ word: String) -> Double? {
-        var text = word.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+    /// `500`, `$1,200`, `£1,200`, `1.5k`, `2m`, `4%` (→ 0.04).
+    static func parseAmount(_ word: String, numbers: NumberStyle = .commaPoint) -> Double? {
+        parseAmountAndCurrency(word, numbers: numbers)?.amount
+    }
+
+    /// An amount and the currency typed with it, if any, as typed: `£1,200` is 1200 and "£".
+    static func parseAmountAndCurrency(_ word: String, numbers: NumberStyle = .commaPoint) -> (amount: Double, currency: String?)? {
+        var text = numbers.normalize(word.lowercased())
+        var currency: String?
+        if let (rest, unit) = Currency.split(text) {
+            text = rest
+            currency = unit
+        }
         var multiplier = 1.0
         if text.hasSuffix("%") { multiplier = 0.01; text.removeLast() }
         else if text.hasSuffix("k") { multiplier = 1_000; text.removeLast() }
         else if text.hasSuffix("m") { multiplier = 1_000_000; text.removeLast() }
         guard let value = Double(text), value.isFinite else { return nil }
-        return value * multiplier
+        return (value * multiplier, currency)
     }
 
-    /// A value with an optional unit: `$1.5m`, `-6,000 dollars`, `25°C`, `25 c`, `77°F` (converted to
-    /// °C), `1.2k`, `4%`. The format is the unit's (currency or temperature), or nil for a bare number.
-    static func parseValue(_ text: String) -> (value: Double, format: ValueFormat?)? {
+    /// A value with an optional unit: `$1.5m`, `£6,000`, `-6,000 dollars`, `2k EUR`, `25°C`, `25 c`,
+    /// `77°F` (converted to °C), `1.2k`, `4%`. The format is the unit's (currency or temperature), or
+    /// nil for a bare number. `currency` is the currency as typed: "£", "$", "eur".
+    static func parseValue(_ text: String, numbers: NumberStyle = .commaPoint) -> (value: Double, format: ValueFormat?, currency: String?)? {
         // Only the number has digits: a space may separate it from its unit ("25 °C", "2.5bn dollars"),
         // but not from another number ("3 $250k" is slot 3, then a value).
         let tokens = text.lowercased().split(whereSeparator: \.isWhitespace)
         guard tokens.filter({ $0.contains(where: \.isNumber) }).count == 1 else { return nil }
-        var text = tokens.joined()
-            .replacingOccurrences(of: ",", with: "")
+        var text = numbers.normalize(tokens.joined())
             .replacingOccurrences(of: "−", with: "-")
         var format: ValueFormat?
+        var currency: String?
         var fahrenheit = false
+        // A currency first, so "500 chf" isn't read as °F.
+        if let (rest, unit) = Currency.split(text) {
+            text = rest
+            format = .currency
+            currency = unit
+        }
         // Longest first, so "degreesf" isn't read as "f" after "degrees".
         let temperatureUnits: [(String, Bool)] = [
             ("degreesfahrenheit", true), ("degreescelsius", false), ("fahrenheit", true), ("celsius", false),
             ("degreesf", true), ("degreesc", false), ("degrees", false), ("degf", true), ("degc", false),
             ("deg", false), ("°f", true), ("°c", false), ("℉", true), ("℃", false), ("°", false), ("f", true), ("c", false),
         ]
-        for (unit, isFahrenheit) in temperatureUnits where text.hasSuffix(unit) {
+        for (unit, isFahrenheit) in temperatureUnits where format == nil && text.hasSuffix(unit) {
             text.removeLast(unit.count)
             format = .temperature
             fahrenheit = isFahrenheit
             break
         }
         var multiplier = 1.0
-        if format == nil {
-            for unit in ["dollars", "dollar", "usd"] where text.hasSuffix(unit) {
-                text.removeLast(unit.count)
-                format = .currency
-                break
-            }
-            if text.contains("$") {
-                text = text.replacingOccurrences(of: "$", with: "")
-                format = .currency
-            }
+        if format != .temperature {
             let multipliers: [(String, Double)] = [("bn", 1e9), ("tn", 1e12), ("k", 1e3), ("m", 1e6), ("b", 1e9), ("t", 1e12), ("%", 0.01)]
             for (suffix, value) in multipliers where text.hasSuffix(suffix) {
                 text.removeLast(suffix.count)
@@ -244,7 +264,7 @@ public enum CommandBarParser {
               let number = Double(text), number.isFinite else { return nil }
         let value = fahrenheit ? (number - 32) * 5 / 9 : number * multiplier
         guard value.isFinite else { return nil }
-        return (value, format)
+        return (value, format, currency)
     }
 
     static let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]

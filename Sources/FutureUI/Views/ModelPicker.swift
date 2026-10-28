@@ -164,8 +164,9 @@ struct ModelPicker: View {
     @ViewBuilder
     private var detail: some View {
         if let template = selected {
-            TemplateDetail(template: template, start: store.start, color: color, warning: warning(for: template),
-                           actionTitle: actionTitle, action: choose)
+            TemplateDetail(template: template, start: store.start,
+                           money: changingIndex.map { store.slots[$0].money } ?? store.money(inSlotAt: -1),
+                           color: color, warning: warning(for: template), actionTitle: actionTitle, action: choose)
                 .id(template.id)
         } else {
             Color.clear
@@ -218,6 +219,8 @@ struct KindBadge: View {
 private struct TemplateDetail: View {
     let template: ModelTemplate
     let start: Date
+    /// How its values would be written: in the scenario's currency, or the changed slot's.
+    let money: ValueStyle
     let color: Color
     let warning: String?
     let actionTitle: String
@@ -286,7 +289,7 @@ private struct TemplateDetail: View {
                 HStack {
                     Text(value.label).font(.system(size: 12))
                     Spacer()
-                    Text(value.value.map(value.text) ?? "From formula")
+                    Text(value.value.map { SlotValue.text($0, value.quantity, money: money) } ?? "From formula")
                         .font(.system(size: 12, weight: .medium))
                         .monospacedDigit()
                 }
@@ -347,7 +350,7 @@ struct TemplateFacts {
         let descriptor = model.descriptor
         func value(_ variable: Variable) -> SlotValue {
             SlotValue(name: variable.name, label: variable.label ?? variable.name, quantity: variable.quantity ?? .number,
-                      minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
+                      money: .money(.usd), minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
                       value: model.startingValues[variable.name], defaultValue: model.declaredDefaults[variable.name],
                       isChanged: false)
         }

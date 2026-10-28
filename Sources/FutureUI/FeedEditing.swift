@@ -114,9 +114,10 @@ extension ScenarioStore {
     }
 
     /// Adds a slot of its own for a feed, with a model that follows its readings and holds the
-    /// latest one: the "Hold the latest" model with the feed's step.
+    /// latest one: the "Hold the latest" model with the feed's step. `currency` is the source's,
+    /// when it gives money: the slot keeps it whatever the scenario's is.
     @discardableResult
-    public func addFeedSlot(_ spec: FeedSpec, name: String, format: ValueFormat, step: StepRate,
+    public func addFeedSlot(_ spec: FeedSpec, name: String, format: ValueFormat, currency: Currency? = nil, step: StepRate,
                             atPosition position: Int? = nil) -> Bool {
         guard let position = position ?? freePositions.first, freePositions.contains(position) else {
             say("All \(Self.bankSize) slots are full. Remove one first.", isError: true)
@@ -127,7 +128,7 @@ extension ScenarioStore {
         var config = SlotConfig(position: position, name: uniqueName(formulaName(fromTitle: name) ?? "Data"),
                                 model: Self.dataSeriesName, kind: .formula,
                                 formula: Self.dataSeriesFormula(label: spec.title, format: format, step: step),
-                                variable: "value", format: format)
+                                variable: "value", format: format, currency: format == .currency ? currency : nil)
         config.readings = SlotReadings(sources: [.feed(feed)], parts: [])
         closeFeedSetup()
         applySlotChange(configs + [config], focus: config.id)

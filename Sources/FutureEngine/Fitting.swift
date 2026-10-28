@@ -151,6 +151,9 @@ public struct SlotCopy: Sendable {
     let links: [Link]
     let routes: [RouteLink]
     let upstream: [Recording]
+    /// The slot's currency, and the rates money it reads from other currencies is converted at.
+    let currency: Currency?
+    let rates: ExchangeRates
 
     /// The values the model marks with `fit`, leaving out any that have readings of their own.
     public let markedValues: [String]
@@ -158,7 +161,8 @@ public struct SlotCopy: Sendable {
     public let fittableValues: [String]
 
     init(name: String, model: any AuthoredModel, start: Date, calendar: Calendar, seed: UInt64, authored: [Event],
-         recurring: [RecurringEvent], readings: [Reading], links: [Link], routes: [RouteLink], upstream: [Recording]) {
+         recurring: [RecurringEvent], readings: [Reading], links: [Link], routes: [RouteLink], upstream: [Recording],
+         currency: Currency? = nil, rates: ExchangeRates = .none) {
         self.name = name
         self.model = model
         self.start = start
@@ -170,6 +174,8 @@ public struct SlotCopy: Sendable {
         self.links = links
         self.routes = routes
         self.upstream = upstream
+        self.currency = currency
+        self.rates = rates
         let withReadings = Set(readings.map(\.variable))
         fittableValues = (model.parameterNames + model.startingValueNames).filter { !withReadings.contains($0) }
         markedValues = fittableValues.filter { model.descriptor.variable(named: $0)?.fittable == true }
@@ -207,7 +213,7 @@ public struct SlotCopy: Sendable {
                         authored: authored.filter { applies($0.kind, $0.values) },
                         recurring: recurring.filter { applies($0.kind, $0.values) },
                         readings: readings, links: links.filter { inputs.contains($0.input) },
-                        routes: routes.filter { handled.contains($0.kind) }, upstream: upstream)
+                        routes: routes.filter { handled.contains($0.kind) }, upstream: upstream, currency: currency, rates: rates)
     }
 
     /// Where runs start: at the slot's first reading of a value, on the slot's grid of points,
@@ -278,9 +284,11 @@ extension Scenario {
         for from in needed.keys.sorted() {
             upstream.append(try recording(of: from, variables: needed[from]!, through: end))
         }
+        let currencies = Set(([slot] + needed.keys).compactMap(currency(of:)))
         return SlotCopy(name: slotName, model: model, start: start, calendar: calendar, seed: seed,
                         authored: events(in: slot), recurring: recurringEvents(in: slot), readings: readings,
-                        links: links, routes: routes, upstream: upstream)
+                        links: links, routes: routes, upstream: upstream, currency: currency(of: slot),
+                        rates: exchangeRates.only(currencies))
     }
 
     /// Fits the slot's values to its readings, without changing the scenario. The outcome's values
@@ -302,10 +310,13 @@ extension Scenario {
             guard let index = grid.lastIndex(atOrBefore: event.time) else { continue }
             events[index, default: []].append(GeneratedEvent(kind: event.kind, values: event.values))
         }
+        // Each value keeps its quantity, so money read from it is converted as it was.
         let recorded = ModelDescriptor(name: name(of: slot), stepRate: descriptor.stepRate,
-                                       variables: variables.map { Variable(name: $0, causality: .output) },
+                                       variables: variables.map {
+                                           Variable(name: $0, causality: .output, quantity: descriptor.variable(named: $0)?.quantity)
+                                       },
                                        emits: descriptor.emits)
-        return Recording(name: name(of: slot), descriptor: recorded, rows: rows, events: events)
+        return Recording(name: name(of: slot), descriptor: recorded, rows: rows, events: events, currency: currency(of: slot))
     }
 }
 
@@ -317,6 +328,8 @@ struct Recording: Sendable {
     var rows: [[Double]]
     /// The events it generated, by point.
     var events: [Int: [GeneratedEvent]]
+    /// What its money is in.
+    var currency: Currency?
 }
 
 /// Plays a recording back: the same values and events at the same points. Past its end it holds
@@ -367,9 +380,10 @@ private final class Trial<Model: AuthoredModel> {
         scenario = Scenario(start: runStart, calendar: copy.calendar, seed: copy.seed, origin: copy.start)
         scenario.recordsMisses = true
         for recording in copy.upstream {
-            try scenario.addSlot(recording.name, model: RecordedModel(recording: recording))
+            try scenario.addSlot(recording.name, model: RecordedModel(recording: recording), currency: recording.currency)
         }
-        id = try scenario.addSlot(copy.name, model: model)
+        id = try scenario.addSlot(copy.name, model: model, currency: copy.currency)
+        scenario.setExchangeRates(copy.rates)
         for event in copy.authored { scenario.add(event, to: id) }
         for rule in copy.recurring { scenario.add(rule, to: id) }
         scenario.setReadings(readings, for: id)

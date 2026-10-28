@@ -29,7 +29,7 @@ struct CommandBarTests {
         #expect(try CommandBarParser.parse("+500 monthly from 2027-03")
                 == .addEvent(kind: "deposit", amount: 500, at: utc(2027, 3), repeats: .monthly))
         #expect(try CommandBarParser.parse("-$6,000 on Aug 2028")
-                == .addEvent(kind: "withdraw", amount: 6000, at: utc(2028, 8), repeats: nil))
+                == .addEvent(kind: "withdraw", amount: 6000, at: utc(2028, 8), repeats: nil, currency: "$"))
         #expect(try CommandBarParser.parse("+1.2k every year")
                 == .addEvent(kind: "deposit", amount: 1200, at: nil, repeats: .yearly))
         #expect(try CommandBarParser.parse("+ 250 fortnightly")
@@ -137,19 +137,19 @@ struct GotoValueTests {
         #expect(try parse("goto -5 degrees") == .findValue(slot: nil, value: -5, format: .temperature))
         #expect(try parse("goto 212°F") == .findValue(slot: nil, value: 100, format: .temperature))
         #expect(try parse("goto 50 fahrenheit") == .findValue(slot: nil, value: 10, format: .temperature))
-        #expect(try parse("goto $1M") == .findValue(slot: nil, value: 1_000_000, format: .currency))
-        #expect(try parse("goto $1,250,000") == .findValue(slot: nil, value: 1_250_000, format: .currency))
-        #expect(try parse("goto 2.5bn dollars") == .findValue(slot: nil, value: 2.5e9, format: .currency))
-        #expect(try parse("show −$6k") == .findValue(slot: nil, value: -6_000, format: .currency))
+        #expect(try parse("goto $1M") == .findValue(slot: nil, value: 1_000_000, format: .currency, currency: "$"))
+        #expect(try parse("goto $1,250,000") == .findValue(slot: nil, value: 1_250_000, format: .currency, currency: "$"))
+        #expect(try parse("goto 2.5bn dollars") == .findValue(slot: nil, value: 2.5e9, format: .currency, currency: "dollars"))
+        #expect(try parse("show −$6k") == .findValue(slot: nil, value: -6_000, format: .currency, currency: "$"))
     }
 
     @Test("A slot name before the value picks the slot, with or without a unit")
     func slots() throws {
         #expect(try parse("goto climate 100°C") == .findValue(slot: "climate", value: 100, format: .temperature))
-        #expect(try parse("goto Mortgage $0") == .findValue(slot: "Mortgage", value: 0, format: .currency))
+        #expect(try parse("goto Mortgage $0") == .findValue(slot: "Mortgage", value: 0, format: .currency, currency: "$"))
         #expect(try parse("goto Index fund 1.5m") == .findValue(slot: "Index fund", value: 1_500_000, format: nil))
         #expect(try parse("goto savings 50000") == .findValue(slot: "savings", value: 50_000, format: nil))
-        #expect(try parse("goto 3 $250k") == .findValue(slot: "3", value: 250_000, format: .currency))
+        #expect(try parse("goto 3 $250k") == .findValue(slot: "3", value: 250_000, format: .currency, currency: "$"))
     }
 
     @Test("Dates still win, and a bare number that isn't a date needs a unit or slot")
@@ -166,13 +166,13 @@ struct GotoValueTests {
 struct FormattingTests {
     @Test("Values and axis labels")
     func values() {
-        #expect(ValueFormat.currency.full(41223.4) == "$41,223")
-        #expect(ValueFormat.currency.full(-6000) == "−$6,000")
-        #expect(ValueFormat.currency.axis(250_000) == "$250k")
-        #expect(ValueFormat.currency.axis(1_250_000) == "$1.25M")
-        #expect(ValueFormat.currency.axis(0) == "$0")
-        #expect(ValueFormat.temperature.full(14.25) == "14.2 °C" || ValueFormat.temperature.full(14.25) == "14.3 °C")
-        #expect(ValueFormat.temperature.axis(15) == "15°")
+        #expect(ValueStyle.money(.usd).full(41223.4) == "$41,223")
+        #expect(ValueStyle.money(.usd).full(-6000) == "−$6,000")
+        #expect(ValueStyle.money(.usd).axis(250_000) == "$250k")
+        #expect(ValueStyle.money(.usd).axis(1_250_000) == "$1.25M")
+        #expect(ValueStyle.money(.usd).axis(0) == "$0")
+        #expect(ValueStyle.temperature.full(14.25) == "14.2 °C" || ValueStyle.temperature.full(14.25) == "14.3 °C")
+        #expect(ValueStyle.temperature.axis(15) == "15°")
     }
 
     @Test("Nice ticks cover the data with round steps")
@@ -189,19 +189,19 @@ struct FormattingTests {
     @Test("Numbers too big to write out, infinity and NaN")
     func hugeValues() {
         // Past Int.max (about 9.2e18) labels used to crash when converted to whole numbers.
-        #expect(ValueFormat.currency.axis(2.5e9) == "$2.5B")
-        #expect(ValueFormat.currency.axis(4e12) == "$4T")
-        #expect(ValueFormat.currency.axis(2.5e25) == "$2.5e25")
-        #expect(ValueFormat.currency.axis(-1e300) == "−$1e300")
-        #expect(ValueFormat.number.axis(1e19) == "1e19")
-        #expect(ValueFormat.temperature.axis(-3e20) == "−3e20°")
-        #expect(ValueFormat.currency.full(1.234e18) == "$1.23e18")
-        #expect(ValueFormat.currency.full(-.infinity) == "−$∞")
-        #expect(ValueFormat.number.full(.infinity) == "∞")
-        #expect(ValueFormat.temperature.full(5e30) == "5e30 °C")
-        #expect(ValueFormat.currency.full(.nan) == "—")
-        #expect(ValueFormat.number.axis(.nan) == "—")
-        #expect(ValueFormat.currency.full(999_999_999_999_999) == "$999,999,999,999,999")
+        #expect(ValueStyle.money(.usd).axis(2.5e9) == "$2.5B")
+        #expect(ValueStyle.money(.usd).axis(4e12) == "$4T")
+        #expect(ValueStyle.money(.usd).axis(2.5e25) == "$2.5e25")
+        #expect(ValueStyle.money(.usd).axis(-1e300) == "−$1e300")
+        #expect(ValueStyle.number.axis(1e19) == "1e19")
+        #expect(ValueStyle.temperature.axis(-3e20) == "−3e20°")
+        #expect(ValueStyle.money(.usd).full(1.234e18) == "$1.23e18")
+        #expect(ValueStyle.money(.usd).full(-.infinity) == "−$∞")
+        #expect(ValueStyle.number.full(.infinity) == "∞")
+        #expect(ValueStyle.temperature.full(5e30) == "5e30 °C")
+        #expect(ValueStyle.money(.usd).full(.nan) == "—")
+        #expect(ValueStyle.number.axis(.nan) == "—")
+        #expect(ValueStyle.money(.usd).full(999_999_999_999_999) == "$999,999,999,999,999")
     }
 
     @Test("Nice ticks stay finite and few, whatever the values")
@@ -218,7 +218,7 @@ struct FormattingTests {
             #expect(result.domain.lowerBound < result.domain.upperBound, "\(low)...\(high)")
             #expect((2...101).contains(result.ticks.count), "\(low)...\(high)")
             #expect(Set(result.ticks).count == result.ticks.count, "\(low)...\(high): ticks repeat")
-            for tick in result.ticks { _ = ValueFormat.currency.axis(tick) }
+            for tick in result.ticks { _ = ValueStyle.money(.usd).axis(tick) }
         }
     }
 

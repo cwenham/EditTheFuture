@@ -505,7 +505,8 @@ private struct FeedForm: View {
         case .newSlot(let position):
             let format = ValueFormat(rawValue: preset.format) ?? .number
             let slotName = name == preset.title ? preset.slotName : name
-            store.addFeedSlot(spec, name: slotName, format: format, step: preset.step, atPosition: position)
+            store.addFeedSlot(spec, name: slotName, format: format, currency: preset.currency, step: preset.step,
+                              atPosition: position)
         }
     }
 

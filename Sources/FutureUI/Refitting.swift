@@ -232,9 +232,9 @@ extension ScenarioStore {
     private func missSummary(_ outcome: FitOutcome, slot: SlotInfo) -> String {
         func amount(_ summary: MissSummary) -> String {
             if summary.isRatio {
-                return summary.typical < 0.0005 ? "less than 0.1%" : ValueFormat.percent.full(summary.typical)
+                return summary.typical < 0.0005 ? "less than " + slot.style.with(.percent).full(0.001) : slot.style.with(.percent).full(summary.typical)
             }
-            return (summary.variable == slot.variable ? slot.format : .number).full(summary.typical)
+            return (summary.variable == slot.variable ? slot.style : .number).full(summary.typical)
         }
         let several = outcome.after.count > 1
         var sentences: [String] = []

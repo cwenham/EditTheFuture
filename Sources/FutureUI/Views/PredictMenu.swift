@@ -135,7 +135,7 @@ struct PredictMenu: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(score.text.prefix(1).uppercased() + score.text.dropFirst())
                             .font(.system(size: 14, weight: .medium)).monospacedDigit()
-                        Text("How far its projections missed \(ValueFormat.number.full(Double(score.compared))) readings they "
+                        Text("How far its projections missed \(ValueStyle.number.full(Double(score.compared))) readings they "
                              + "didn't see, made at three cut-offs and the points after them. "
                              + "The dotted line is its projection from \(DateText.monthYear(score.cutoff)).")
                             .font(.system(size: 11)).foregroundStyle(Theme.secondary)

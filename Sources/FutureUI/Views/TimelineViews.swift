@@ -38,7 +38,7 @@ struct TimelineRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: TimelineLayout.gap) {
-                YAxisLabels(ticks: timeline.focus.yTicks, domain: timeline.focus.yDomain, format: timeline.focus.format)
+                YAxisLabels(ticks: timeline.focus.yTicks, domain: timeline.focus.yDomain, style: timeline.focus.style)
                     .frame(width: TimelineLayout.labelWidth, height: focusHeight)
                 FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
@@ -126,14 +126,14 @@ struct TimelineRows: View {
 struct YAxisLabels: View {
     let ticks: [Double]
     let domain: ClosedRange<Double>
-    let format: ValueFormat
+    let style: ValueStyle
 
     var body: some View {
         Canvas { context, size in
             let span = domain.upperBound - domain.lowerBound
             for tick in ticks {
                 let y = size.height * (1 - (tick - domain.lowerBound) / (span == 0 ? 1 : span))
-                let label = context.resolve(Text(format.axis(tick)).font(.system(size: 11)).monospacedDigit()
+                let label = context.resolve(Text(style.axis(tick)).font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(Theme.secondary))
                 // Keep the top and bottom labels inside the canvas instead of half-clipped.
                 let clampedY = min(max(y, 7), size.height - 7)
@@ -141,7 +141,7 @@ struct YAxisLabels: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Values from \(format.axis(domain.lowerBound)) to \(format.axis(domain.upperBound))")
+        .accessibilityLabel("Values from \(style.axis(domain.lowerBound)) to \(style.axis(domain.upperBound))")
     }
 }
 

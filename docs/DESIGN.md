@@ -203,6 +203,42 @@ Paused slots stay in the scenario's list with their events, but the engine doesn
 
 The engine borrows FMI 3.0 and SSP vocabulary (see the glossary) so it can import FMUs (functional mock-up units) later. That would be Mac-only for binary FMUs, because they contain native code. It also keeps the concepts familiar to simulation engineers. The scenario plays the role FMI calls the importer, and the step method is the counterpart of `fmi3DoStep`. Further reading is in section 18.
 
+### 5.11 Currencies and exchange rates
+
+Built in October 2026. The code is `Currency`, `NumberStyle` and `ExchangeRates` in `FutureEngine`, `RateCopy` in `FutureDocument`, the rate sources in `FutureFeeds` (`Rates.swift`), and `Money.swift` and `RateCenter` in `FutureUI`.
+
+**Currencies.** A scenario has a currency (`currency: GBP` in its heading, US dollars when it doesn't say), and a slot can have one of its own (15.2). Formulas and scripts mark money with `as currency`, and it's in the slot's currency. A currency is an ISO 4217 code; about 40 have names, symbols and styles of their own (`Currency.common`), and any other code is written with its code.
+
+**Converting between slots.**
+- When a slot reads a value marked as currency from a slot in another currency, the engine converts it as it's read: the value times the rate from one currency to the other at the reading slot's step (`Scenario.computeNext`). It's the one place values cross between slots, so formulas, Lua and Python all convert the same way, and so do Refit and Predict with, whose slot copies carry the currencies and rates (`SlotCopy`).
+- Nothing else is converted: a slot's own values, events, readings and parameters keep their numbers when its currency changes. Changing a slot from dollars to pounds turns $18,000 into £18,000. Events sent between slots aren't converted either, since the engine can't tell which of their fields are money.
+- `rates: none` turns converting off: money passes between slots as it is.
+- The store works out the same conversions for the views (`ScenarioStore.conversions`): the Slot tab says what's converted and at what rate, and the lane says `← Stocks.value ($→£)`.
+
+**Rates.**
+- `ExchangeRates` holds, for each currency, how many of it one US dollar buys at each time a source gave. Cross rates go through dollars. A rate holds until the next one; before the first, the first is used, and after the last, the last, so projections use the latest rate.
+- The engine computes again only what new rates change: for each conversion, from the first time its two currencies' rates differ (`ExchangeRates.firstDifference`), back to a checkpoint. A new currency for a slot computes again only the slots whose conversion changed.
+- A slot that needs rates the scenario doesn't have yet waits, paused with "Waiting for exchange rates from US dollars to British pounds", and so do the slots that read it. It runs once they arrive, rather than showing numbers that look right and aren't.
+
+**Sources** (`rates:` in the heading):
+- `ecb`, the default: the European Central Bank's reference rates, published each working day, from 4 January 1999, for about 30 currencies, through Frankfurter (`api.frankfurter.dev`), which is free and needs no key. One request fetches every day for several currencies: about 7,100 days in October 2026.
+- `openexchangerates`: the ECB's rates for the past, with the latest from Open Exchange Rates (`openexchangerates.org`) for about 170 currencies. It needs an App ID, saved in the Keychain under `openexchangerates` and sent only to `openexchangerates.org`, over HTTPS, in an `Authorization: Token` header rather than the address. How fresh its rates are depends on the plan (hourly on the free one, every minute on the dearest); the app asks every 10 minutes while the scenario is open, about 4,300 requests a month, which needs a paid plan. A currency the ECB doesn't have (UAE dirhams, say) has only the latest rate, used for every date.
+- `none`: no converting.
+- `etf-feed --rates GBP,EUR [--since 2026-01-01] [--live]` fetches rates without the app.
+
+**Kept with the scenario.** Rates are readings, so they travel with the scenario (15.1): `readings/exchange-rates.csv` holds the daily rates of the currencies the slots convert, and `readings/exchange-rates-live.csv` the latest live ones, as CSV with a `date` column and one per currency, in units per US dollar. The scenario opens with them, so slots that convert run at once, offline too, and their cached results (15.5) can be used. `RateCenter` then fetches what's due: the daily rates every 6 hours, from two weeks before the latest, and a currency the copy doesn't have from 1999; live rates every 10 minutes. After a failure it waits half an hour, and says why in the footer and the Slot tab. Refresh Data Feeds fetches them now.
+
+**Fingerprints.** A slot that converts counts its conversions and the rates of both currencies in its fingerprint (15.5), so its cache is used only with the same rates. Other slots' fingerprints don't change.
+
+**Number styles.**
+- Each currency has the style it's usually written in (`Currency.regional`): separators, its local symbol, and where it goes. `$1,234.56`, `1.234,56 €`, `£1,234.56`, `1 234,56 kr`, `CHF 1’234.56`, `R$ 1.234,56`, `₹12,34,567`, `¥1,235`.
+- Each slot is written in its currency's style: money, plain numbers, percents (`4,5 %`) and temperatures, in readouts, axes, lanes, the Slot tab, events and messages.
+- Two currencies in a scenario that share a local symbol, such as US and Canadian dollars (`$`) or Swedish and Norwegian kronor (`kr`), use the symbols that tell them apart instead: `$` and `CA$`, `SEK` and `NOK`.
+- `numbers:` in the heading chooses one style for every slot: `comma-point` (1,234.56), `point-comma` (1.234,56), `space-comma` (1 234,56), `apostrophe-point` (1’234.56) or `indian` (12,34,567.89). Symbols are then the ones that tell currencies apart, before the number where decimals follow a point and after it where they follow a comma.
+- Typed numbers are read in the slot's style: `1.234,5` is 1234.5 where decimals follow a comma. There, a point is between thousands only when thousands follow it (`1.234`, `12.500`), so `1.5` and `0.045` still read as typed. Spaces and apostrophes between thousands are always read.
+- Axes keep k, M, B and T for thousands, millions, billions and trillions in every style: `1,25M €`.
+- `scenario.md`, the cache and copied tables keep plain numbers, with a point before decimals, so files read the same everywhere.
+
 ## 6. Where models come from (plug-ins)
 
 ### 6.1 One protocol, many hosts
@@ -268,7 +304,7 @@ init balance = 18000 label "Balance" as currency
 | `range low..high` | The slider's range. Values outside it can still be typed. |
 | `by step` | The slider's step. |
 | `label "text"` | The name shown in the Slot tab. Defaults to the variable's name. |
-| `as currency` | How the value is written: `number`, `percent`, `currency` or `temperature`. A value written with `%` is a percent unless it says otherwise. |
+| `as currency` | How the value is written: `number`, `percent`, `currency` or `temperature`. A value written with `%` is a percent unless it says otherwise. `currency` (or `money`) is money in the slot's currency, which the slot or scenario chooses (15.2), so the same model works in pounds, euros or dollars. |
 | `fit` | Refit may change it to match the slot's readings, within its `range` (8.4). Only on `param` and `init` lines. |
 
 They become the variable's `label`, `minimum`, `maximum`, `increment`, `quantity` and `fittable` in the model's descriptor, like FMI's `min`, `max` and `description`. Plug-ins describe their parameters the same way. Lines that define a value can take `label` and `as` too, which name what the graph shows: `temp[t] = … label "Temperature" as temperature`.
@@ -401,7 +437,7 @@ def deposit(s, e, t):
 | `on("kind", fn)` | Runs `fn(s, e, t)` for each event of that kind in the step. `"Slot.Kind"` or `"Slot.Kind[t-1]"` listens to another slot's events. |
 | `start(s, t)` | Optional. Runs once at the start, after the starting values are set. |
 
-The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). Parameters and starting values also take `fit` (8.4): `{ fit = true }` in Lua, `fit=True` in Python. A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
+The options are the formula language's: `range`, `by`, `label` and `as` (`as_` in Python, where `as` is a keyword). As in formulas, `"currency"` is money in the slot's currency (15.2). Parameters and starting values also take `fit` (8.4): `{ fit = true }` in Lua, `fit=True` in Python. A value written as a string ending in `%`, like `"4.5%"`, is divided by 100 and shown as a percent.
 
 What a step sees:
 - **`s`** holds the parameters, state variables and outputs, which it can change, and the inputs, which it can only read. A name that isn't declared is an error, so typos don't go unnoticed.
@@ -836,6 +872,7 @@ Home & money.etf/
   readings/         imported history as CSV, and copies of readings from databases and feeds (15.3, 15.4, 15.8)
     sp500.csv
     Rates-fred-DGS10.csv
+    exchange-rates.csv  exchange rates the slots convert money at (5.11)
   cache/            values the models computed; safe to delete (15.5)
     Market.etfcache
 ```
@@ -920,8 +957,8 @@ select ts as date, temp_c as temp from readings where sensor = 'kitchen'
 
 | Part | How it's written |
 |---|---|
-| The scenario | The first heading: the scenario's name, then its settings in brackets. `start` is required. `seed` defaults to the engine's own. |
-| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8); later banks aren't built yet. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it; it's left out for a model of the slot's own. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`) and `color` (hex). Without `shows` the graph draws the model's first output, and without `as` it uses that variable's own `as`. |
+| The scenario | The first heading: the scenario's name, then its settings in brackets. `start` is required. `seed` defaults to the engine's own. `currency` (`GBP`, `EUR`) is what its money is in, and defaults to US dollars. `rates` (`ecb`, `openexchangerates` or `none`) is where exchange rates come from, and defaults to `ecb`; `numbers` (`point-comma` and others) is how numbers are written, and defaults to each currency's own (5.11). |
+| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8); later banks aren't built yet. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it; it's left out for a model of the slot's own. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`), `currency` (a currency of the slot's own) and `color` (hex). Without `shows` the graph draws the model's first output, without `as` it uses that variable's own `as`, and without `currency` it uses the scenario's. |
 | The model | The first fenced block in a model's language in the slot's section (not under Readings), exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). A part such as Values ends where the model's block starts. |
 | The slot's own values | `### Values`: one `- name: value` line for each parameter or starting value that differs from the model's default (6.2). |
 | Events | `### Events`: one line per event or recurring rule. |
@@ -940,8 +977,15 @@ Branches (5.7) aren't in the format yet. One possibility is a section that lists
 - The app writes events in date order, but any order reads.
 - Generated events aren't written. They're results, kept in the cache (15.5).
 
+**Currencies:**
+- `# Budget [start: 2024-01-01, currency: GBP]` puts the scenario's money in pounds. `## 3. Oil [Hold the latest, currency: USD]` keeps one slot in US dollars whatever the scenario's currency.
+- A currency is an ISO 4217 code, in any case. A symbol or name that means one currency reads too (`£`, `euros`), but the app writes codes.
+- A slot's currency says how its money is written: its own `18000` is £18,000 in pounds and €18,000 in euros, so changing it relabels its amounts. Money it reads from a slot in another currency is converted at exchange rates (5.11).
+- Without `currency` a scenario is in US dollars, which is what every scenario meant before currencies existed. So the app writes `currency` only when it's been chosen, or the file had it.
+- A currency that can't be read is reported, kept as written, and US dollars (or the scenario's, for a slot) are used.
+
 **Numbers:**
-- A value is written in its quantity: `4.5%` for a percent, a plain number otherwise. Values are read with the command bar's rules, so `1.5k` and `$1200` work too.
+- A value is written in its quantity: `4.5%` for a percent, a plain number otherwise. Values are read with the command bar's rules, so `1.5k`, `$1200`, `£1200` and `1200 EUR` work too.
 - The app writes each number so that it reads back as exactly the same value. When the short form doesn't (0.1 + 0.2), it writes every digit needed: `0.30000000000000004`.
 - `inf`, `-inf` and `nan` are allowed, since values can be extreme.
 
@@ -1094,7 +1138,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 
 **Sign-ins** are kept in the Keychain as generic passwords (service `com.editthefuture.feeds`, one item per sign-in, the credential as JSON). A built-in source's sign-in is named after the source (`fred`); a feed at a web address uses its host. Each is tied to its hosts (13.3). Checking whether one is saved reads only its attributes, which never asks the user. The sandbox (when the app has one) needs the outgoing network entitlement.
 
-**A slot of its own.** A feed can be added as a new slot with the "Hold the latest" model (once called "Data series"): `value[t] = value[t-1]`, at the feed's own step. Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does. Predict with (8.4) offers other models for the slot, such as Steady growth or Trend line, fitted to its readings and scored on them.
+**A slot of its own.** A feed can be added as a new slot with the "Hold the latest" model (once called "Data series"): `value[t] = value[t-1]`, at the feed's own step. A ready-made feed of money says its currency (`FeedPreset.currency`; all of today's are US dollars), and its slot gets it as its own, so oil stays in dollars in a scenario in pounds, and slots that read it convert it (5.11). Its readings replace the value, so the line follows them through the past and holds the latest one after. The value is 0 until the first reading, when the feed starts after the scenario does. Predict with (8.4) offers other models for the slot, such as Steady growth or Trend line, fitted to its readings and scored on them.
 
 **Running a feed without the app:** `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01` prints its readings as CSV, using the Keychain's sign-ins; `--key KEY` uses a key just once. `etf-feed treasury10` runs a ready-made feed, `--list` lists them, and `--check` fetches the last 120 days of each one that needs no key.
 

@@ -4,7 +4,7 @@ import FutureEngine
 /// Numbers as a saved scenario writes them (docs/DESIGN.md, 15.2): exact, so they read back as the
 /// same value, with `inf`, `-inf` and `nan` allowed.
 public enum FileNumber {
-    /// Reads `6000`, `4.5%`, `-12.5`, `1.5k`, `$1200`, `1e+20`, `inf`, `nan`. Thousands separators
+    /// Reads `6000`, `4.5%`, `-12.5`, `1.5k`, `$1200`, `£1200`, `1200 EUR`, `1e+20`, `inf`, `nan`. Thousands separators
     /// are allowed only where `commas` says so (not inside brackets, where commas separate settings).
     public static func parse(_ text: String, commas: Bool = true) -> Double? {
         var text = text.trimmingCharacters(in: .whitespaces).lowercased()
@@ -16,7 +16,7 @@ public enum FileNumber {
         default: break
         }
         if commas { text = text.replacingOccurrences(of: ",", with: "") }
-        text = text.replacingOccurrences(of: "$", with: "")
+        if let (rest, _) = Currency.split(text.contains(" ") ? text.replacingOccurrences(of: " ", with: "") : text) { text = rest }
         var multiplier = 1.0
         for (suffix, value) in [("°c", 1.0), ("°", 1), ("%", 0.01), ("bn", 1e9), ("tn", 1e12), ("k", 1e3), ("m", 1e6),
                                 ("b", 1e9), ("t", 1e12)] where text.hasSuffix(suffix) {

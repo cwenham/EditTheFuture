@@ -16,6 +16,8 @@ public final class ScenarioDocument {
     /// Fetches the scenario's feeds into `readings/` (docs/DESIGN.md, 15.8). A new one takes over
     /// when the folder moves.
     public private(set) var feeds: FeedCenter
+    /// Fetches the exchange rates its slots convert money at into `readings/` (docs/DESIGN.md, 5.11).
+    public private(set) var rates: RateCenter
     /// Called after the folder moved to follow the scenario's new name.
     public var onMove: ((ScenarioPackage) -> Void)?
 
@@ -56,6 +58,7 @@ public final class ScenarioDocument {
             document.isWatching = true
             document.startWatching()
             document.feeds.start()
+            document.rates.start()
         }
         return document
     }
@@ -70,12 +73,17 @@ public final class ScenarioDocument {
         self.store = store
         self.parsed = parsed
         feeds = FeedCenter(store: store, folder: package.url)
+        rates = RateCenter(store: store, folder: package.url)
         lastSeen = Self.stamp(package)
         store.onScenarioChange = { [weak self] in
             self?.scheduleSave()
             self?.feeds.sync()
+            self?.rates.sync()
         }
-        store.onRefreshFeeds = { [weak self] slot in self?.feeds.refresh(slot: slot) }
+        store.onRefreshFeeds = { [weak self] slot in
+            self?.feeds.refresh(slot: slot)
+            if slot == nil { self?.rates.refresh() }
+        }
     }
 
     struct Loaded: Sendable {
@@ -93,11 +101,15 @@ public final class ScenarioDocument {
             readings[slot.name] = ReadingLoader.load(slot.readings, slot: slot.name, folder: package.url, variable: slot.shows)
         }
         try? package.write(copies: readings.values.reduce(into: [:]) { $0.merge($1.copies) { $1 } })
-        let definition = ScenarioDefinition(file: parsed.file, loaded: readings)
+        // The rates kept with the scenario, so slots that convert money run straight away (docs/DESIGN.md, 5.11).
+        let rates = parsed.file.rates == ExchangeRateSource.none ? .none : RateCenter.readCopies(in: package.url)
+        let definition = ScenarioDefinition(file: parsed.file, loaded: readings, exchangeRates: rates)
 
         var problems = parsed.problems.map(\.description) + readings.values.flatMap(\.problems)
         let configs = ScenarioStore.configs(from: definition)
-        let assembly = ScenarioStore.assemble(configs)
+        let assembly = ScenarioStore.assemble(configs, money: ScenarioMoney(
+            currency: definition.currency ?? .usd, numbers: definition.numbers,
+            converts: definition.rates != ExchangeRateSource.none, rates: rates))
         for (index, config) in configs.enumerated() {
             guard let descriptor = assembly.descriptors[index] else { continue }
             let names = Set(descriptor.variables.map(\.name))
@@ -113,7 +125,8 @@ public final class ScenarioDocument {
         let cached = cache ? package.cachedSlots() : [:]
         if !cached.isEmpty {
             let fingerprints = ScenarioStore.fingerprints(configs, descriptors: assembly.descriptors, start: definition.start,
-                                                          seed: definition.seed, libraries: ScriptLibraryDigest.compute())
+                                                          seed: definition.seed, libraries: ScriptLibraryDigest.compute(),
+                                                          conversions: assembly.conversions, rates: rates)
             for (index, config) in configs.enumerated() {
                 guard let fingerprint = fingerprints[index], let url = cached[config.name],
                       let history = try? SlotCache.history(at: url, fingerprint: fingerprint) else { continue }
@@ -209,6 +222,11 @@ public final class ScenarioDocument {
         feeds = FeedCenter(store: store, folder: target.url)
         feeds.now = old.now
         if isWatching { feeds.start() }
+        let oldRates = rates
+        oldRates.close()
+        rates = RateCenter(store: store, folder: target.url)
+        rates.now = oldRates.now
+        if isWatching { rates.start() }
         onMove?(target)
     }
 
@@ -280,6 +298,7 @@ public final class ScenarioDocument {
         timer?.invalidate()
         timer = nil
         feeds.close()
+        rates.close()
         store.onScenarioChange = nil
         store.onRefreshFeeds = nil
         await saveResults()
@@ -345,8 +364,8 @@ public enum ScenarioLibrary {
     }
 
     /// The scenario to open at launch: the one opened last if it's still there, else the first in
-    /// the folder, else a new copy of the built-in "Home & money".
-    public static func initial(lastOpened: URL?, in folder: URL = folder) throws -> ScenarioPackage {
+    /// the folder, else a new copy of the built-in "Home & money", in `currency`: this Mac's own.
+    public static func initial(lastOpened: URL?, in folder: URL = folder, currency: Currency = .local) throws -> ScenarioPackage {
         if let lastOpened, FileManager.default.fileExists(atPath: ScenarioPackage(url: lastOpened).scenarioURL.path) {
             return ScenarioPackage(url: lastOpened)
         }
@@ -355,7 +374,9 @@ public enum ScenarioLibrary {
         }
         let package = ScenarioPackage(url: folder.appendingPathComponent(ScenarioDefinition.homeAndMoney.name)
             .appendingPathExtension(ScenarioPackage.fileExtension))
-        try ScenarioDocument.create(.homeAndMoney, at: package)
+        var definition = ScenarioDefinition.homeAndMoney
+        definition.currency = currency
+        try ScenarioDocument.create(definition, at: package)
         return package
     }
 }

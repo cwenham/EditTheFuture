@@ -1,59 +1,100 @@
 import Foundation
 import FutureEngine
 
-/// How a slot's values are shown.
+/// How a slot's values are shown: the kind of value, as the Slot tab's Format menu and
+/// `scenario.md`'s `as` say it. Money's currency comes with it in a `ValueStyle`.
 public enum ValueFormat: String, Sendable, Codable, Hashable {
     case currency
     case temperature
     case number
     /// A fraction shown as a percent: 0.045 is "4.5%".
     case percent
+}
 
-    /// Full value for readouts and lanes, e.g. "$41,223" or "14.2 °C". Values too big to write
-    /// out are shown as "$1.23e18"; values that overflowed as "∞".
+/// How values are written: the format, the currency for money, and the style: separators, and
+/// the symbol and where it goes (docs/UI.md, 5.7).
+public struct ValueStyle: Hashable, Sendable {
+    public var format: ValueFormat
+    /// What money is written in. Only `currency` uses it.
+    public var currency: Currency
+    /// How numbers and amounts are written: the currency's own style unless the scenario chose one.
+    public var writing: MoneyWriting
+
+    public init(_ format: ValueFormat, currency: Currency, writing: MoneyWriting? = nil) {
+        self.format = format
+        self.currency = currency
+        self.writing = writing ?? currency.regional
+    }
+
+    /// Money in a currency's own style: "£41,223", "41.223 €".
+    public static func money(_ currency: Currency) -> ValueStyle { ValueStyle(.currency, currency: currency) }
+    public static let number = ValueStyle(.number, currency: .usd)
+    public static let percent = ValueStyle(.percent, currency: .usd)
+    public static let temperature = ValueStyle(.temperature, currency: .usd)
+
+    /// The same style for another kind of value.
+    public func with(_ format: ValueFormat) -> ValueStyle {
+        var copy = self
+        copy.format = format
+        return copy
+    }
+
+    var numbers: NumberStyle { writing.numbers }
+
+    /// Full value for readouts and lanes, e.g. "$41,223", "41.223 €" or "14.2 °C". Values too big
+    /// to write out are shown as "$1.23e18"; values that overflowed as "∞".
     public func full(_ value: Double) -> String {
         if value.isNaN { return "—" }
         let sign = value < 0 ? "−" : ""
         let magnitude = abs(value)
-        switch self {
+        let numbers = self.numbers
+        switch format {
         case .currency:
-            guard magnitude < Self.writtenOutLimit else { return sign + "$" + Self.scientific(magnitude) }
-            return sign + "$" + Self.grouped(magnitude.rounded())
+            let number = magnitude < ValueFormat.writtenOutLimit ? ValueFormat.grouped(magnitude.rounded())
+                : ValueFormat.scientific(magnitude)
+            return writing.amount(numbers.localize(number), negative: value < 0)
         case .temperature:
-            guard magnitude < Self.writtenOutLimit else { return sign + Self.scientific(magnitude) + " °C" }
-            return String(format: "%.1f °C", value)
+            guard magnitude < ValueFormat.writtenOutLimit else { return sign + numbers.localize(ValueFormat.scientific(magnitude)) + " °C" }
+            return numbers.localize(String(format: "%.1f", value)) + " °C"
         case .number:
-            guard magnitude < Self.writtenOutLimit else { return sign + Self.scientific(magnitude) }
-            return magnitude >= 100 ? Self.grouped(value.rounded()) : String(format: "%.2f", value)
+            guard magnitude < ValueFormat.writtenOutLimit else { return sign + numbers.localize(ValueFormat.scientific(magnitude)) }
+            return numbers.localize(magnitude >= 100 ? ValueFormat.grouped(value.rounded()) : String(format: "%.2f", value))
         case .percent:
             let percent = magnitude * 100
-            guard percent < Self.writtenOutLimit else { return sign + Self.scientific(percent) + "%" }
-            return sign + (percent >= 100 ? Self.grouped(percent.rounded()) : String(format: "%.1f", percent)) + "%"
+            guard percent < ValueFormat.writtenOutLimit else {
+                return sign + numbers.localize(ValueFormat.scientific(percent)) + numbers.percentSign
+            }
+            let number = percent >= 100 ? ValueFormat.grouped(percent.rounded()) : String(format: "%.1f", percent)
+            return sign + numbers.localize(number) + numbers.percentSign
         }
     }
 
-    /// Short value for axes, e.g. "$100k", "$1.25M", "$3B", "15°", "$2.5e18".
+    /// Short value for axes, e.g. "$100k", "1,25M €", "£3B", "15°", "$2.5e18".
     public func axis(_ value: Double) -> String {
-        switch self {
+        let numbers = self.numbers
+        switch format {
         case .currency:
-            let sign = value < 0 ? "−" : ""
             let magnitude = abs(value)
-            if magnitude == 0 { return "$0" }
-            if magnitude >= Self.writtenOutLimit { return sign + "$" + Self.trimmed(magnitude) }
-            if magnitude >= 1e12 { return sign + "$" + Self.trimmed(magnitude / 1e12) + "T" }
-            if magnitude >= 1e9 { return sign + "$" + Self.trimmed(magnitude / 1e9) + "B" }
-            if magnitude >= 1e6 { return sign + "$" + Self.trimmed(magnitude / 1e6) + "M" }
-            if magnitude >= 1e3 { return sign + "$" + Self.trimmed(magnitude / 1e3) + "k" }
-            return sign + "$" + Self.trimmed(magnitude)
+            let number: String
+            if magnitude == 0 { number = "0" }
+            else if magnitude >= ValueFormat.writtenOutLimit { number = ValueFormat.trimmed(magnitude) }
+            else if magnitude >= 1e12 { number = ValueFormat.trimmed(magnitude / 1e12) + "T" }
+            else if magnitude >= 1e9 { number = ValueFormat.trimmed(magnitude / 1e9) + "B" }
+            else if magnitude >= 1e6 { number = ValueFormat.trimmed(magnitude / 1e6) + "M" }
+            else if magnitude >= 1e3 { number = ValueFormat.trimmed(magnitude / 1e3) + "k" }
+            else { number = ValueFormat.trimmed(magnitude) }
+            return writing.amount(numbers.localize(number), negative: value < 0 && magnitude > 0)
         case .temperature:
-            return Self.trimmed(value) + "°"
+            return numbers.localize(ValueFormat.trimmed(value)) + "°"
         case .number:
-            return Self.trimmed(value)
+            return numbers.localize(ValueFormat.trimmed(value))
         case .percent:
-            return Self.trimmed(value * 100) + "%"
+            return numbers.localize(ValueFormat.trimmed(value * 100)) + numbers.percentSign
         }
     }
+}
 
+extension ValueFormat {
     /// "41223" → "41,223". Written out by hand: creating a NumberFormatter per label was a
     /// measurable part of each frame.
     static func grouped(_ value: Double) -> String {

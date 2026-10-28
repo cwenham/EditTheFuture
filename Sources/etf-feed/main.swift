@@ -9,6 +9,8 @@ import FutureFeeds
 //   swift run etf-feed treasury10 --since 2026-09-01       a ready-made feed, by its id
 //   swift run etf-feed --list                               the ready-made feeds
 //   swift run etf-feed --check                              fetches the last 120 days of each one that needs no key
+//   swift run etf-feed --rates GBP,EUR --since 2026-10-01   exchange rates, units per US dollar (docs/DESIGN.md, 5.11)
+//   swift run etf-feed --rates GBP,EUR --live               the latest from Open Exchange Rates (needs its App ID)
 //
 // Sign-ins come from the Keychain, as the app saves them. --key KEY uses a key just this once.
 
@@ -16,6 +18,7 @@ let usage = """
     Usage: etf-feed <feed line or ready-made feed> [--since YYYY-MM-DD] [--key KEY]
            etf-feed --list
            etf-feed --check
+           etf-feed --rates GBP,EUR [--since YYYY-MM-DD] [--live] [--key KEY]
     """
 
 var arguments = Array(CommandLine.arguments.dropFirst())
@@ -39,6 +42,29 @@ if let text = option("--since") {
     since = date
 }
 let key = option("--key")
+
+if let codes = option("--rates") {
+    var currencies: [Currency] = []
+    for code in codes.split(separator: ",") {
+        guard let currency = Currency(code: String(code)) else { fail("“\(code)” isn't a currency code.") }
+        currencies.append(currency)
+    }
+    let live = arguments.contains("--live")
+    let provider: any RateProvider = live ? RateProviders.openExchangeRates : RateProviders.ecb
+    let store: any CredentialStore = key.map {
+        MemoryCredentialStore([provider.credentialName: FeedCredential(kind: .key, secret: $0, hosts: provider.hosts)])
+    } ?? KeychainCredentialStore()
+    do {
+        let rates = try await RateFetcher(credentials: store).fetch(provider, currencies: currencies, since: since)
+        for currency in currencies where !rates.covers(currency) {
+            FileHandle.standardError.write(Data("\(provider.name) has no rates for \(currency.code).\n".utf8))
+        }
+        print(RateCopy.text(rates), terminator: "")
+    } catch {
+        fail("\(error)")
+    }
+    exit(0)
+}
 
 if arguments == ["--list"] {
     for category in FeedPreset.Category.allCases {

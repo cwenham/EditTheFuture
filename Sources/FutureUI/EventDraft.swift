@@ -51,20 +51,25 @@ public struct EventDraft: Equatable, Sendable {
         kind.prefix(1).uppercased() + kind.dropFirst()
     }
 
-    /// What to add to the scenario, or why the draft isn't ready.
-    func build() -> Result<Built, DraftProblem> {
+    /// What to add to the scenario, or why the draft isn't ready. `currency` is the slot's: an
+    /// amount typed in another one isn't taken, since nothing converts it.
+    func build(money: ValueStyle) -> Result<Built, DraftProblem> {
+        let numbers = money.writing.numbers, currency = money.currency
         switch kind {
         case .event(let name):
-            guard let amount = CommandBarParser.parseAmount(amountText.trimmingCharacters(in: .whitespaces)), amount > 0 else {
+            guard let (amount, typed) = CommandBarParser.parseAmountAndCurrency(amountText.trimmingCharacters(in: .whitespaces),
+                                                                                numbers: numbers),
+                  amount > 0 else {
                 return .failure(amountText.isEmpty ? .missingAmount : .badAmount(amountText))
             }
+            if let typed, !currency.answers(to: typed) { return .failure(.otherCurrency(money)) }
             if let rate = repeats.rate {
                 return .success(.rule(RecurringEvent(kind: name, values: ["amount": amount], first: date, every: rate)))
             }
             return .success(.event(Event(time: date, kind: name, values: ["amount": amount])))
         case .setParameter:
             guard !parameter.isEmpty else { return .failure(.missingParameter) }
-            guard let value = CommandBarParser.parseAmount(valueText.trimmingCharacters(in: .whitespaces)) else {
+            guard let value = CommandBarParser.parseAmount(valueText.trimmingCharacters(in: .whitespaces), numbers: numbers) else {
                 return .failure(valueText.isEmpty ? .missingValue : .badAmount(valueText))
             }
             return .success(.event(Event.set([parameter: value], at: date)))
@@ -79,13 +84,17 @@ public struct EventDraft: Equatable, Sendable {
     enum DraftProblem: Error, Equatable {
         case missingAmount, missingValue, missingParameter
         case badAmount(String)
+        /// The amount was typed in a currency the slot isn't in.
+        case otherCurrency(ValueStyle)
 
         var message: String {
             switch self {
             case .missingAmount: return "Enter an amount, e.g. 500 or 1.2k"
             case .missingValue: return "Enter a value, e.g. 4% or 650"
             case .missingParameter: return "Choose a parameter"
-            case .badAmount(let text): return "“\(text)” isn't a number. Use 500, $1,200, 1.5k or 4%"
+            case .badAmount(let text): return "“\(text)” isn't a number. Use 500, 1,200, 1.5k or 4%"
+            case .otherCurrency(let money):
+                return "This slot is in \(money.currency.plural). Type the amount in \(money.writing.symbol), or without a currency."
             }
         }
     }
@@ -131,8 +140,14 @@ extension ScenarioStore {
 
     /// Whether the draft has everything it needs to be added (and previewed).
     public var draftIsComplete: Bool {
-        if case .success = eventDraft.build() { return true }
+        if case .success = buildDraft() { return true }
         return false
+    }
+
+    /// The draft built for its slot, in the slot's currency.
+    func buildDraft(_ draft: EventDraft? = nil) -> Result<EventDraft.Built, EventDraft.DraftProblem> {
+        let draft = draft ?? eventDraft
+        return draft.build(money: money(inSlotAt: draft.slotIndex))
     }
 
     /// The draft parameter's value at the draft's date, from the latest results, e.g. 0.045.
@@ -187,7 +202,7 @@ extension ScenarioStore {
     public func commitEvent() -> Bool {
         if editingEvent != nil { return saveEditedEvent() }
         let draft = eventDraft
-        switch draft.build() {
+        switch buildDraft(draft) {
         case .failure(let problem):
             draftError = problem.message
             return false
@@ -200,7 +215,7 @@ extension ScenarioStore {
                 say("Added \(label(for: event, inSlotAt: draft.slotIndex)) on \(DateText.monthYear(event.time)) to \(slot.title)")
             case .rule(let rule):
                 add(rule, toSlotAt: draft.slotIndex)
-                let amount = rule.values["amount"].map { ValueFormat.currency.full($0) } ?? ""
+                let amount = rule.values["amount"].map(money(inSlotAt: draft.slotIndex).full) ?? ""
                 say("Added \(EventDraft.title(forKind: rule.kind).lowercased()) of \(amount) \(Self.describe(rule.every)) from \(DateText.monthYear(rule.first)) to \(slot.title)")
             }
             return true
@@ -211,7 +226,7 @@ extension ScenarioStore {
     /// screen past the right edge so scrolling only asks again when it goes further.
     func updateDraftPreview() {
         previewSequence += 1
-        guard case .success(let built) = eventDraft.build() else {
+        guard case .success(let built) = buildDraft() else {
             if !draftPreview.isEmpty { draftPreview = [] }
             previewThrough = .distantPast
             return
@@ -254,7 +269,7 @@ extension ScenarioStore {
             let difference = after - before
             if abs(difference) < 0.005 { return "No change" }
             let sign = difference > 0 ? "+" : "−"
-            return sign + slot.format.full(abs(difference)).replacingOccurrences(of: "−", with: "")
+            return sign + slot.style.full(abs(difference)).replacingOccurrences(of: "−", with: "")
         }
         return EventPreviewState(cursorDate: DateText.monthYear(cursor), atCursor: effect(at: cursor),
                                  edgeDate: DateText.monthYear(frame.end), atEdge: effect(at: frame.end))

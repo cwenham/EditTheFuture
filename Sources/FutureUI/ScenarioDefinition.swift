@@ -15,6 +15,8 @@ public struct SlotSpec: Sendable {
     /// Hex color, e.g. "#5AA9FF". nil uses the slot palette's color for its position.
     public var color: String?
     public var format: ValueFormat
+    /// A currency of the slot's own, or nil for the scenario's.
+    public var currency: Currency?
     /// 0-based position in the bank (slot 1 is 0). nil takes the first free position.
     public var position: Int?
     /// The slot's own parameter and starting values, by name, in place of the formula's defaults.
@@ -29,8 +31,9 @@ public struct SlotSpec: Sendable {
     var formatInFile = false
 
     public init(name: String, model: String = "Custom formula", kind: ModelKind = .formula, formula: String, variable: String,
-                color: String? = nil, format: ValueFormat, position: Int? = nil, values: [String: Double] = [:],
-                events: [Event] = [], rules: [RecurringEvent] = [], readings: SlotReadings = .none, problem: String? = nil) {
+                color: String? = nil, format: ValueFormat, currency: Currency? = nil, position: Int? = nil,
+                values: [String: Double] = [:], events: [Event] = [], rules: [RecurringEvent] = [],
+                readings: SlotReadings = .none, problem: String? = nil) {
         self.name = name
         self.model = model
         self.kind = kind
@@ -38,6 +41,7 @@ public struct SlotSpec: Sendable {
         self.variable = variable
         self.color = color
         self.format = format
+        self.currency = currency
         self.position = position
         self.values = values
         self.events = events
@@ -63,13 +67,27 @@ public struct ScenarioDefinition: Sendable {
     public var start: Date
     /// nil for the engine's own.
     public var seed: UInt64?
+    /// What the scenario's money is in, or nil when its file doesn't say, which means US dollars.
+    public var currency: Currency?
+    /// Where exchange rates come from, or nil for the ECB's (docs/DESIGN.md, 5.11).
+    public var rates: ExchangeRateSource?
+    /// How numbers are written, or nil for each currency in its own style.
+    public var numbers: NumberStyle?
+    /// The rates kept in the scenario's `readings/`, for converting money between slots.
+    public var exchangeRates: ExchangeRates
     public var slots: [SlotSpec]
     public var events: [InitialEvent]
 
-    public init(name: String, start: Date, seed: UInt64? = nil, slots: [SlotSpec], events: [InitialEvent] = []) {
+    public init(name: String, start: Date, seed: UInt64? = nil, currency: Currency? = nil, rates: ExchangeRateSource? = nil,
+                numbers: NumberStyle? = nil, exchangeRates: ExchangeRates = .none, slots: [SlotSpec],
+                events: [InitialEvent] = []) {
         self.name = name
         self.start = start
         self.seed = seed
+        self.currency = currency
+        self.rates = rates
+        self.numbers = numbers
+        self.exchangeRates = exchangeRates
         self.slots = slots
         self.events = events
     }

@@ -12,7 +12,19 @@ public struct SnapshotData: Codable, Equatable, Sendable {
         public var variable: String
         public var color: String
         public var format: ValueFormat
+        /// The currency's code, for money: "GBP". The table's numbers are plain, so its heading says it.
+        public var currency: String?
         public var points: [Point]
+
+        public init(name: String, variable: String, color: String, format: ValueFormat, currency: String? = nil,
+                    points: [Point]) {
+            self.name = name
+            self.variable = variable
+            self.color = color
+            self.format = format
+            self.currency = currency
+            self.points = points
+        }
     }
 
     /// Uniform type identifier for the app's own pasteboard format.
@@ -43,7 +55,12 @@ public struct SnapshotData: Codable, Equatable, Sendable {
     /// spreadsheets treat them as numbers.
     public func tsv() -> String {
         guard let first = slots.first else { return "" }
-        var lines = [(["Date"] + slots.map { "\($0.name) (\($0.variable))" }).joined(separator: "\t")]
+        // "Savings (balance, GBP)": the numbers are plain, so the heading says what money is in.
+        let headings = slots.map { slot in
+            let about = slot.currency.map { slot.variable + ", " + $0 } ?? slot.variable
+            return "\(slot.name) (\(about))"
+        }
+        var lines = [(["Date"] + headings).joined(separator: "\t")]
         for point in first.points {
             var row = [DateText.iso(point.t)]
             for slot in slots {

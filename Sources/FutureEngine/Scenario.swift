@@ -87,6 +87,8 @@ public final class Scenario {
         var recurring: [RecurringEvent]
         /// In time order, so a step finds its own by binary search.
         var readings: [Reading]
+        /// What its money is in, when money it reads from other slots is converted (docs/DESIGN.md, 5.11).
+        var currency: Currency?
         /// Events this slot generated, in time order.
         var generated: [Event] = []
         /// Its misses, in time order, when the scenario keeps them (`recordsMisses`).
@@ -99,12 +101,13 @@ public final class Scenario {
         var timedSteps = 0
 
         init(name: String, runner: any AnySlotRunner, authored: [Event] = [], recurring: [RecurringEvent] = [],
-             readings: [Reading] = []) {
+             readings: [Reading] = [], currency: Currency? = nil) {
             self.name = name
             self.runner = runner
             self.authored = authored
             self.recurring = recurring
             self.readings = readings
+            self.currency = currency
         }
 
         var secondsPerStep: Double? { timedSteps > 0 ? stepSeconds / Double(timedSteps) : nil }
@@ -122,6 +125,12 @@ public final class Scenario {
     public private(set) var connections: [Connection] = []
     /// All event routes, including ones resolved from subscriptions. Current after `validate()`.
     public private(set) var eventRoutes: [EventRoute] = []
+    /// For each connection, in the same order, the currencies its money is converted between, or
+    /// nil when it isn't money or both slots are in the same currency (docs/DESIGN.md, 5.11).
+    private var conversions: [CurrencyPair?] = []
+
+    /// The rates money is converted at, when a slot reads it from a slot in another currency.
+    public private(set) var exchangeRates = ExchangeRates.none
 
     /// Whether slots keep their misses: what each step worked out for a value before a reading
     /// replaced it (docs/DESIGN.md, 8.4). Fitting turns this on in its own copy of a slot. The app's
@@ -156,11 +165,13 @@ public final class Scenario {
     /// The slot's model, for fitting (docs/DESIGN.md, 8.4).
     func model(of slot: SlotID) -> any TimelineModel { slots[slot.rawValue].runner.anyModel }
 
+    /// - Parameter currency: what its money is in, so money it reads from a slot in another currency
+    ///   is converted (docs/DESIGN.md, 5.11). nil leaves it as it is.
     @discardableResult
-    public func addSlot<M: TimelineModel>(_ name: String, model: M) throws -> SlotID {
+    public func addSlot<M: TimelineModel>(_ name: String, model: M, currency: Currency? = nil) throws -> SlotID {
         guard Self.isValidName(name) else { throw EngineError.invalidSlotName(name) }
         guard slotID(named: name) == nil else { throw EngineError.duplicateSlotName(name) }
-        slots.append(Slot(name: name, runner: try makeRunner(for: model, slotName: name)))
+        slots.append(Slot(name: name, runner: try makeRunner(for: model, slotName: name), currency: currency))
         structureChanged()
         return SlotID(rawValue: slots.count - 1)
     }
@@ -179,8 +190,8 @@ public final class Scenario {
         } else {
             structureChanged()
         }
-        slots[slot.rawValue] = Slot(name: old.name, runner: runner,
-                                    authored: old.authored, recurring: old.recurring, readings: old.readings)
+        slots[slot.rawValue] = Slot(name: old.name, runner: runner, authored: old.authored, recurring: old.recurring,
+                                    readings: old.readings, currency: old.currency)
     }
 
     /// Connects explicitly, for models whose inputs don't name their source (e.g. plug-ins).
@@ -272,6 +283,62 @@ public final class Scenario {
             if readings[mid].time <= date { low = mid + 1 } else { high = mid }
         }
         return low
+    }
+
+    // MARK: Currencies
+
+    public func currency(of slot: SlotID) -> Currency? { slots[slot.rawValue].currency }
+
+    /// What a slot's money is in. Money it reads from a slot in another currency is converted at
+    /// the step's exchange rate; nil for either slot leaves it as it is. Only slots whose
+    /// conversions change are computed again.
+    public func setCurrency(_ currency: Currency?, of slot: SlotID) {
+        guard slots[slot.rawValue].currency != currency else { return }
+        if !isPrepared { try? prepareIfNeeded() }
+        guard isPrepared else {
+            slots[slot.rawValue].currency = currency
+            return
+        }
+        slots[slot.rawValue].currency = currency
+        let old = conversions
+        resolveConversions()
+        for (index, connection) in connections.enumerated() where old[index] != conversions[index] {
+            invalidate(connection.to, from: start)
+        }
+    }
+
+    /// New exchange rates. Slots that convert money are computed again from the first time their
+    /// rates changed.
+    public func setExchangeRates(_ rates: ExchangeRates) {
+        guard rates != exchangeRates else { return }
+        let old = exchangeRates
+        exchangeRates = rates
+        if !isPrepared { try? prepareIfNeeded() }
+        guard isPrepared else { return }
+        for (index, connection) in connections.enumerated() {
+            guard let pair = conversions[index],
+                  let changed = rates.firstDifference(from: old, in: [pair.from, pair.to]) else { continue }
+            invalidate(connection.to, from: max(changed, start))
+        }
+    }
+
+    /// The conversions into a slot's inputs, one for each input that reads money from a slot in
+    /// another currency.
+    public func conversions(into slot: SlotID) throws -> [CurrencyPair] {
+        try prepareIfNeeded()
+        return connections.indices.compactMap { connections[$0].to == slot ? conversions[$0] : nil }
+    }
+
+    /// Works out which connections carry money between currencies: the value read is marked as
+    /// currency, and both slots have currencies, which differ.
+    private func resolveConversions() {
+        conversions = connections.map { connection in
+            guard let from = slots[connection.from.rawValue].currency, let to = slots[connection.to.rawValue].currency,
+                  from != to,
+                  descriptor(of: connection.from).variable(named: connection.variable)?.quantity == .currency
+            else { return nil }
+            return CurrencyPair(from: from, to: to)
+        }
     }
 
     // MARK: Saved results
@@ -480,6 +547,7 @@ public final class Scenario {
         try checkForSameStepLoops(resolvedConnections, resolvedRoutes)
         connections = resolvedConnections
         eventRoutes = resolvedRoutes
+        resolveConversions()
         groups = Self.groups(slotCount: slots.count,
                              links: resolvedConnections.map { ($0.from, $0.to) } + resolvedRoutes.map { ($0.from, $0.to) })
         isPrepared = true
@@ -593,8 +661,17 @@ public final class Scenario {
         let window = StepWindow.forStep(index, on: runner.grid)
 
         var inputs: [String: Double] = [:]
-        for connection in connections where connection.to == id {
-            inputs[connection.input] = try inputValue(connection, index: index, grid: runner.grid)
+        for offset in connections.indices where connections[offset].to == id {
+            let connection = connections[offset]
+            var value = try inputValue(connection, index: index, grid: runner.grid)
+            if let pair = conversions[offset] {
+                // Converted at the rate when it's used: this step's.
+                guard let rate = exchangeRates.rate(from: pair.from, to: pair.to, at: window.upper) else {
+                    throw EngineError.noExchangeRate(slot: slotName, from: pair.from.code, to: pair.to.code)
+                }
+                value *= rate
+            }
+            inputs[connection.input] = value
         }
         for input in runner.descriptor.inputs where inputs[input.name] == nil {
             inputs[input.name] = input.start

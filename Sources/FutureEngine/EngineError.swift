@@ -15,6 +15,8 @@ public enum EngineError: Error, Equatable, CustomStringConvertible {
     case reentrantStep(slot: String)
     case modelFailed(slot: String, message: String)
     case goalNotBracketed(lowResult: Double, highResult: Double, target: Double)
+    /// A slot reads money in another currency, and there's no rate between them.
+    case noExchangeRate(slot: String, from: String, to: String)
 
     public var description: String {
         switch self {
@@ -45,6 +47,8 @@ public enum EngineError: Error, Equatable, CustomStringConvertible {
             return "\(slot) was asked to step while it was already stepping (a same-step loop)."
         case .modelFailed(let slot, let message):
             return "\(slot) failed: \(message)"
+        case .noExchangeRate(let slot, let from, let to):
+            return "\(slot) reads money in \(from) but is in \(to), and there's no exchange rate between them yet."
         case .goalNotBracketed(let low, let high, let target):
             return "The target \(target) isn't between the results at the ends of the range (\(low) and \(high))."
         }

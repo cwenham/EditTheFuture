@@ -1,22 +1,33 @@
 import Foundation
 import FutureDocument
 import FutureEngine
+import FutureFeeds
 
 // The scenario menu in the panel's header, and its form (docs/UI.md, 3): switching scenarios,
-// making new ones, and changing a scenario's name, start date and seed.
+// making new ones, and changing a scenario's name, start date, seed and currency.
 
-/// A scenario's name, start date and seed: what the heading of its `scenario.md` holds
+/// A scenario's name, start date, seed and currency: what the heading of its `scenario.md` holds
 /// (docs/DESIGN.md, 15.2).
 public struct ScenarioSettings: Equatable, Sendable {
     public var name: String
     public var start: Date
     /// nil for the engine's own (docs/DESIGN.md, 4.4).
     public var seed: UInt64?
+    /// nil when the file doesn't name one, which means US dollars.
+    public var currency: Currency?
+    /// Where exchange rates come from: nil for the ECB's.
+    public var rates: ExchangeRateSource?
+    /// How numbers are written: nil for each currency in its own style.
+    public var numbers: NumberStyle?
 
-    public init(name: String, start: Date, seed: UInt64?) {
+    public init(name: String, start: Date, seed: UInt64?, currency: Currency? = nil, rates: ExchangeRateSource? = nil,
+                numbers: NumberStyle? = nil) {
         self.name = name
         self.start = start
         self.seed = seed
+        self.currency = currency
+        self.rates = rates
+        self.numbers = numbers
     }
 }
 
@@ -72,6 +83,20 @@ public struct ScenarioForm: Equatable, Sendable {
     public var mode: Mode
     public var name: String
     public var start: Date
+    /// What the scenario's money is in. Changing it changes the symbol, not the amounts.
+    public var currency: Currency
+    /// How numbers are written: nil for each currency in its own style.
+    public var numbers: NumberStyle?
+    /// Where exchange rates come from (docs/DESIGN.md, 5.11).
+    public var rates: ExchangeRateSource
+    /// An App ID for live rates, as typed. Saved in the Keychain, never in the scenario; empty
+    /// keeps the one saved.
+    public var appID = ""
+    /// Whether the Keychain has an App ID for live rates.
+    public var hasAppID = false
+    /// What Test found: the latest rate, or what went wrong.
+    public var rateTest: String?
+    public var isTestingRates = false
     /// The seed as typed: `0x5EEDF07E` or a whole number. Empty for the engine's own.
     public var seedText: String
     /// Folder names other scenarios use there, lowercased, since the Mac's disks ignore case.
@@ -125,8 +150,74 @@ extension ScenarioStore {
         case .duplicate: name = ScenarioLibrary.uniqueName(self.name + " copy", taken: taken)
         }
         let start = mode == .new ? DateText.startOfYear(DateText.year(now)) : self.start
-        scenarioForm = ScenarioForm(mode: mode, name: name, start: start,
-                                    seedText: mode == .edit ? ScenarioForm.text(seed: seed) : "", taken: taken)
+        // A new scenario is in this one's currency and style, as a copy is: the ones being worked in.
+        var form = ScenarioForm(mode: mode, name: name, start: start, currency: currency, numbers: numberSetting,
+                                rates: rateSource, seedText: mode == .edit ? ScenarioForm.text(seed: seed) : "", taken: taken)
+        scenarioForm = form
+        if rateSource.isLive { checkForAppID() }
+    }
+
+    /// Looks in the Keychain for an App ID for live rates, once live rates are chosen in the form.
+    public func checkForAppID() {
+        let found = credentials.hasCredential(named: RateProviders.openExchangeRates.credentialName)
+        if scenarioForm?.hasAppID != found { scenarioForm?.hasAppID = found }
+    }
+
+    /// The source of rates a form's choice means for the file: none when it's the ECB's and the
+    /// file leaves it unsaid.
+    func rateSetting(for choice: ExchangeRateSource) -> ExchangeRateSource? {
+        choice == rateSource ? rateSetting : choice
+    }
+
+    /// Saves the App ID typed in the form in the Keychain, for Open Exchange Rates' hosts only.
+    /// Returns why it couldn't be saved.
+    func saveAppID(_ text: String) -> String? {
+        let key = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        let provider = RateProviders.openExchangeRates
+        do {
+            try credentials.save(FeedCredential(kind: .key, secret: key, hosts: provider.hosts), named: provider.credentialName)
+            return nil
+        } catch {
+            return "Couldn't save the App ID: \(error)"
+        }
+    }
+
+    /// Fetches the latest rate for the form's currency with the App ID typed, or the one saved,
+    /// without saving anything, and says what came back.
+    public func testLiveRates() async {
+        guard var form = scenarioForm else { return }
+        form.isTestingRates = true
+        form.rateTest = nil
+        scenarioForm = form
+        let provider = RateProviders.openExchangeRates
+        let key = form.appID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let store: any CredentialStore = key.isEmpty ? credentials
+            : MemoryCredentialStore([provider.credentialName: FeedCredential(kind: .key, secret: key, hosts: provider.hosts)])
+        let fetcher = RateFetcher(transport: feedTransport, credentials: store)
+        let target = form.currency == .usd ? Currency.eur : form.currency
+        let result: String
+        do {
+            let rates = try await fetcher.fetch(provider, currencies: [target])
+            if let latest = rates.latest(target) {
+                let one = ValueStyle.money(.usd).amountText(1)
+                let rate = ValueStyle(.currency, currency: target, writing: target.writing(form.numbers)).amountText(latest.perDollar, digits: 4)
+                result = "Works: \(one)\u{00A0}=\u{00A0}\(rate), as of \(DateText.dayMonthYear(latest.time))."
+            } else {
+                result = "Open Exchange Rates has no rate for \(target.plural)."
+            }
+        } catch {
+            result = (error as? FeedError)?.message ?? error.localizedDescription
+        }
+        guard scenarioForm != nil else { return }
+        scenarioForm?.isTestingRates = false
+        scenarioForm?.rateTest = result
+    }
+
+    /// The currency a form's choice means for the file: none when it's what the file leaves
+    /// unsaid, so a heading without one keeps its meaning and its text.
+    func currencySetting(for choice: Currency) -> Currency? {
+        choice == currency ? currencySetting : choice
     }
 
     /// Opens the form for the menu, with the names the app's folders already use.
@@ -144,14 +235,24 @@ extension ScenarioStore {
     @discardableResult
     public func submitScenarioForm(_ actions: ScenarioMenuActions?) async -> Bool {
         guard let form = scenarioForm, form.problem == nil else { return false }
-        let name = form.trimmedName, start = form.start
+        let name = form.trimmedName, start = form.start, currency = currencySetting(for: form.currency)
+        let rates = rateSetting(for: form.rates), numbers = form.numbers
+        if form.rates.isLive, let problem = saveAppID(form.appID) {
+            scenarioForm?.failure = problem
+            return false
+        }
         switch form.mode {
         case .edit:
             guard let seed = ScenarioForm.seed(from: form.seedText) else { return false }
             let old = settings
             closeScenarioForm()
-            applySettingsChange(ScenarioSettings(name: name, start: start, seed: seed))
-            if old.start != start { say("\(name) now starts \(DateText.dayMonthYear(start)). ⌘Z undoes it.") }
+            applySettingsChange(ScenarioSettings(name: name, start: start, seed: seed, currency: currency, rates: rates,
+                                                 numbers: numbers))
+            if old.start != start {
+                say("\(name) now starts \(DateText.dayMonthYear(start)). ⌘Z undoes it.")
+            } else if old.currency != currency {
+                say("\(name) is now in \(form.currency.plural). The amounts are the same; ⌘Z undoes it.")
+            }
             return true
         case .new, .duplicate:
             guard let actions else { return false }
@@ -159,13 +260,20 @@ extension ScenarioStore {
             let made: Result<ScenarioPackage, Error>
             if form.mode == .new {
                 made = await Task.detached(priority: .userInitiated) {
-                    Result { try ScenarioLibrary.createBlank(name: name, start: start, in: folder) }
+                    Result {
+                        try ScenarioLibrary.createBlank(name: name, start: start, currency: currency, rates: rates, numbers: numbers,
+                                                        in: folder)
+                    }
                 }.value
             } else {
                 guard let source = actions.current() else { return false }
                 actions.save()
+                let copyCurrency = form.currency
                 made = await Task.detached(priority: .userInitiated) {
-                    Result { try ScenarioLibrary.duplicate(source, name: name, start: start, in: folder) }
+                    Result {
+                        try ScenarioLibrary.duplicate(source, name: name, start: start, currency: copyCurrency, rates: rates,
+                                                      numbers: numbers, in: folder)
+                    }
                 }.value
             }
             switch made {
@@ -224,26 +332,30 @@ extension ScenarioLibrary {
         return list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    /// A new scenario: one blank formula, to start from.
-    public static func blank(name: String, start: Date) -> ScenarioDefinition {
+    /// A new scenario: one blank formula, to start from. `currency` nil leaves it unsaid: US dollars.
+    public static func blank(name: String, start: Date, currency: Currency? = nil, rates: ExchangeRateSource? = nil,
+                             numbers: NumberStyle? = nil) -> ScenarioDefinition {
         let template = ModelLibrary.blankFormula
         var slot = SlotSpec(name: template.slotName, model: template.slotModelName, kind: template.kind,
                             formula: template.formula, variable: template.variable, format: template.format, position: 0)
         slot.showsInFile = false  // the model's own choice, so the heading stays plain
-        return ScenarioDefinition(name: name, start: start, slots: [slot])
+        return ScenarioDefinition(name: name, start: start, currency: currency, rates: rates, numbers: numbers, slots: [slot])
     }
 
     /// Writes a new scenario with one blank formula, and returns its folder.
-    public static func createBlank(name: String, start: Date, in folder: URL) throws -> ScenarioPackage {
+    public static func createBlank(name: String, start: Date, currency: Currency? = nil, rates: ExchangeRateSource? = nil,
+                                   numbers: NumberStyle? = nil, in folder: URL) throws -> ScenarioPackage {
         let package = package(named: name, in: folder)
         guard !FileManager.default.fileExists(atPath: package.url.path) else { throw CocoaError(.fileWriteFileExists) }
-        try ScenarioDocument.create(blank(name: name, start: start), at: package)
+        try ScenarioDocument.create(blank(name: name, start: start, currency: currency, rates: rates, numbers: numbers), at: package)
         return package
     }
 
-    /// Copies a scenario's folder under a new name and start, with its readings but not its
-    /// cache, and returns the copy.
-    public static func duplicate(_ source: ScenarioPackage, name: String, start: Date, in folder: URL) throws -> ScenarioPackage {
+    /// Copies a scenario's folder under a new name, start and currency, with its readings but not
+    /// its cache, and returns the copy.
+    public static func duplicate(_ source: ScenarioPackage, name: String, start: Date, currency: Currency? = nil,
+                                 rates: ExchangeRateSource? = nil, numbers: NumberStyle? = nil,
+                                 in folder: URL) throws -> ScenarioPackage {
         let manager = FileManager.default
         let package = package(named: name, in: folder)
         guard !manager.fileExists(atPath: package.url.path) else { throw CocoaError(.fileWriteFileExists) }
@@ -251,6 +363,10 @@ extension ScenarioLibrary {
         var file = parsed.file
         file.name = name
         file.start = start
+        // The copy's file says its currency only when the original did, or it's another one.
+        if let currency, currency != (file.currency ?? .usd) || file.currency != nil { file.currency = currency }
+        file.rates = rates
+        file.numbers = numbers
         do {
             try manager.createDirectory(at: package.url, withIntermediateDirectories: true)
             for item in try manager.contentsOfDirectory(at: source.url, includingPropertiesForKeys: nil)

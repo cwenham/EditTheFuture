@@ -313,3 +313,32 @@ struct FittingTests {
         #expect(throws: CancellationError.self) { try copy.fit(FitSettings(values: ["growth"]), isCancelled: { true }) }
     }
 }
+
+@Suite("Fitting with exchange rates")
+struct ConvertedFittingTests {
+    @Test("Refit's copy converts money from another currency as the scenario does")
+    func converted() throws {
+        let start = CivilDate.date(year: 2024, month: 1, day: 1)
+        let scenario = Scenario(start: start)
+        try scenario.addSlot("Shop", model: try FormulaModel("""
+            step 1 month
+            init price = 100 as currency
+            price[t] = price[t-1]
+            """, name: "Shop"), currency: .usd)
+        let id = try scenario.addSlot("Wallet", model: try FormulaModel("""
+            step 1 month
+            param k = 0.5 range 0..2 fit
+            init v = 0 as currency
+            v[t] = Shop.price * k
+            """, name: "Wallet"), currency: .gbp)
+        scenario.setExchangeRates(ExchangeRates(perDollar: [.gbp: [(start, 0.8)]]))
+        let grid = TimeGrid(start: start, rate: .months(1), calendar: .utcGregorian)
+        scenario.setReadings((1...24).map { Reading(time: grid.point($0), variable: "v", value: 80) }, for: id)
+        try scenario.validate()
+        #expect(try scenario.value("v", of: id, at: grid.point(30)) == 40)  // 100 dollars × 0.8 × k
+
+        // Without converting in the copy, k would come out as 0.8.
+        let outcome = try scenario.refit(id, FitSettings(values: ["k"]))
+        #expect(abs(outcome.values["k"]! - 1) < 1e-6)
+    }
+}

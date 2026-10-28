@@ -40,11 +40,13 @@ public struct FeedPreset: Identifiable, Sendable, Hashable {
     public let slotName: String
     /// `number`, `percent`, `currency` or `temperature`.
     public let format: String
+    /// What the source's money is in, so its slot keeps it whatever the scenario's currency.
+    public let currency: Currency?
     public let step: StepRate
 
     init(_ id: String, _ title: String, _ category: Category, _ summary: String, provider: String,
          _ settings: KeyValuePairs<String, String>, units: String, percentPoints: Bool = false, fahrenheit: Bool = false,
-         slot: String, format: String = "number", step: StepRate = .days(1)) {
+         slot: String, format: String = "number", currency: Currency? = nil, step: StepRate = .days(1)) {
         self.id = id
         self.title = title
         self.category = category
@@ -55,6 +57,7 @@ public struct FeedPreset: Identifiable, Sendable, Hashable {
         self.fahrenheit = fahrenheit
         slotName = slot
         self.format = format
+        self.currency = currency
         self.step = step
     }
 
@@ -104,11 +107,11 @@ public enum FeedCatalog {
         .init("vix", "Volatility (VIX)", .markets, "The CBOE volatility index, daily since 1990.",
               provider: "fred", ["series": "VIXCLS"], units: "index points", slot: "VIX"),
         .init("oil", "Crude oil (WTI)", .markets, "West Texas Intermediate, dollars a barrel, daily since 1986.",
-              provider: "fred", ["series": "DCOILWTICO"], units: "US dollars a barrel", slot: "Oil", format: "currency"),
+              provider: "fred", ["series": "DCOILWTICO"], units: "US dollars a barrel", slot: "Oil", format: "currency", currency: .usd),
         .init("dollar", "US dollar index", .markets, "The dollar against a broad basket of currencies, daily since 2006.",
               provider: "fred", ["series": "DTWEXBGS"], units: "index, January 2006 = 100", slot: "Dollar"),
         .init("stock", "A stock or fund", .markets, "Any ticker's daily close from Tiingo, back decades. Needs a free key.",
-              provider: "tiingo", ["symbol": "SPY", "price": "close"], units: "US dollars", slot: "Stock", format: "currency"),
+              provider: "tiingo", ["symbol": "SPY", "price": "close"], units: "US dollars", slot: "Stock", format: "currency", currency: .usd),
 
         // Rates and bonds
         .init("treasury10", "10-year Treasury yield", .rates, "Market yield on 10-year Treasury notes, daily since 1962.",
@@ -137,7 +140,7 @@ public enum FeedCatalog {
         .init("note10price", "10-year note auction price", .rates, "The price of each 10-year note auction, per $100 of face value.",
               provider: "treasury", ["dataset": "v1/accounting/od/auctions_query", "field": "high_price", "date": "auction_date",
                                      "filter": "security_term:eq:10-Year,security_type:eq:Note"],
-              units: "US dollars per $100", slot: "Note10Price", format: "currency", step: .months(1)),
+              units: "US dollars per $100", slot: "Note10Price", format: "currency", currency: .usd, step: .months(1)),
         .init("note10yield", "10-year note auction yield", .rates, "The yield at each 10-year note auction.",
               provider: "treasury", ["dataset": "v1/accounting/od/auctions_query", "field": "high_yield", "date": "auction_date",
                                      "filter": "security_term:eq:10-Year,security_type:eq:Note"],
@@ -145,15 +148,15 @@ public enum FeedCatalog {
         .init("bond30price", "30-year bond auction price", .rates, "The price of each 30-year bond auction, per $100 of face value.",
               provider: "treasury", ["dataset": "v1/accounting/od/auctions_query", "field": "high_price", "date": "auction_date",
                                      "filter": "security_term:eq:30-Year,security_type:eq:Bond"],
-              units: "US dollars per $100", slot: "Bond30Price", format: "currency", step: .months(1)),
+              units: "US dollars per $100", slot: "Bond30Price", format: "currency", currency: .usd, step: .months(1)),
 
         // Debt
         .init("debt", "US national debt", .debt, "Total public debt outstanding, every working day since 1993: the debt to the penny.",
               provider: "treasury", ["dataset": "v2/accounting/od/debt_to_penny", "field": "tot_pub_debt_out_amt"],
-              units: "US dollars", slot: "NationalDebt", format: "currency"),
+              units: "US dollars", slot: "NationalDebt", format: "currency", currency: .usd),
         .init("debt1790", "US national debt since 1790", .debt, "The debt outstanding at the end of each year, since 1790.",
               provider: "treasury", ["dataset": "v2/accounting/od/debt_outstanding", "field": "debt_outstanding_amt"],
-              units: "US dollars", slot: "DebtHistory", format: "currency", step: .years(1)),
+              units: "US dollars", slot: "DebtHistory", format: "currency", currency: .usd, step: .years(1)),
         .init("debtgdp", "US federal debt to GDP", .debt, "Total public debt as a percent of GDP, quarterly since 1966.",
               provider: "fred", ["series": "GFDEGDQ188S"], units: "percent of GDP", percentPoints: true, slot: "DebtToGDP",
               format: "percent", step: .quarters(1)),

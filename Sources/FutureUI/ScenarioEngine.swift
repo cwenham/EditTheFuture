@@ -21,6 +21,8 @@ actor ScenarioEngine {
         /// Identifies the model and the slot's values for it. When only this changes, the slot's
         /// model is swapped without rebuilding the rest of the scenario.
         let key: String
+        /// What its money is in, when money read from other currencies is converted; nil when it isn't.
+        var currency: Currency? = nil
     }
 
     /// Every slot as the store has it, in the store's order.
@@ -45,6 +47,8 @@ actor ScenarioEngine {
         case restore([Int: SlotHistory])
         /// A slot's readings changed, such as when a feed brought new ones (docs/DESIGN.md, 15.8).
         case readings(slot: Int, ReadingSet)
+        /// New exchange rates (docs/DESIGN.md, 5.11). Slots that convert compute again from where they changed.
+        case rates(ExchangeRates)
     }
 
     struct FetchRequest: Sendable {
@@ -158,6 +162,7 @@ actor ScenarioEngine {
 
     private var start: Date
     private var seed: UInt64
+    private var rates: ExchangeRates
     private var scenario: Scenario
     private var setups: [SlotSetup?]
     /// Each slot's readings as last sent, to tell when they change without comparing every reading.
@@ -171,26 +176,28 @@ actor ScenarioEngine {
     /// How far each chunk of a fetch computes before checking whether it's been superseded.
     static let chunk: TimeInterval = 4 * 365.2425 * 86_400
 
-    init(start: Date, seed: UInt64 = Scenario.defaultSeed, layout: Layout) throws {
+    init(start: Date, seed: UInt64 = Scenario.defaultSeed, layout: Layout, rates: ExchangeRates = .none) throws {
         self.start = start
         self.seed = seed
-        (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout)
+        self.rates = rates
+        (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout, rates: rates)
         setups = layout.slots
         readingSets = layout.readings
     }
 
-    private static func build(start: Date, seed: UInt64, layout: Layout) throws -> (Scenario, [SlotID?]) {
+    private static func build(start: Date, seed: UInt64, layout: Layout, rates: ExchangeRates) throws -> (Scenario, [SlotID?]) {
         let scenario = Scenario(start: start, seed: seed)
         var ids: [SlotID?] = []
         for (index, setup) in layout.slots.enumerated() {
             guard let setup else { ids.append(nil); continue }
-            let id = try scenario.addSlot(setup.name, model: setup.model)
+            let id = try scenario.addSlot(setup.name, model: setup.model, currency: setup.currency)
             for event in layout.events[index] { scenario.add(event, to: id) }
             for rule in layout.rules[index] { scenario.add(rule, to: id) }
             scenario.setReadings(layout.readings[index].readings, for: id)
             ids.append(id)
         }
         try scenario.validate()
+        scenario.setExchangeRates(rates)
         return (scenario, ids)
     }
 
@@ -214,6 +221,9 @@ actor ScenarioEngine {
             guard readingSets.indices.contains(slot), readingSets[slot] != set else { return }
             readingSets[slot] = set
             if let id = ids[slot] { scenario.setReadings(set.readings, for: id) }
+        case .rates(let rates):
+            self.rates = rates
+            scenario.setExchangeRates(rates)
         }
     }
 
@@ -232,6 +242,7 @@ actor ScenarioEngine {
                 try scenario.validate()
                 for (index, id) in ids.enumerated() {
                     guard let id else { continue }
+                    scenario.setCurrency(layout.slots[index]?.currency, of: id)
                     syncEvents(of: id, to: layout.events[index], rules: layout.rules[index])
                     if readingSets.indices.contains(index), readingSets[index] != layout.readings[index] {
                         scenario.setReadings(layout.readings[index].readings, for: id)
@@ -249,7 +260,7 @@ actor ScenarioEngine {
 
     private func rebuild(_ layout: Layout) {
         do {
-            (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout)
+            (scenario, ids) = try Self.build(start: start, seed: seed, layout: layout, rates: rates)
         } catch {
             // The store only sends slots whose wiring checks out, so this shouldn't happen. If it
             // does, run nothing rather than something half-wired.

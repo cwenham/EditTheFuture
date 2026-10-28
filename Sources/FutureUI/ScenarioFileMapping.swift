@@ -7,14 +7,15 @@ import FutureScript
 
 extension ScenarioDefinition {
     /// The scenario a file describes, with the readings found for its slots, by slot name.
-    public init(file: ScenarioFile, readings: [String: ReadingSet] = [:]) {
-        self.init(name: file.name, start: file.start, seed: file.seed,
-                  slots: file.slots.map { SlotSpec(file: $0, readings: SlotReadings(sources: $0.readings, set: readings[$0.name] ?? .empty)) })
+    public init(file: ScenarioFile, readings: [String: ReadingSet] = [:], exchangeRates: ExchangeRates = .none) {
+        self.init(name: file.name, start: file.start, seed: file.seed, currency: file.currency, rates: file.rates,
+                  numbers: file.numbers, exchangeRates: exchangeRates, slots: file.slots.map { SlotSpec(file: $0, readings: SlotReadings(sources: $0.readings, set: readings[$0.name] ?? .empty)) })
     }
 
     /// The same, with each source's readings apart, as `ReadingLoader` loads them.
-    public init(file: ScenarioFile, loaded: [String: LoadedReadings]) {
-        self.init(name: file.name, start: file.start, seed: file.seed, slots: file.slots.map {
+    public init(file: ScenarioFile, loaded: [String: LoadedReadings], exchangeRates: ExchangeRates = .none) {
+        self.init(name: file.name, start: file.start, seed: file.seed, currency: file.currency, rates: file.rates,
+                  numbers: file.numbers, exchangeRates: exchangeRates, slots: file.slots.map {
             SlotSpec(file: $0, readings: SlotReadings(sources: $0.readings, parts: loaded[$0.name]?.parts ?? []))
         })
     }
@@ -36,7 +37,7 @@ extension SlotSpec {
         }
         self.init(name: slot.name, model: slot.model.isEmpty ? kind.customModelName : slot.model, kind: kind,
                   formula: slot.source, variable: variable, color: slot.color.map { "#" + $0 }, format: format ?? .number,
-                  position: slot.position, values: slot.values, events: slot.events, rules: slot.rules,
+                  currency: slot.currency, position: slot.position, values: slot.values, events: slot.events, rules: slot.rules,
                   readings: readings, problem: slot.problem)
         showsInFile = slot.shows != nil
         formatInFile = slot.format != nil
@@ -84,11 +85,10 @@ extension ValueFormat {
 extension ScenarioStore {
     /// The scenario as its file says it.
     public func scenarioFile() -> ScenarioFile {
-        Self.file(name: name, start: start, seed: seed, configs: configs, descriptors: descriptors)
+        Self.file(settings, configs: configs, descriptors: descriptors)
     }
 
-    nonisolated static func file(name: String, start: Date, seed: UInt64?, configs: [SlotConfig],
-                                 descriptors: [ModelDescriptor?]) -> ScenarioFile {
+    nonisolated static func file(_ settings: ScenarioSettings, configs: [SlotConfig], descriptors: [ModelDescriptor?]) -> ScenarioFile {
         let slots = configs.enumerated().map { index, config -> SlotFile in
             let descriptor = descriptors.indices.contains(index) ? descriptors[index] : nil
             let percents = Set((descriptor?.variables ?? []).filter { $0.quantity == .percent }.map(\.name))
@@ -104,17 +104,20 @@ extension ScenarioStore {
                             model: config.model == config.kind.customModelName ? "" : config.model,
                             language: config.kind.language, source: config.formula,
                             shows: writeShows ? config.variable : nil,
-                            format: writeFormat ? config.format.rawValue : nil, color: color,
+                            format: writeFormat ? config.format.rawValue : nil, currency: config.currency, color: color,
                             values: config.values, percentNames: percents, events: config.events, rules: config.rules,
                             readings: config.readings.sources, problem: config.problem)
         }
-        return ScenarioFile(name: name, start: start, seed: seed, slots: slots)
+        return ScenarioFile(name: settings.name, start: settings.start, seed: settings.seed, currency: settings.currency,
+                            rates: settings.rates, numbers: settings.numbers, slots: slots)
     }
 
     /// A definition as its file would say it, for writing a new scenario.
     nonisolated static func file(for definition: ScenarioDefinition) -> ScenarioFile {
         let configs = Self.configs(from: definition)
-        return file(name: definition.name, start: definition.start, seed: definition.seed, configs: configs,
+        return file(ScenarioSettings(name: definition.name, start: definition.start, seed: definition.seed,
+                                     currency: definition.currency, rates: definition.rates, numbers: definition.numbers),
+                    configs: configs,
                     descriptors: assemble(configs).descriptors)
     }
 
@@ -150,24 +153,45 @@ extension ScenarioStore {
         }
         let focus = slots.indices.contains(focusedIndex) ? focused.id : nil
         if definition.start != start || definition.seed != seed {
-            replaceScenario(name: definition.name, start: definition.start, seed: definition.seed, configs: incoming, focus: focus)
+            replaceScenario(ScenarioSettings(name: definition.name, start: definition.start, seed: definition.seed,
+                                             currency: definition.currency, rates: definition.rates, numbers: definition.numbers),
+                            configs: incoming, focus: focus)
             return
         }
         if name != definition.name { name = definition.name }
+        // A new currency is written into the slots as they're built again, so it goes first.
+        setMoneySettings(currency: definition.currency, rates: definition.rates, numbers: definition.numbers)
         applySlotChange(incoming, focus: focus)
     }
 
     /// Each slot's fingerprint as the store has it now (docs/DESIGN.md, 15.5).
     func fingerprints(libraries: [ScriptLanguage: String]) -> [String?] {
-        Self.fingerprints(configs, descriptors: descriptors, start: start, seed: seed, libraries: libraries)
+        Self.fingerprints(configs, descriptors: descriptors, start: start, seed: seed, libraries: libraries,
+                          conversions: slots.map(\.conversions), rates: exchangeRates)
     }
 
     /// What made each slot's results (docs/DESIGN.md, 15.5): a hash of its model and values, its
     /// events and readings, the scenario's start and seed, the engine's version, the script
     /// libraries, and the same for every slot it reads or listens to, however far upstream. nil for
     /// paused slots.
+    /// A slot that converts money counts its currencies and their rates too (docs/DESIGN.md, 5.11).
     nonisolated static func fingerprints(_ configs: [SlotConfig], descriptors: [ModelDescriptor?], start: Date, seed: UInt64?,
-                                         libraries: [ScriptLanguage: String]) -> [String?] {
+                                         libraries: [ScriptLanguage: String], conversions: [[SlotConversion]] = [],
+                                         rates: ExchangeRates = .none) -> [String?] {
+        var rateDigests: [Currency: String] = [:]
+        func digest(_ currency: Currency) -> String {
+            if let known = rateDigests[currency] { return known }
+            var hash = Fingerprint()
+            if let series = rates.series[currency] {
+                for (time, rate) in zip(series.times, series.perDollar) {
+                    hash.add(time.timeIntervalSinceReferenceDate)
+                    hash.add(rate)
+                }
+            }
+            let text = hash.finish()
+            rateDigests[currency] = text
+            return text
+        }
         let index = Dictionary(configs.enumerated().map { ($0.element.name, $0.offset) }, uniquingKeysWith: { a, _ in a })
         let own = configs.enumerated().map { offset, config -> String? in
             guard offset < descriptors.count, descriptors[offset] != nil, config.problem == nil else { return nil }
@@ -194,6 +218,11 @@ extension ScenarioStore {
                 hash.add(EventIdentity.key(rule))
             }
             hash.add(config.readings.set.digest)
+            for conversion in conversions.indices.contains(offset) ? conversions[offset] : [] {
+                hash.add("converts " + conversion.reading + " " + conversion.pair.description)
+                hash.add(digest(conversion.pair.from))
+                hash.add(digest(conversion.pair.to))
+            }
             return hash.finish()
         }
         return configs.indices.map { start -> String? in

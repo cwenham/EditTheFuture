@@ -121,7 +121,7 @@ public struct FeedFetcher: Sendable {
         return FeedCopy.cleaned(points)
     }
 
-    private func send(_ request: URLRequest, credential: FeedCredential?) async throws -> (Data, HTTPURLResponse) {
+    func send(_ request: URLRequest, credential: FeedCredential?) async throws -> (Data, HTTPURLResponse) {
         do {
             return try await transport.data(for: request, redirectHosts: credential.map { Set($0.hosts) })
         } catch let error as FeedError {

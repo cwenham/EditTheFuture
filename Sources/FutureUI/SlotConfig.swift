@@ -21,6 +21,8 @@ struct SlotConfig: Sendable, Equatable {
     /// A color of its own, or nil for its position's palette color.
     var color: String?
     var format: ValueFormat
+    /// A currency of its own for its money, or nil for the scenario's.
+    var currency: Currency?
     /// Its own parameter and starting values, in place of the formula's defaults.
     var values: [String: Double] = [:]
     var events: [Event] = []
@@ -125,6 +127,9 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
     /// "Interest rate", or the name when the model gives no label.
     public let label: String
     public let quantity: Quantity
+    /// How it's written: in the slot's currency when it's money, and in the slot's style.
+    public let money: ValueStyle
+    public var currency: Currency { money.currency }
     public let minimum: Double?
     public let maximum: Double?
     public let increment: Double?
@@ -156,25 +161,28 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
     }
 
     public func text(_ value: Double) -> String {
-        SlotValue.text(value, quantity)
+        SlotValue.text(value, quantity, money: money)
     }
 
-    /// Reads what was typed: "4.5%", "$1,200", "1.5k", "21°C". Percent values are typed in percent,
-    /// so "6" means 6%.
+    /// Reads what was typed, in the slot's style: "4.5%", "£1,200", "1.234,5 €", "1.5k", "21°C".
+    /// Percent values are typed in percent, so "6" means 6%. Money typed in another currency isn't
+    /// read: values are converted only as one slot reads another.
     public func parse(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let trimmed = money.numbers.normalize(text.trimmingCharacters(in: .whitespaces))
         guard let parsed = CommandBarParser.parseValue(trimmed) else { return nil }
+        if quantity == .currency, let typed = parsed.currency, !currency.answers(to: typed) { return nil }
         if quantity == .percent, !trimmed.contains("%") { return parsed.value / 100 }
         return parsed.value
     }
 
-    /// "4.5%", "$1,324", "0.03 °C", "30.1".
-    static func text(_ value: Double, _ quantity: Quantity) -> String {
+    /// "4.5%", "£1,324", "1.324 €", "0.03 °C", "30.1", in the style `money` says.
+    static func text(_ value: Double, _ quantity: Quantity, money: ValueStyle) -> String {
+        let numbers = money.numbers
         switch quantity {
-        case .number: return number(value)
-        case .percent: return number(value * 100) + "%"
-        case .currency: return (value < 0 ? "−$" : "$") + number(abs(value))
-        case .temperature: return number(value) + " °C"
+        case .number: return numbers.localize(number(value))
+        case .percent: return numbers.localize(number(value * 100)) + numbers.percentSign
+        case .currency: return money.writing.amount(numbers.localize(number(abs(value))), negative: value < 0)
+        case .temperature: return numbers.localize(number(value)) + " °C"
         }
     }
 

@@ -41,7 +41,8 @@ public struct FocusedSlotState: Sendable {
     public let name: String
     public let summary: String
     public let color: Color
-    public let format: ValueFormat
+    /// How its values are written, in its currency when they're money.
+    public let style: ValueStyle
     public let samples: [Sample]
     /// Readings of the value the graph shows, drawn as dots on a thin line (docs/UI.md, 2.4).
     public let readings: [Sample]

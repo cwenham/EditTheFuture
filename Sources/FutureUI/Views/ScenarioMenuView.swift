@@ -1,4 +1,6 @@
 import SwiftUI
+import FutureEngine
+import FutureFeeds
 #if os(macOS)
 import AppKit
 #endif
@@ -25,7 +27,7 @@ struct ScenarioTitle: View {
                 #if os(macOS)
                 .background(MenuAnchorView(anchor: anchor))
                 #endif
-                .help("Switch scenarios, make a new one, or change this one's name, start date and seed")
+                .help("Switch scenarios, make a new one, or change this one's name, start date, currency and seed")
                 .accessibilityLabel("Scenario: \(store.name)")
                 .accessibilityHint("Opens the scenario menu")
                 .popover(isPresented: Binding(get: { store.scenarioForm != nil }, set: { if !$0 { store.closeScenarioForm() } }),
@@ -140,7 +142,7 @@ struct MenuAnchorView: NSViewRepresentable {
 }
 #endif
 
-/// The form for a scenario's name, start date and seed, or for a new scenario or a copy.
+/// The form for a scenario's name, start date, currency and seed, or for a new scenario or a copy.
 struct ScenarioFormView: View {
     @Bindable var store: ScenarioStore
     let actions: ScenarioMenuActions?
@@ -170,6 +172,63 @@ struct ScenarioFormView: View {
                         .environment(\.calendar, DateText.calendar)
                         .accessibilityLabel("Start date")
                     hint(startHint(form))
+                }
+
+                field("Currency") {
+                    Picker("Currency", selection: binding(form, \.currency)) {
+                        ForEach(ScenarioStore.currencyChoices(including: [form.currency, store.currency]), id: \.code) {
+                            Text($0.menuTitle).tag($0)
+                        }
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("Currency")
+                    hint(currencyHint(form))
+                }
+
+                field("Numbers") {
+                    Picker("Numbers", selection: binding(form, \.numbers)) {
+                        Text("Each currency's own: \(example(form.currency, nil))").tag(NumberStyle?.none)
+                        Divider()
+                        ForEach(NumberStyle.allCases, id: \.self) { style in
+                            Text(example(form.currency, style)).tag(NumberStyle?.some(style))
+                        }
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("How numbers are written")
+                    hint(form.numbers == nil ? "Each slot is written the way its currency usually is, such as 1.234,56 € or ¥1,235."
+                         : "Every slot is written this way, whatever its currency.")
+                }
+
+                field("Exchange rates") {
+                    Picker("Exchange rates", selection: binding(form, \.rates)) {
+                        Text("European Central Bank, daily (free)").tag(ExchangeRateSource.ecb)
+                        Text("Live, from Open Exchange Rates").tag(ExchangeRateSource.openexchangerates)
+                        Text("Don't convert").tag(ExchangeRateSource.none)
+                    }
+                    .labelsHidden()
+                    .accessibilityLabel("Exchange rates")
+                    .onChange(of: form.rates) { if form.rates.isLive { store.checkForAppID() } }
+                    if form.rates.isLive {
+                        HStack(spacing: 8) {
+                            SecureField(form.hasAppID ? "Saved in your Keychain" : "App ID", text: binding(form, \.appID))
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit(save)
+                                .accessibilityLabel("Open Exchange Rates App ID")
+                            Button(form.isTestingRates ? "Testing…" : "Test") { Task { await store.testLiveRates() } }
+                                .disabled(form.isTestingRates || (form.appID.isEmpty && !form.hasAppID))
+                                .help("Fetch the latest rate with this App ID, without saving anything")
+                        }
+                        if let test = form.rateTest { hint(test) }
+                        HStack(spacing: 4) {
+                            hint(RateProviders.openExchangeRates.signIn.note ?? "")
+                        }
+                        if let signUp = RateProviders.openExchangeRates.signIn.signUp {
+                            Link("Get an App ID", destination: signUp)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.proposal)
+                        }
+                    }
+                    hint(ratesHint(form))
                 }
 
                 if form.mode == .edit {
@@ -237,6 +296,31 @@ struct ScenarioFormView: View {
                 : "Everything will be worked out again from \(DateText.dayMonthYear(form.start)). ⌘Z undoes it."
         case .new: return "The new scenario is worked out from this date. It starts with one blank formula."
         case .duplicate: return "The copy is worked out from this date. It keeps the slots, events and readings."
+        }
+    }
+
+    private func currencyHint(_ form: ScenarioForm) -> String {
+        guard form.mode == .edit, form.currency != store.currency else {
+            return "Money is written in this, unless a slot has a currency of its own."
+        }
+        let example = store.money(inSlotAt: -1).full(18_000)
+        let changed = ValueStyle(.currency, currency: form.currency, writing: form.currency.writing(form.numbers)).full(18_000)
+        return "Slots' own amounts keep their numbers: \(example) becomes \(changed). Money read from slots in other currencies is converted."
+    }
+
+    /// "1.234,56 €": an amount in the currency, written the way a choice of style would.
+    private func example(_ currency: Currency, _ style: NumberStyle?) -> String {
+        ValueStyle(.currency, currency: currency, writing: currency.writing(style)).amountText(1234.56, digits: 2)
+    }
+
+    private func ratesHint(_ form: ScenarioForm) -> String {
+        switch form.rates {
+        case .ecb:
+            return "Money a slot reads from a slot in another currency is converted at each day's rate, back to 1999. The latest rate is used for the future."
+        case .openexchangerates:
+            return "The ECB's daily rates for the past, with the latest from Open Exchange Rates every 10 minutes. The App ID is kept in your Keychain, never in the scenario."
+        case .none:
+            return "Money passes between slots as it is, whatever their currencies."
         }
     }
 

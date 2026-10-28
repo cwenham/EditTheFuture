@@ -73,6 +73,9 @@ public enum ScenarioFormat {
     static func heading(_ file: ScenarioFile, extras: [Setting]) -> String {
         var settings = [Setting(key: "start", value: FileDate.text(file.start))]
         if let seed = file.seed { settings.append(Setting(key: "seed", value: "0x" + String(seed, radix: 16, uppercase: true))) }
+        if let currency = file.currency { settings.append(Setting(key: "currency", value: currency.code)) }
+        if let rates = file.rates { settings.append(Setting(key: "rates", value: rates.rawValue)) }
+        if let numbers = file.numbers { settings.append(Setting(key: "numbers", value: numbers.rawValue)) }
         settings += extras
         return "# " + file.name + " [" + settings.map(\.text).joined(separator: ", ") + "]"
     }
@@ -82,6 +85,7 @@ public enum ScenarioFormat {
         if !slot.model.isEmpty { settings.append(Setting(key: slot.model, value: nil)) }
         if let shows = slot.shows { settings.append(Setting(key: "shows", value: shows)) }
         if let format = slot.format { settings.append(Setting(key: "as", value: format)) }
+        if let currency = slot.currency { settings.append(Setting(key: "currency", value: currency.code)) }
         if let color = slot.color { settings.append(Setting(key: "color", value: color)) }
         settings += extras
         let base = "## \(slot.position + 1). \(slot.name)"
@@ -254,8 +258,10 @@ private struct Reader {
         }), case .heading(_, let headingText) = kinds[headingLine] else {
             throw ScenarioFormat.Unreadable(line: nil, message: "The file needs a first heading with the scenario's name and start: # Home & money [start: 2022-01-01].")
         }
-        let (name, start, seed, extras) = try scenarioHeading(headingText, line: headingLine)
-        var file = ScenarioFile(name: name, start: start, seed: seed)
+        let heading = try scenarioHeading(headingText, line: headingLine)
+        var file = ScenarioFile(name: heading.name, start: heading.start, seed: heading.seed, currency: heading.currency,
+                                rates: heading.rates, numbers: heading.numbers)
+        let extras = heading.extras
 
         // Sections start at each level 1 or 2 heading.
         var sections: [Section] = []
@@ -343,13 +349,26 @@ private struct Reader {
         return (hashes.count, text)
     }
 
-    mutating func scenarioHeading(_ text: String, line: Int) throws -> (String, Date, UInt64?, [Setting]) {
+    struct Heading {
+        var name: String
+        var start: Date
+        var seed: UInt64?
+        var currency: Currency?
+        var rates: ExchangeRateSource?
+        var numbers: NumberStyle?
+        var extras: [Setting]
+    }
+
+    mutating func scenarioHeading(_ text: String, line: Int) throws -> Heading {
         guard let (name, settings) = Setting.split(text) else {
             throw ScenarioFormat.Unreadable(line: line + 1, message: "The brackets in the scenario's heading don't close.")
         }
         guard !name.isEmpty else { throw ScenarioFormat.Unreadable(line: line + 1, message: "The scenario's heading needs a name.") }
         var start: Date?
         var seed: UInt64?
+        var currency: Currency?
+        var rates: ExchangeRateSource?
+        var numbers: NumberStyle?
         var extras: [Setting] = []
         for setting in settings {
             switch (setting.key.lowercased(), setting.value) {
@@ -363,6 +382,25 @@ private struct Reader {
                 if let parsed { seed = parsed } else {
                     problems.append(FileProblem(line: line + 1, message: "“\(value)” isn't a seed: use a whole number, like 0x5EEDF07E. The engine's own is used."))
                 }
+            case ("currency", let value?):
+                if let found = Currency.named(value) { currency = found } else {
+                    extras.append(setting)
+                    problems.append(FileProblem(line: line + 1, message: "“\(value)” isn't a currency: use its code, like GBP or EUR. US dollars are used."))
+                }
+            case ("rates", let value?):
+                if let found = ExchangeRateSource(rawValue: value.lowercased()) { rates = found } else {
+                    extras.append(setting)
+                    let names = ExchangeRateSource.allCases.map(\.rawValue).joined(separator: ", ")
+                    problems.append(FileProblem(line: line + 1, message: "“\(value)” isn't a source of exchange rates: use \(names). The ECB's are used."))
+                }
+            case ("numbers", let value?):
+                if value.lowercased() == "regional" { numbers = nil } else if let found = NumberStyle(rawValue: value.lowercased()) {
+                    numbers = found
+                } else {
+                    extras.append(setting)
+                    let names = (["regional"] + NumberStyle.allCases.map(\.rawValue)).joined(separator: ", ")
+                    problems.append(FileProblem(line: line + 1, message: "“\(value)” isn't a way to write numbers: use \(names). Each currency's own is used."))
+                }
             default:
                 extras.append(setting)
                 problems.append(FileProblem(line: line + 1, message: "The scenario has no setting called “\(setting.key)”. It's kept as written."))
@@ -371,7 +409,7 @@ private struct Reader {
         guard let start else {
             throw ScenarioFormat.Unreadable(line: line + 1, message: "The scenario's heading needs a start date: # \(name) [start: 2022-01-01].")
         }
-        return (name, start, seed, extras)
+        return Heading(name: name, start: start, seed: seed, currency: currency, rates: rates, numbers: numbers, extras: extras)
     }
 
     /// Reads a slot's section, or returns nil when its heading isn't a slot's (it's then kept as
@@ -410,6 +448,11 @@ private struct Reader {
                 } else {
                     extras.append(setting)
                     problems.append(FileProblem(line: line, message: "“\(value)” isn't a format. Use number, percent, currency or temperature.", slot: name))
+                }
+            case ("currency", let value?):
+                if let found = Currency.named(value) { slot.currency = found } else {
+                    extras.append(setting)
+                    problems.append(FileProblem(line: line, message: "“\(value)” isn't a currency: use its code, like GBP or EUR. The scenario's is used.", slot: name))
                 }
             case ("color", let value?), ("colour", let value?):
                 let hex = value.hasPrefix("#") ? String(value.dropFirst()) : value
@@ -625,6 +668,7 @@ private struct Writer {
         var out = Array(lines[..<layout.headingLine])
         // A part is written again only when what it says changed, not how it's written.
         let headingSame = file.name == original.file.name && file.start == original.file.start && file.seed == original.file.seed
+            && file.currency == original.file.currency && file.rates == original.file.rates && file.numbers == original.file.numbers
         out.append(headingSame ? lines[layout.headingLine] : ScenarioFormat.heading(file, extras: layout.headingExtras))
 
         // Match each slot in the file to a slot now: by name, then by position.
@@ -682,7 +726,7 @@ private struct Writer {
     func slot(_ new: SlotFile, over layout: SlotLayout, was old: SlotFile) -> [String] {
         var out: [String] = []
         let headingSame = new.position == old.position && new.name == old.name && new.model == old.model
-            && new.shows == old.shows && new.format == old.format && new.color == old.color
+            && new.shows == old.shows && new.format == old.format && new.currency == old.currency && new.color == old.color
         out.append(headingSame ? lines[layout.lines.lowerBound] : ScenarioFormat.slotHeading(new, extras: layout.extras))
         let modelSame = new.language == old.language && new.source == old.source
         let partStarts = Dictionary(uniqueKeysWithValues: layout.parts.map { ($0.value.lines.lowerBound, $0.key) })

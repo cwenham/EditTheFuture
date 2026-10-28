@@ -333,11 +333,11 @@ struct ScenarioStoreTests {
         store.commandText = "goto $1M"
         store.runCommand()
         #expect(store.messageIsError)
-        #expect(store.message?.hasPrefix("Which slot? Savings, Index fund, Mortgage and Energy bill are in dollars.") == true)
+        #expect(store.message?.hasPrefix("Which slot? Savings, Index fund, Mortgage and Energy bill are in US dollars.") == true)
 
         store.commandText = "goto climate $5"
         store.runCommand()
-        #expect(store.message == "Climate is in °C, not dollars.")
+        #expect(store.message == "Climate is in °C, not US dollars.")
 
         store.commandText = "goto weather 5°C"
         store.runCommand()
@@ -396,7 +396,7 @@ struct ScenarioStoreTests {
         let pdf = try #require(pasteboard.data(forType: .pdf))
         #expect(pdf.starts(with: Array("%PDF".utf8)))
         let table = try #require(pasteboard.string(forType: SnapshotExporter.tabularText))
-        #expect(table.hasPrefix("Date\tSavings (balance)"))
+        #expect(table.hasPrefix("Date\tSavings (balance, USD)"))
         let json = try #require(pasteboard.data(forType: SnapshotExporter.snapshotType))
         #expect(try SnapshotData.decode(json).scenario == "Home & money")
     }
