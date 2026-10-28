@@ -9,10 +9,15 @@ import FutureScript
 /// results in `cache/`.
 @MainActor
 public final class ScenarioDocument {
-    public let package: ScenarioPackage
+    /// The scenario's folder. It moves when the scenario is renamed in the app and the folder had
+    /// its old name.
+    public private(set) var package: ScenarioPackage
     public let store: ScenarioStore
-    /// Fetches the scenario's feeds into `readings/` (docs/DESIGN.md, 15.8).
-    public let feeds: FeedCenter
+    /// Fetches the scenario's feeds into `readings/` (docs/DESIGN.md, 15.8). A new one takes over
+    /// when the folder moves.
+    public private(set) var feeds: FeedCenter
+    /// Called after the folder moved to follow the scenario's new name.
+    public var onMove: ((ScenarioPackage) -> Void)?
 
     /// Mistakes found the last time `scenario.md` was read, readings' included.
     public private(set) var problems: [String] = []
@@ -37,6 +42,7 @@ public final class ScenarioDocument {
     private var isReloading = false
     var isReloadingForTests: Bool { isReloading }
     private var isClosed = false
+    private var isWatching = false
 
     // MARK: Opening
 
@@ -47,6 +53,7 @@ public final class ScenarioDocument {
         let document = ScenarioDocument(package: package, store: store, parsed: loaded.parsed)
         document.report(loaded.problems)
         if watch {
+            document.isWatching = true
             document.startWatching()
             document.feeds.start()
         }
@@ -152,15 +159,57 @@ public final class ScenarioDocument {
         }
         let text = ScenarioFormat.text(for: store.scenarioFile(), over: parsed)
         guard text != parsed.text || !FileManager.default.fileExists(atPath: package.scenarioURL.path) else { return true }
+        let oldName = parsed.file.name
         do {
             try package.write(text: text)
             parsed = try ScenarioFormat.parse(text)
             lastSeen = Self.stamp(package)
-            return true
         } catch {
             store.say("Couldn't save \(package.name): \(error.localizedDescription)", isError: true)
             return false
         }
+        // Only the app's own changes get here. A change from another app is read into `parsed`
+        // first, so its new name never moves the folder under the editor that saved it.
+        if parsed.file.name != oldName { followName(from: oldName) }
+        return true
+    }
+
+    // MARK: Renaming
+
+    /// Moves the folder to follow the scenario's new name, when it had the old one and nothing
+    /// is in the way (docs/DESIGN.md, 15.1).
+    private func followName(from oldName: String) {
+        let manager = FileManager.default
+        let target = ScenarioLibrary.package(named: parsed.file.name, in: package.url.deletingLastPathComponent())
+        guard package.name == ScenarioLibrary.folderName(for: oldName), target != package else { return }
+        // The Mac's disks ignore case, so a change of case alone goes through another name.
+        let caseOnly = target.url.path.lowercased() == package.url.path.lowercased()
+        guard caseOnly || !manager.fileExists(atPath: target.url.path) else {
+            store.say("The scenario's folder keeps its name: there's already a “\(target.url.lastPathComponent)”.")
+            return
+        }
+        do {
+            if caseOnly {
+                let step = package.url.deletingLastPathComponent().appendingPathComponent(UUID().uuidString)
+                try manager.moveItem(at: package.url, to: step)
+                try manager.moveItem(at: step, to: target.url)
+            } else {
+                try manager.moveItem(at: package.url, to: target.url)
+            }
+        } catch {
+            store.say("Couldn't rename the scenario's folder: \(error.localizedDescription)", isError: true)
+            return
+        }
+        package = target
+        lastSeen = Self.stamp(package)
+        // A fetch on its way still writes to the old folder, so the old center stops (its fetch
+        // finds the folder gone) and a new one reads the copies where they are now.
+        let old = feeds
+        old.close()
+        feeds = FeedCenter(store: store, folder: target.url)
+        feeds.now = old.now
+        if isWatching { feeds.start() }
+        onMove?(target)
     }
 
     // MARK: Changes from other apps

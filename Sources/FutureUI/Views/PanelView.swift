@@ -4,10 +4,13 @@ import SwiftUI
 public struct PanelActions {
     public var hide: () -> Void
     public var copySnapshot: () -> Void
+    /// The scenario menu's, or nil for a title that isn't a menu.
+    public var scenarios: ScenarioMenuActions?
 
-    public init(hide: @escaping () -> Void, copySnapshot: @escaping () -> Void) {
+    public init(hide: @escaping () -> Void, copySnapshot: @escaping () -> Void, scenarios: ScenarioMenuActions? = nil) {
         self.hide = hide
         self.copySnapshot = copySnapshot
+        self.scenarios = scenarios
     }
 }
 
@@ -131,13 +134,7 @@ struct PanelHeader: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(store.name).font(.system(size: 14, weight: .semibold))
-            }
-            .padding(.horizontal, 8)
-            .allowsHitTesting(false)
+            ScenarioTitle(store: store, actions: actions.scenarios)
 
             HStack(spacing: 6) {
                 ForEach(0..<ScenarioStore.bankSize, id: \.self) { position in

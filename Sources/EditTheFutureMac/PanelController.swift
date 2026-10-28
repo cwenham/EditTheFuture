@@ -16,7 +16,7 @@ final class PanelController {
 
     var isVisible: Bool { panel.isVisible }
 
-    init(store: ScenarioStore) {
+    init(store: ScenarioStore, scenarios: ScenarioMenuActions? = nil) {
         self.store = store
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 820))
 
@@ -30,7 +30,8 @@ final class PanelController {
 
         let actions = PanelActions(
             hide: { [weak self] in self?.hide() },
-            copySnapshot: { [weak self] in self?.copy(.everything) }
+            copySnapshot: { [weak self] in self?.copy(.everything) },
+            scenarios: scenarios
         )
         let hosting = NSHostingView(rootView: PanelView(store: store, actions: actions))
         hosting.translatesAutoresizingMaskIntoConstraints = false

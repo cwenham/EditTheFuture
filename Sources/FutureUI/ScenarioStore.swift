@@ -87,6 +87,8 @@ public final class ScenarioStore {
         case changedEvent(slot: UUID, old: Event, at: Int, new: EventDraft.Built?)
         /// Slots were added, removed, moved or changed. Undo puts the old list back.
         case slots(before: [SlotConfig], after: [SlotConfig], focusBefore: UUID?, focusAfter: UUID?)
+        /// The scenario's name, start or seed was changed in the app (docs/UI.md, 3).
+        case settings(before: ScenarioSettings, after: ScenarioSettings)
     }
 
     /// A parameter or starting value being dragged on its slider.
@@ -151,6 +153,8 @@ public final class ScenarioStore {
     public var picker: PickerRequest?
     /// The feed setup screen that's open, if any (docs/UI.md, 5.10).
     public var feedSetup: FeedSetupRequest?
+    /// The scenario menu's form, while it's open (docs/UI.md, 3).
+    public var scenarioForm: ScenarioForm?
     /// Each feed's state, for the Slot tab. `FeedCenter` keeps it (docs/DESIGN.md, 15.8).
     public internal(set) var feedStatuses: [FeedKey: FeedStatus] = [:]
     /// Asks for feeds to be fetched now: one slot's, or every slot's with nil.
@@ -672,6 +676,8 @@ public final class ScenarioStore {
         case .slots(let before, _, let focusBefore, _):
             configs = keepingReadings(before)
             refreshSlots(focus: focusBefore)
+        case .settings(let before, _):
+            apply(before)
         }
         redoStack.append(change)
         followEditedEvent()
@@ -710,6 +716,8 @@ public final class ScenarioStore {
         case .slots(_, let after, _, let focusAfter):
             configs = keepingReadings(after)
             refreshSlots(focus: focusAfter)
+        case .settings(_, let after):
+            apply(after)
         }
         undoStack.append(change)
         followEditedEvent()
@@ -751,11 +759,38 @@ public final class ScenarioStore {
     /// Replaces the scenario's name, start and seed, and its slots, building the engine's scenario
     /// again. Undo starts afresh.
     func replaceScenario(name: String, start: Date, seed: UInt64?, configs newConfigs: [SlotConfig], focus: UUID?) {
-        self.name = name
-        self.start = start
-        self.seed = seed
         configs = newConfigs.sorted { $0.position < $1.position }
         clearUndo()
+        rebuild(ScenarioSettings(name: name, start: start, seed: seed), focus: focus)
+    }
+
+    /// The scenario's name, start and seed, as the heading of its file says them.
+    public var settings: ScenarioSettings { ScenarioSettings(name: name, start: start, seed: seed) }
+
+    /// Changes the scenario's name, start or seed as one change, which undo takes back. A new
+    /// start or seed builds the engine's scenario again (docs/UI.md, 3).
+    func applySettingsChange(_ new: ScenarioSettings) {
+        guard new != settings else { return }
+        undoStack.append(.settings(before: settings, after: new))
+        redoStack.removeAll()
+        apply(new)
+    }
+
+    /// Sets the name, start and seed. Only a new start or seed needs the scenario built again.
+    private func apply(_ new: ScenarioSettings) {
+        guard new.start != start || new.seed != seed else {
+            if name != new.name { name = new.name }
+            onScenarioChange?()
+            return
+        }
+        rebuild(new, focus: nil)
+    }
+
+    /// Sets the name, start and seed, and builds the engine's scenario again with the slots as they are.
+    private func rebuild(_ new: ScenarioSettings, focus: UUID?) {
+        if name != new.name { name = new.name }
+        if start != new.start { start = new.start }
+        if seed != new.seed { seed = new.seed }
         let assembly = Self.assemble(configs)
         enqueue(.mutate(.rebuild(start: start, seed: seed ?? Scenario.defaultSeed, layout: assembly.layout)))
         refreshSlots(focus: focus)  // which keeps the view and cursor within the new start's reach
