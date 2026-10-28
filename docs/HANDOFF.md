@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `78f4827` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `3f2fd0e` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -41,6 +41,8 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `ca33769` | Predict with, Refit and the automatic pick designed (DESIGN.md 8.4, UI.md 5.11). |
 | `cd09c0c` | Fitting in the engine: `fit` on params and inits, misses, a bounded least-squares solver, and Refit on a copy of the slot, in formulas, Lua and Python. |
 | `78f4827` | Refit and Predict with in the panel: eight Forecast models (Trend line among them), each scored on readings it didn't see, with the best tagged. Fits use readings from before the scenario's start. Merged from `feature/predict-with`. |
+| `dd77c64` | The graph scrolls back before the scenario's start, to the earliest reading, with the part before the start shaded and a dashed "Start" line. |
+| `3f2fd0e` | The scenario menu: switching, New, Duplicate and Edit (name, start date and seed) from the scenario's name in the panel. Merged from `feature/scenario-menu` (`b4e39a2`) and `feature/history-before-start`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done.
 
@@ -194,7 +196,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Fitting several values with readings of different values adds their misses together. Differences in different units could outweigh each other; ratios don't.
 - **The scenario menu:**
   - Checked in tests and in captures of the real menu and popover on screen in a throwaway test. Not checked by clicking in the app: the menu opening from the floating panel, typing in the form, Esc and ↩ reaching its buttons, and switching from the menu.
-  - `feature/history-before-start` changes `replaceScenario` too: it moves the cursor and frame clamps into `refreshSlots` (`updateEarliest`). This branch moved `replaceScenario`'s body into `rebuild`, which the menu's start date also uses. Merging them: keep `rebuild`, and drop its two clamps in favour of `updateEarliest`.
+  - A new start date goes through `rebuild`, then `refreshSlots`, whose `updateEarliest` keeps the view and cursor within reach: back to the earliest reading when there are readings before the start.
   - Undoing a later start date doesn't scroll the view back: it stays where the new start put it.
   - The start date is a date picker in the system's date order, in UTC like the engine. Years past 9999 can be typed in `scenario.md`, not in the picker.
 - `README.md` still describes only the engine package.
