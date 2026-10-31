@@ -401,13 +401,18 @@ public final class Scenario {
 
     /// The variable's value at the slot's last point at or before `date`.
     public func value(_ variable: String, of slot: SlotID, at date: Date) throws -> Double {
+        try point(variable, of: slot, atOrBefore: date).value
+    }
+
+    /// The slot's last point at or before `date`: its time and the variable's value there.
+    public func point(_ variable: String, of slot: SlotID, atOrBefore date: Date) throws -> Sample {
         guard date >= start else { throw EngineError.dateBeforeStart }
         try checkReadable(variable, of: slot)
         try ensure(slot, through: date)
         let runner = slots[slot.rawValue].runner
         let index = runner.lastComputedIndex(atOrBefore: date)!
-        guard let column = runner.column(of: variable) else { return .nan }
-        return runner.value(at: index, column: column)
+        guard let column = runner.column(of: variable) else { return Sample(time: runner.times[index], value: .nan) }
+        return Sample(time: runner.times[index], value: runner.value(at: index, column: column))
     }
 
     /// The variable at every communication point from `from` through `through`.

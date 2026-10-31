@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var store: ScenarioStore? { document?.store }
     private var panel: PanelController?
     private var router: CommandRouter?
+    /// Takes commands from the etf tool (docs/DESIGN.md, 10.2).
+    private var commandServer: CommandServer?
     private let hotKeys = HotKeyCenter()
     private var statusItem: NSStatusItem?
     private var hasLaunched = false
@@ -22,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var isTerminating = false
 
     static let lastScenarioKey = "scenario.lastOpened"
+    /// What the etf tool passes when it starts the app, so the panel doesn't pop up.
+    static let backgroundArgument = "--background"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Python takes a moment to start, so it starts now, off the main thread (docs/DESIGN.md, 6.4).
@@ -29,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         NSApp.mainMenu = makeMainMenu()
         makeStatusItem()
         registerHotKeys()
+        startCommandServer()
         hasLaunched = true
         Task { await openFirstScenario() }
     }
@@ -41,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 continue
             }
             do {
-                router?.perform(try URLScheme.command(from: url), from: .urlScheme)
+                let command = try URLScheme.command(from: url)
+                if let router { Task { await router.perform(command, from: .urlScheme) } }
             } catch {
                 store?.say(String(describing: error), isError: true)
             }
@@ -52,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Saves the scenario and its cache before quitting, giving the cache a few seconds at most.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        commandServer?.stop()
         guard let document, !isTerminating else { return .terminateNow }
         isTerminating = true
         Task {
@@ -126,10 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     /// Closes the scenario that's open, then shows `opened` in a new panel.
     private func show(_ opened: ScenarioDocument) async {
-        let wasVisible = panel?.isVisible ?? true
+        // Started by the etf tool, the app stays out of the way until asked to show.
+        let wasVisible = panel?.isVisible ?? !ProcessInfo.processInfo.arguments.contains(Self.backgroundArgument)
         panel?.tearDown()
         panel = nil
         router = nil
+        Outside.shared.connect(nil)
         if let old = document {
             document = nil
             await old.close()
@@ -137,7 +146,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         document = opened
         let panel = PanelController(store: opened.store, scenarios: scenarioMenuActions())
         self.panel = panel
-        router = CommandRouter(panel: panel)
+        let router = CommandRouter(panel: panel)
+        self.router = router
+        Outside.shared.connect(router)
+        // Siri's phrases and Spotlight follow the slots' names (Intents.swift).
+        let saving = opened.store.onScenarioChange
+        opened.store.onScenarioChange = {
+            saving?()
+            Outside.shared.slotsMayHaveChanged()
+        }
         UserDefaults.standard.set(opened.package.url.path, forKey: Self.lastScenarioKey)
         // Renaming the scenario in the panel can rename its folder (docs/DESIGN.md, 15.1).
         opened.onMove = { package in
@@ -208,6 +225,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return
         }
         Task { await open(package) }
+    }
+
+    // MARK: The etf tool (docs/DESIGN.md, 10.2 and 13)
+
+    /// Listens for the etf tool, which comes inside the app. Only that tool, or code from the same
+    /// team once the app is signed with one, may connect. Without the tool (as with `swift run`)
+    /// there's nothing to listen for.
+    private func startCommandServer() {
+        switch CallerCheck.forApp(at: Bundle.main.bundleURL) {
+        case .failure(let problem):
+            NSLog("Edit The Future: %@", problem.description)
+        case .success(let check):
+            let server = CommandServer(check: check) { request in
+                await Outside.shared.handle(request, from: .commandLine)
+            }
+            do {
+                try server.start()
+                commandServer = server
+            } catch {
+                NSLog("Edit The Future takes no commands from the etf tool: %@", String(describing: error))
+            }
+        }
     }
 
     // MARK: Hot-keys (docs/UI.md, 4.2)

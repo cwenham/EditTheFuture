@@ -397,6 +397,48 @@ actor ScenarioEngine {
         return FindResult(request: request, startValue: startValue, found: nil)
     }
 
+    /// What the command line or Shortcuts asks of a slot (docs/DESIGN.md, 10.2).
+    struct ReadRequest: Sendable {
+        enum Points: Sendable {
+            /// The slot's last point at or before each date, in order.
+            case at([Date])
+            /// Every point the slot computes in the range.
+            case all(from: Date, through: Date)
+        }
+
+        let slot: Int
+        let variable: String
+        let points: Points
+    }
+
+    enum ReadResult: Sendable {
+        case samples([Sample])
+        case failed(String)
+    }
+
+    /// Reads a slot's values, computing as far as needed (only that slot and what it reads from).
+    func read(_ request: ReadRequest) -> ReadResult {
+        guard ids.indices.contains(request.slot), let id = ids[request.slot] else {
+            return .failed("That slot is paused, so it has no values.")
+        }
+        do {
+            switch request.points {
+            case .at(let dates):
+                return .samples(try dates.map { try scenario.point(request.variable, of: id, atOrBefore: $0) })
+            case .all(let from, let through):
+                return .samples(try scenario.series(request.variable, of: id, from: from, through: through))
+            }
+        } catch EngineError.dateBeforeStart {
+            return .failed("That's before the scenario starts, on \(DateText.dayMonthYear(scenario.start)).")
+        } catch {
+            record(error)
+            if let (_, failure) = Self.failure(error, in: scenario) {
+                return .failed("It stopped after \(DateText.monthYear(failure.date)): \(failure.text)")
+            }
+            return .failed(String(describing: error))
+        }
+    }
+
     /// A copy of a slot for Refit (docs/DESIGN.md, 8.4), or why there can't be one.
     enum FittingCopy: Sendable {
         case copy(SlotCopy)

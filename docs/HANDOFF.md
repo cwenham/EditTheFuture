@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-28, at commit `969f7c8` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-10-31, on `feature/intents-and-cli` (branched from `969f7c8` on `main`, not merged yet): App Intents and the `etf` command-line tool, from milestone M2.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -45,7 +45,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `3f2fd0e` | The scenario menu: switching, New, Duplicate and Edit (name, start date and seed) from the scenario's name in the panel. Merged from `feature/scenario-menu` (`b4e39a2`) and `feature/history-before-start`. |
 | `969f7c8` | Currencies, exchange rates and regional number styles: a currency for each scenario and slot, money converted between slots at the ECB's daily rates or live ones from Open Exchange Rates, and each currency written in its usual style (DESIGN.md 5.11). Merged from `feature/currencies`. |
 
-Milestones M0 and M1 from DESIGN.md section 16 are done.
+Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are built on `feature/intents-and-cli`; the CoreMIDI adapter waits for the hardware.
 
 ## What works
 
@@ -144,6 +144,9 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Other: `copy`, `copy data`, `undo`, `redo`.
 - **Clipboard:** PNG, PDF, a tab-separated table and the app's own JSON, all in one copy.
 - **`etf://` links:** `show`, `now`, `toggle`, `select`, `scroll`, `zoom`, `copy`. Commands that edit, sent from outside the app, ask for confirmation.
+- **The `etf` tool** (DESIGN.md 10.3, UI.md 4.4): inside the app at `Contents/MacOS/etf`. `status`, `slots`, `value`, `data` (CSV), `show`, `goto`, `focus`, `now`, `toggle`, `scroll`, `zoom`, `deposit`, `withdraw`, `set`, `event add`, `add`, `remove`, `undo`, `redo`, `copy`; `--json`, `--number`, `--no-launch`, `--timeout`. It talks to the app through a private socket (`~/Library/Application Support/Edit The Future/commands.sock`), and the app checks the caller is that exact `etf` by its code hash (or the same team, once signed with one). When the app isn't running, `etf` starts it with the panel hidden.
+- **Shortcuts, Siri and Spotlight** (DESIGN.md 10.4): Get Value (with a dialog and a snippet of the line), Show Timeline (an `OpenIntent`, so Spotlight can open a slot), Add Deposit or Withdrawal, Change a Parameter (both ask first), Copy Snapshot. A `SlotEntity` for each slot, by formula name. Four App Shortcuts with Siri phrases. Slots indexed in Spotlight on macOS 15. `scripts/build-app.sh` makes `Metadata.appintents` with Xcode's `appintentsmetadataprocessor`.
+- **The command vocabulary** gained `goto`, `addEvent`, `addModel` and `removeSlot`, and questions (`Query`: status, slots, value, series). Everything from outside is checked for range (`isWellFormed`) and answered with a `Reply`.
 - **Speed:**
   - The engine runs on its own thread and fetches ahead in the scroll direction.
   - Slot groups run on separate cores.
@@ -179,10 +182,12 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Mute and solo, and banks ([ and ]).
   - Click to pin the cursor, and ⌥-scroll to zoom the value axis.
   - Glance HUD and settings.
-- **M2, the next milestone:**
-  - A CoreMIDI adapter and the hardware prototype profile. MIDI decoding and the profile already exist in `FutureCommands/MIDI.swift`.
-  - App Intents for Shortcuts, Spotlight and Siri.
-  - A CLI over XPC.
+- **The rest of M2:** a CoreMIDI adapter and the hardware prototype profile, once the hardware is ready. MIDI decoding and the profile already exist in `FutureCommands/MIDI.swift`; `CommandRouter` answers the hardware's commands (`setWheelMode`, `adjustParameter`, banks, mute and solo) with "comes later" for now.
+- **More for the etf tool and Shortcuts:**
+  - `refit` and `predict` from outside (UI.md 5.11 plans them, asking first).
+  - A Shortcuts "Add reading" action (DESIGN.md 14), opening another scenario, and Siri answers for dates ("in 2030"): Siri phrases can only hold slots, so Siri asks for the date or uses now.
+  - An installer for `etf` on the PATH. For now, link it: `ln -s "$PWD/.build/EditTheFuture.app/Contents/MacOS/etf" /usr/local/bin/etf`.
+  - XPC in place of the socket, if the app gets a Developer ID and a launch agent is wanted (DESIGN.md 10.3).
 - **Later milestones:** iPhone and iPad apps, widgets, plug-in hosts (WebAssembly, remote, ExtensionKit), FMU import, ensembles.
 
 ## Loose ends
@@ -226,7 +231,15 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The start date is a date picker in the system's date order, in UTC like the engine. Years past 9999 can be typed in `scenario.md`, not in the picker.
 - `README.md` still describes only the engine package.
 - **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
-- `goto` with a value, and adding, removing and changing slots, exist only in the panel and command bar. They aren't in the `Command` vocabulary, `etf://` links or the CLI, although UI.md principle 3 says every command should be reachable everywhere.
+- `goto` with a value, and adding and removing slots, are now in the `Command` vocabulary and the `etf` tool, but not in `etf://` links. Changing a slot's model isn't in either.
+- **The etf tool and Shortcuts:**
+  - Checked in tests (the tool's arguments and printing, the wire format, real socket round trips, a refused caller, an Apple-signed `nc` let through by a code-signing requirement, stale sockets, the store's answers and edits on the demo and runaway scenarios) and in the real app with a scratch copy of a scenario: `etf` started the app hidden in about 2.4 seconds, read values and CSV, added a monthly deposit, refused a deposit in the wrong currency, set a rate, found where Savings reaches £1m, and undid back to the file as it was.
+  - **Not seen in Shortcuts yet.** The bundle's `Metadata.appintents` lists all five intents and the slot entity, and `linkd` (the daemon that runs App Intents) connected to the app as it launched, but the actions weren't looked at in the Shortcuts app, nor Siri's phrases, the snippet, the confirmations, or Spotlight's results. Computer use gets Shortcuts only for clicking (no typing), its Gallery doesn't list apps' actions, and its action catalogue (`~/Library/Shortcuts/ToolKit`) is privacy-protected. To check: in Shortcuts, make a new shortcut and search the actions for "Edit The Future".
+  - **The cursor follows a resting pointer.** `etf goto 2030` or `etf show --at` puts the cursor there, but if the mouse pointer rests over the graph when the panel appears, the cursor moves to the pointer within a second. Links do the same. The cursor's hover tracking would need to ignore the pointer until it moves.
+  - On macOS 14 the editing intents ask with `requestConfirmation(result:confirmationActionName:)`, which is deprecated (the build warns); macOS 15 uses the new one.
+  - An ad-hoc rebuild changes the bundled `etf`'s hash, so an `etf` from an older build can't talk to a newer app, and says so. A link on the PATH to the bundle's copy always matches.
+  - `CallerCheck.forApp` trusts the same team's code once the app is signed with a team. With a Developer ID, it may be worth also pinning the identifier `com.editthefuture.etf`.
+  - The intents' Siri phrases aren't localized (`--no-app-shortcuts-localization`).
 - Not checked by hand in the app: dragging chips onto another number, the chip context menus, and typing in the formula editor (completion keys, palette clicks, ⌘↩). The editor's text view was driven in tests (typing, completion, accepting, Esc) and rendered offscreen. Computer use can't find the app, so they were checked only in tests and offscreen renders. The picker popover was checked in an on-screen non-activating panel in a throwaway test.
 - A slider can't be cancelled with Esc while it's being dragged: the slider's tracking loop holds the keyboard until the mouse is let go. Undo covers it.
 - The picker's preview only works for models that don't read other slots.
@@ -253,19 +266,20 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 | `FutureScript` | Lua and Python scripts (DESIGN.md 6.4). `ScriptModel` (an `AuthoredModel`) keeps the state as numbers. `ScriptPrograms` loads each script once and shares it, behind a lock. `LuaRuntime` and `PythonRuntime` drive the interpreters through `CLua` and `CPythonBridge`. `LuaPrelude` and `PythonPrelude` implement the script API and report declarations as JSON (`ScriptDescription`, checked into a `ScriptShape`). `ScriptTools`: `ScriptHighlighter`, `ScriptCompleter` and `ScriptVocabulary`. |
 | `CLua`, `CPythonBridge` | C: Lua 5.5.1 with `etf_lua.c` (sandboxed state, memory cap, time-limit hook, `require`); `etf_python.c` (CPython start, audit hooks, watchdog). `CPythonBridge` is in the package only when `Vendor/Python` exists. |
 | `FutureFormula` | The formula language (DESIGN.md 6.2): lexer, parser (with `range`, `by`, `label` and `as` options), analyzer, resolution to array positions (`Executable`), evaluator, and `FormulaModel`, which takes a slot's own values and reports its constant defaults. `FormulaTools`: `FormulaVocabulary` (functions and built-ins with descriptions), `FormulaHighlighter`, `FormulaCompleter` and `FormulaDiagnoser`, all working on half-written text. |
-| `FutureCommands` | The `Command` vocabulary, `etf://` parsing, the confirmation policy, MIDI decoding, the controller profile and feedback. |
+| `FutureCommands` | The `Command` vocabulary (with `EventRequest`, `Amount`, `Repetition`), `etf://` parsing, the confirmation policy, MIDI decoding, the controller profile and feedback. `Request.swift`: `Query`, `Request`, `Reply` and its answers, and `Wire` (versioned JSON, infinity and NaN as text). `CommandLineTool`: the `etf` tool's arguments, amounts and printing. `CommandSocket.swift`: `CommandServer`, `CommandClient`, `Caller` (from the socket's audit token) and `CallerCheck` (code-signing requirements). |
 | `FutureDocument` | Saved scenarios (DESIGN.md, 15), with no UI: `ScenarioFormat` reads `scenario.md` into a `ScenarioFile` and writes it back over the text it came from (`ParsedScenario` keeps where each part was). `FileNumber` and `FileDate` write numbers and dates exactly. `EventIdentity` gives events the ids the file would. `ReadingLoader`, `CSVReadings` and `DatabaseReadings` (SQLite) make a `ReadingSet`, with each source's readings apart (`LoadedReadings.parts`). `FeedSpec` is a feed's line, `FeedCopy` its copy in `readings/` and the merging of new readings. `SlotCache` reads and writes cache files; `Fingerprint` hashes. `ScenarioPackage` is the folder. |
 | `FutureFeeds` | Feeds (DESIGN.md, 15.8), with no UI: `FeedProvider` and the sources in `Providers/`, `FeedCatalog` (ready-made feeds), `FeedCredential` with `KeychainCredentialStore` and `MemoryCredentialStore`, `FeedFetcher` (sign-ins, hosts, pages, errors) over a `FeedTransport`, `Rates.swift` (exchange rates: `FrankfurterRates`, `OpenExchangeRates`, `RateFetcher`) (`URLSessionTransport`, with a guard on redirects), and `FeedDate`, `FeedNumber`, `JSONPath` and `FeedTable` for what sources send. |
 | `FutureUI` | `ScenarioStore` (main actor, `@Observable`) holds the frame, cursor, focus, add-event draft, undo and the command bar, and draws only from the engine's cached results (`computed`). `ScenarioEngine` (an actor on its own serial queue) owns the `Scenario` and runs edits, fetches, previews and `goto` searches in order. Fetches compute four years at a time and stop when a newer fetch is waiting. Also `PanelState` (the value types views draw), Canvas views, `CommandBarParser`, `Formatting` (`ValueFormat`, the kind of value; `ValueStyle`, a format with its currency, which writes values; `niceTicks`, `DateText`) and the snapshot exporter. Slots: `SlotConfig` (the store's record of each slot, replaced whole for undo), `SlotEditing` (the store's slot changes), `ModelLibrary`, and the views `SidePane`, `SlotPane` and `ModelPicker`. Formulas: `FormulaEditing` (drafts, checks, preview, apply) and the views `FormulaPane` and `FormulaEditor` (an `NSTextView` with line numbers and its own completion list). Saving: `ScenarioDocument` (opens a folder off the main thread, saves after changes, checks the file every second, writes the cache on closing, moves the folder after a rename) and `ScenarioLibrary` (the Scenarios folder, new scenarios and copies); `ScenarioMenu.swift` (`ScenarioSettings`, `ScenarioForm`, `ScenarioMenuActions`) and the views in `ScenarioMenuView.swift` (`ScenarioTitle`, the `NSMenu`, `ScenarioFormView`); `ScenarioFileMapping` turns the store into a `ScenarioFile` and back (`reload(from:)`), and works out fingerprints. Money: `Money.swift` (`ScenarioMoney`, `SlotConversion`, conversions, writings, waiting for rates, the Slot tab's note) and `RateCenter` (fetching rates into `readings/`). Feeds: `FeedCenter` (fetching, copies, statuses), `FeedEditing` (adding, changing and removing feeds, a feed's own slot, new readings, readings for drawing), and the views `FeedSetup` and the Slot tab's Readings section. |
-| `EditTheFutureMac` | `AppDelegate` (status item and hot-keys), `FloatingPanel`, `PanelController` (hosting, keys, scroll mapping, copy), `CommandRouter` (runs `Command`s, asks for confirmation), `HotKeyCenter` (Carbon hot-keys). |
+| `EditTheFutureMac` | `AppDelegate` (status item, hot-keys, the socket server), `FloatingPanel`, `PanelController` (hosting, keys, scroll mapping, copy), `CommandRouter` (runs `Command`s, asks for confirmation, answers with a `Reply`) and `Outside` (holds requests until a scenario is open), `HotKeyCenter` (Carbon hot-keys). `Intents.swift`: the App Intents, `SlotEntity`, the App Shortcuts and the snippet. |
 | `etf-bench` | Benchmarks that render the real panel. |
+| `etf` | The command-line tool inside the app: reads its arguments, starts the app if needed, sends one request and prints the reply. |
 | `etf-feed` | Fetches a feed without the app and prints CSV; `--list` and `--check` for the ready-made feeds. |
 
 ## Checking your work
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 420 tests in about 40 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Tests:** `swift test` runs about 445 tests in about 40 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
 - **Exchange rates against the live sources:** `swift run etf-feed --rates GBP,EUR --since 2026-10-01` (the ECB, through Frankfurter), and `--live` with `--key` for Open Exchange Rates.
 - **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
 - **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.
@@ -286,6 +300,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
     - Lay out, display and run the run loop a few times.
     - Write a PNG with `cacheDisplay(in:to:)`.
 - **Saving:** the app reads and writes `~/Library/Application Support/Edit The Future/Scenarios`. To check outside edits, change `scenario.md` there while the app runs. Delete the folder to start again from the built-in scenario. In tests, `ScenarioDocument.open(_:now:watch: false)` and `checkFile(force: true)` avoid waiting for the timer, and `ScenarioDocument.cacheThreshold = 0` caches every slot.
+- **The etf tool in the app:** after `scripts/build-app.sh`, use `.build/EditTheFuture.app/Contents/MacOS/etf` (a `swift run etf` copy isn't trusted by the app). To try edits without touching a real scenario, copy one to a scratch folder, `open -a "$PWD/.build/EditTheFuture.app" "<folder>/Copy.etf"` (`open -a` needs the app's full path), and put `scenario.lastOpened` back afterwards. `etf status` says which scenario is open.
+- **The system log:** in zsh, `log` is a shell builtin; use `/usr/bin/log show`. Default-level lines are rarely kept, so the app's own `NSLog`s and `linkd`'s connections are about all there is.
 - **Crash reports:** `~/Library/Logs/DiagnosticReports/EditTheFuture-*.ips`. Everything after the first line is JSON, and the faulting thread's frames are symbolicated.
 
 ## Lessons learned
@@ -336,6 +352,10 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Views must keep a slot's `id` (or the `SlotInfo` itself), never its index, and look the index up when they draw or act (`store.slotIndex(id:)`). After a removal, SwiftUI can draw a child view once more with the inputs its parent gave it last time, before the parent catches up. A chip that kept an index read past the end of `store.slots` and crashed the app when the last slot was removed.
   - The store's slot functions ignore an index with no slot, as a second line of defense.
 
+- **XPC needs launchd to know the name.** `NSXPCListener(machServiceName:)` in an ordinary app fails silently: clients' connections are just invalidated. `bootstrap_check_in` with a new name does work at run time (Chromium relies on it), but gives a raw Mach port, not an XPC listener. Hence the socket (DESIGN.md 10.3).
+- **SIGPIPE from a caller that hung up:** macOS refuses `setsockopt` (`SO_NOSIGPIPE`) on a socket whose other end has already closed, so writing a reply to it stopped the whole process with SIGPIPE. It happened when the "is anyone listening?" check connected and closed at once. Now a connection whose option can't be set is closed without a word, and a reset counts as hanging up. The test "A socket left behind is replaced…" stopped the test run without the fix.
+- **App Intents without Xcode:** SwiftPM builds the intents' code but not the `Metadata.appintents` Shortcuts reads. The compiler writes the constant values it needs with `-emit-const-values` and a list of protocols (`-const-gather-protocols-file`; the list is in Xcode's `SWBApplePlatform`), and `appintentsmetadataprocessor` takes them with the source list. In release builds the values are one file for the module, in debug builds one per source file.
+- **The test runner isn't signed,** so a code-signing check can't let it through. A program Apple signed stands in: `/usr/bin/nc -U` talks to a Unix socket, and `anchor apple` lets it in.
 - **Saved scenarios** (DESIGN.md, 15):
   - Folder listings give directory URLs a trailing slash, so two URLs for one folder can differ. `ScenarioPackage` normalizes its URL.
   - JSON writers don't all keep every digit of a `Double`, so the cache writes event times and values as exact text (`FileNumber`).

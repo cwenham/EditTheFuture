@@ -733,9 +733,15 @@ Menus, keyboard shortcuts, the URL scheme, the command-line tool, App Intents an
 |---|---|
 | Window | `toggleWindow`, `peek(begin/end)` |
 | Slots | `selectSlot(n)`, `toggleSlotVisible(n)`, `soloSlot(n)`, `nextBank`, `previousBank` |
-| Timeline | `scroll(ticks)`, `zoom(ticks)`, `jumpToNow`, `show(timeline, at)`, `setWheelMode`, `cycleWheelMode` |
-| Editing | `insertEventAtCursor`, `adjustParameter(name, ticks)`, `undo`, `redo` |
+| Timeline | `scroll(ticks)`, `zoom(ticks)`, `jumpToNow`, `show(timeline, at)`, `goto(text)`, `setWheelMode`, `cycleWheelMode` |
+| Editing | `insertEventAtCursor`, `adjustParameter(name, ticks)`, `addEvent(EventRequest)`, `addModel(name, slot)`, `removeSlot(name)`, `undo`, `redo` |
 | Clipboard | `copySnapshot(format)`, `copyData` |
+
+- `goto` takes the command bar's text: a date, or a value with its unit or slot (`2035`, `savings 1m`, `25°C`).
+- An `EventRequest` names a slot (or the focused one), a kind (`deposit`, `withdraw`, `set` for parameters, or another kind the slot takes), its values, the currency they were given in, a date (now when left out) and how often it repeats. A plain number for a percent is in percent, as in the Slot tab: 4.5 is 4.5%; `Amount.isFraction` marks one given with "%".
+- `removeSlot` only asks: the panel shows the question in the Slot tab (13, rule 6).
+- **Questions** (`Query`) never change anything: `status`, `slots`, `value(slot, variable, at)` and `series(slot, variable, from, through, every)`. A request from outside is a `Request`: a command or a question. Each gets a `Reply`, with a message in the panel's words and, for questions, the answer.
+- Commands that arrive from outside are checked with `isWellFormed` before they run: slots 1–8, ticks within the URL scheme's limit, names up to 200 characters, finite amounts. Dates are checked as they're decoded.
 
 Feedback to devices: each slot's name, color, state (idle, computing, error) and whether it's selected or soloed. Also the cursor's date and value text, the wheel mode, and whether peek is active.
 
@@ -744,11 +750,42 @@ Feedback to devices: each slot's name, color, state (idle, computing, error) and
 Everything that's reasonable and secure (section 13):
 
 - **URL scheme `etf://`**, for example `etf://show?timeline=savings&at=2030-01`. Others: `etf://toggle`, `etf://now`, `etf://select?slot=3`, `etf://scroll?ticks=12`, `etf://zoom?ticks=-2`, `etf://copy?format=png|pdf|tsv|all`. Dates can be `YYYY`, `YYYY-MM` or `YYYY-MM-DD`.
-- **Command-line tool `etf`**, bundled with the app, talking to it over XPC: `etf show savings --at 2030-01`, `etf value savings balance --at 2030-01`, `etf copy --format tsv`, `etf event add savings deposit amount=500 --at 2027-01-01`.
+- **Command-line tool `etf`**, inside the app, talking to it through a private local socket (10.3): `etf show savings --at 2030-01`, `etf value savings balance --at 2030-01`, `etf data savings --every monthly`, `etf copy --format tsv`, `etf event add savings deposit amount=500 --at 2027-01-01`.
 - **Menu bar item** (`MenuBarExtra`): current values, quick toggle, recent timelines.
-- **App Intents** on all platforms, powering Shortcuts, Spotlight and Siri: "What's my savings balance in 2030?" answers with a value and a chart snippet. Also intents to show a timeline, add an event, and copy a snapshot.
+- **App Intents** on all platforms, powering Shortcuts, Spotlight and Siri (10.4): "What's my savings balance in 2030?" answers with a value and a chart snippet. Also intents to show a timeline, add a deposit or withdrawal, change a parameter, and copy a snapshot.
 - **Local network API** for paired devices only (section 7).
 - **AppleScript**: optional and low priority. App Intents and the CLI cover most needs.
+
+### 10.3 The etf tool
+
+`etf` (`Sources/etf`) only reads its arguments, connects and prints. Reading the arguments and printing replies are in `FutureCommands` (`CommandLineTool`), so they're tested without the app.
+
+- **Commands:** `status`, `slots`, `value [SLOT] [VALUE] [--at DATE]`, `data [SLOT] [VALUE] [--from] [--through] [--every]` (CSV), `show`, `goto`, `focus`, `now`, `toggle`, `scroll`, `zoom`, `deposit`, `withdraw`, `set`, `event add`, `add`, `remove`, `undo`, `redo` and `copy`. `etf help` lists them.
+- **Output:** text in the panel's words, the value as the panel writes it (`£96,420`), `--number` for every digit (`96420.12345`, `inf`, `nan`), CSV for `data`, and `--json` for the whole reply. Errors go to standard error. Exit codes: 0 done, 1 the app said no, 2 wrong arguments, 3 the app couldn't be reached.
+- **Numbers** use a point for decimals whatever the slot's style, as scripts expect: `1,200.50`, `1.5k`, `4.5%`, `£500`, `500eur`. Commas only group thousands, so `1,5` is refused rather than read as 15.
+- **Dates** are `2030`, `2030-06` or `2030-06-15`, in UTC like the engine. `value` gives the slot's last step at or before the date. `data` without dates covers ten years from today, one row a step, or one per `--every` holding the value then; it stops at 100,000 rows.
+- **Starting the app:** when nothing is listening, `etf` starts the app it came in (or the one macOS knows) with `--background`, so the panel stays hidden until a command shows it, and waits up to 20 seconds.
+- **The socket:** `~/Library/Application Support/Edit The Future/commands.sock`, or the per-user cache folder when that path is too long for a socket's address. One request and one reply a connection, each a length then JSON (`Wire`), with a version. JSON can't hold infinity or NaN, so they're written as `"inf"`, `"-inf"` and `"nan"`.
+- **Why not XPC:** an app can't offer a named XPC service unless launchd knows the name first, which means a launch agent registered with `SMAppService`. That shows in Login Items, with a notice, likely again after every ad-hoc rebuild. A Unix socket gives the same check of the caller's code signature (13, rule 2) without it. The protocol is apart from the transport, so XPC can replace the socket later.
+- **Questions** go through the engine's queue after anything already queued (`ScenarioEngine.read`), so the main thread still never computes. A value far ahead computes that far, as `goto` does.
+
+### 10.4 Shortcuts, Siri and Spotlight
+
+The intents are in the app (`EditTheFutureMac/Intents.swift`) and wait for its scenario to open. A slot is a `SlotEntity`, known by its formula name, which the scenario file keeps, so a shortcut finds it again after the app restarts.
+
+| Intent | Does | Asks first |
+|---|---|---|
+| Get Value | A slot's value now or at a date, with a dialog ("Savings will be £96,420 in Jan 2030.") and a snippet of its line, from now to the date | No |
+| Show Timeline | Shows the panel at a slot and a date. Spotlight runs it when a slot is picked from its results (`OpenIntent`) | No |
+| Add Deposit or Withdrawal | Once or repeating, from a date | Yes |
+| Change a Parameter | From a date; 4.5 means 4.5% for a percent | Yes |
+| Copy Snapshot | Everything, a picture, PDF, a table or data only | No |
+
+- **Siri phrases** (`EditTheFutureShortcuts`): "What's Savings in Edit The Future", "Show Savings in Edit The Future", "Add a deposit in Edit The Future", "Copy a snapshot from Edit The Future". Siri learns the slots' names from `updateAppShortcutParameters()`, called when a scenario opens and when slots change.
+- **Spotlight** (macOS 15 and later): the slots are indexed as entities (`IndexedEntity`), and those no longer in the scenario are taken out.
+- **A date picked in Shortcuts** is the day it falls on in the Mac's time zone, as a UTC date for the engine (`PartialDate(day:in:)`).
+- **Asking first:** editing intents check the event (`ScenarioStore.describe`), ask with Shortcuts' own confirmation, then add it. The app's own alert isn't used for them.
+- **Building:** Xcode makes the app's `Metadata.appintents` from constant values the compiler records. SwiftPM doesn't, so `Package.swift` asks the compiler for them on the app's module (`-emit-const-values`, with the protocols in `scripts/appintents-protocols.json`), and `scripts/build-app.sh` runs Xcode's `appintentsmetadataprocessor` on them. Without Xcode selected, the app builds without its intents.
 
 ## 11. Clipboard and export
 
@@ -834,7 +871,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
    | Paired device over the network | runs | runs | confirm |
 
    Any web page can open an `etf://` link, so links can navigate but can't edit data or overwrite the clipboard without confirmation. Plug-ins can never be installed from a URL.
-2. **XPC (CLI):** the app's Mach service accepts only clients signed by the same team (`setCodeSigningRequirement`).
+2. **The etf tool:** the app listens on a private Unix socket (10.3): the file is readable and writable only by the user, in a folder only the user can open. Before reading anything, it checks the caller's code signature against its audit token from the kernel (`CallerCheck`): code signed by the app's team, or, in an ad-hoc build without a team, only the exact `etf` inside this app, by its code hash. Requests that are too large, unreadable or out of range are answered with why and never run. A caller that hangs up gets nothing. Without the tool in the bundle (as with `swift run`), the app doesn't listen.
 3. **Network:** nothing listens. The app connects out only to paired devices and to the sources of a scenario's feeds (15.8).
    - Paired devices: explicit pairing, TLS-PSK, permissions per capability, revocable. No anonymous HTTP server.
    - Feeds fetch data (CSV and JSON), never code. Answers are capped at 64 MB, and requests have time limits. Cookies and caches aren't kept.
@@ -1149,7 +1186,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M0 (this scaffold) | Engine package: time grids, events, checkpoints, coordinator with connections, event routes and same-step loop checks, goal seek, formula language, command vocabulary, URL scheme, MIDI decoding and profile, tests |
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
-| M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); CLI over XPC |
+| M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); the command-line tool. App Intents and the `etf` tool are done (10.3, 10.4), the tool through a local socket rather than XPC. The CoreMIDI adapter waits for the hardware. |
 | M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with and the automatic pick are done (15.8, 4.6, 8.4). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
@@ -1200,25 +1237,27 @@ Sources/
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
-  FutureCommands/    Command vocabulary, DeviceFeedback, etf:// URL scheme, MIDI decoding, profile and feedback
+  FutureCommands/    Command vocabulary, questions and replies, DeviceFeedback, etf:// URL scheme, the etf tool's arguments and printing, the local socket and its caller check, MIDI decoding, profile and feedback
   FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, feeds' lines and copies, cache files, the scenario folder
   FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping
-  EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping, answers and edits for the etf tool and Shortcuts (OutsideRequests)
+  EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links, the command router and the socket server, App Intents
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
   etf-script/        runs a script model without the app and prints CSV
+  etf/               the command-line tool inside the app: sends one request and prints the reply (10.3)
   etf-feed/          fetches a feed without the app and prints CSV
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit
   FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
-  FutureCommandsTests/  URL scheme, confirmation policy, MIDI parsing and mapping, feedback encoding
+  FutureCommandsTests/  URL scheme, confirmation policy, the etf tool's arguments, amounts and printing, the wire format, the socket (round trips, refused callers, stale sockets), MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
   FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts
 scripts/
-  build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, and the .etf document type
+  build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, the .etf document type, the etf tool and the App Intents metadata
+  appintents-protocols.json  the protocols whose constant values the compiler records for App Intents
   fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
 ```
 

@@ -12,6 +12,7 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 - Python for scripts: `scripts/fetch-python.sh` once per checkout (into `Vendor/Python`, not in git). Without it, Python slots pause. Run it again if Python's tests show as skipped: SwiftPM caches whether the folder was there.
 - A script without the app: `swift run etf-script model.lua --through 2040-01-01`
 - A feed without the app: `swift run etf-feed "[feed: fred, series: DGS10]" --since 2026-01-01`; `--check` fetches every ready-made feed that needs no key; `--rates GBP,EUR` fetches exchange rates.
+- The command-line tool, once the app is built: `.build/EditTheFuture.app/Contents/MacOS/etf help` (`etf value savings --at 2030`, `etf data savings --every monthly`). The app trusts only the copy inside it.
 - App: `scripts/build-app.sh`, then `open .build/EditTheFuture.app`. It's a menu bar app; show the panel with ⌃⌥Space or `open "etf://show?timeline=savings&at=2060-01"`.
 
 ## Rules

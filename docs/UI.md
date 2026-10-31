@@ -193,6 +193,17 @@ Commands come through the MIDI profile (DESIGN.md, 12.3):
 - The wheel follows its mode. When the mode changes, a toast shows the new mode (the Glance artboard).
 - Slot LEDs mirror slot colors, and pulse while a slot computes.
 
+### 4.4 From outside: the etf tool, Shortcuts and Siri
+
+The open scenario answers questions and takes commands from outside the panel (DESIGN.md, 10.3 and 10.4). What they change shows in the panel at once, saves, and can be undone like any edit.
+
+- **Questions** don't move anything: `etf value savings --at 2030` prints `£96,420`; Siri says "Savings will be £96,420 in Jan 2030." and shows the slot's line from now to then, with a dot at the date.
+- **Moving the panel:** `etf show`, `etf goto` and `etf focus`, and Shortcuts' Show Timeline, bring the panel up. `now`, `scroll` and `zoom` move it without showing it.
+- **Changes** say what they did, in the command bar's words: "Added +£500 every month from Jan 2027 to Savings". The footer shows the same message. Shortcuts asks before each change ("Add +£500 every month from Jan 2027 to Savings?"); the etf tool doesn't, as the keyboard doesn't.
+- **Removing a slot** from outside opens the Slot tab with its question, as the command bar does. Nothing is removed until it's confirmed there.
+- **Started by the etf tool**, the app opens its scenario with the panel hidden, so a script reading values doesn't put a window on the screen.
+- **Mistakes** say what's wrong and what would work: "Savings is in British pounds. Give the amount in £, or without a currency." "Savings has no value called “colour”. Its values: balance, rate, monthly."
+
 ## 5. Interactions
 
 ### 5.1 Scrubbing and the cursor
@@ -548,6 +559,12 @@ Sections:
   - `RateCenter`, owned by `ScenarioDocument` like `FeedCenter`, reads the copies, fetches what's due one fetch at a time, and remembers which currencies each fetch asked for, so a currency still missing afterwards waits for the next fetch that's due.
   - The form's App ID is looked up in the Keychain only once live rates are chosen (`checkForAppID`), so tests never touch it.
   - New and Duplicate write the folder off the main thread (`ScenarioLibrary.createBlank`, `duplicate`), then ask the app to open it.
+- **Requests from outside** (4.4, DESIGN.md 10.3 and 10.4):
+  - `OutsideRequests.swift` extends the store: `answer(_:)` for questions, `addEvent`, `describe`, `goto`, `addModel`, `removeSlot`, `undoForReply` and `redoForReply`. Each returns a `Reply`.
+  - Values are read through the engine's queue (`ScenarioStore.read`, `ScenarioEngine.read`), after anything already queued. `Scenario.point` gives the slot's last step at or before a date, with its time.
+  - Commands that reuse the command bar run its action and answer with what the store said (`replying`): `messageCount` tells whether a message came, and the reply waits until the engine is idle, so `goto savings £1m` answers with where it found it.
+  - `CommandRouter.perform` answers every command with a `Reply`. `Outside` (in the app) holds requests until a scenario is open, then sends them to the router of the one that's open. It also tells Siri and Spotlight when the slots' names change.
+  - The snippet's line (`SnippetLine`) leaves out values that aren't finite and scales with `ScenarioStore.laneDomain`.
 - **Measuring:** `swift run -c release etf-bench` times the engine, the panel state, and real SwiftUI frames while scrolling, zooming and moving the cursor. It reports main-thread CPU time as well as wall time. `etf-bench flick [frames]` replays zooming all the way out and flicking far into the future, and `etf-bench far [year]` times the engine computing that far. `etf-bench loop`, `engine-loop` and `cursor-loop [scroll|preview]` run long enough to profile with `sample` or Instruments.
 - **Snapshots:**
   - `ImageRenderer` renders a chrome-free snapshot view to PNG and PDF.

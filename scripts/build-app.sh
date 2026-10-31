@@ -6,12 +6,15 @@ cd "$(dirname "$0")/.."
 
 config=${1:-release}
 swift build -c "$config" --product EditTheFutureMac
+swift build -c "$config" --product etf
 bin_path=$(swift build -c "$config" --show-bin-path)
 
 app=.build/EditTheFuture.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_path/EditTheFutureMac" "$app/Contents/MacOS/EditTheFuture"
+# The command-line tool (docs/DESIGN.md, 10.2). The app takes commands only from this copy.
+cp "$bin_path/etf" "$app/Contents/MacOS/etf"
 
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -102,5 +105,35 @@ if [[ -d "$bin_path/Python.framework" ]]; then
     install_name_tool -add_rpath @executable_path/../Frameworks "$app/Contents/MacOS/EditTheFuture"
 fi
 
+# Shortcuts, Siri and Spotlight read the app's intents from Contents/Resources/Metadata.appintents,
+# which Xcode makes with appintentsmetadataprocessor from the constant values the compiler
+# recorded (Package.swift). Without Xcode the app still runs, without its intents.
+if processor=$(xcrun --find appintentsmetadataprocessor 2>/dev/null); then
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    ls "$PWD"/Sources/EditTheFutureMac/*.swift > "$work/sources.txt"
+    find "$bin_path/EditTheFutureMac.build" -name '*.swiftconstvalues' > "$work/constvalues.txt"
+    arch=$(uname -m)
+    "$processor" \
+        --toolchain-dir "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain" \
+        --module-name EditTheFutureMac \
+        --sdk-root "$(xcrun --show-sdk-path)" \
+        --xcode-version "$(xcodebuild -version | awk '/Build version/ { print $3 }')" \
+        --platform-family macOS \
+        --deployment-target 14.0 \
+        --bundle-identifier com.editthefuture.mac \
+        --target-triple "$arch-apple-macos14.0" \
+        --binary-file "$app/Contents/MacOS/EditTheFuture" \
+        --source-file-list "$work/sources.txt" \
+        --swift-const-vals-list "$work/constvalues.txt" \
+        --output "$app/Contents/Resources" \
+        --force --no-app-shortcuts-localization --quiet-warnings 2>&1 | grep -v -E "^\S+ \S+ appintentsmetadataprocessor\[" || true
+    [[ -f "$app/Contents/Resources/Metadata.appintents/extract.actionsdata" ]] || echo "warning: no App Intents metadata was made" >&2
+else
+    echo "warning: Xcode isn't selected (xcode-select), so the app's App Intents won't show in Shortcuts" >&2
+fi
+
+# The tool is signed first: the app is sealed with it inside, and trusts that exact copy.
+codesign --force --sign - --identifier com.editthefuture.etf "$app/Contents/MacOS/etf" >/dev/null
 codesign --force --sign - "$app" >/dev/null
 echo "Built $app"

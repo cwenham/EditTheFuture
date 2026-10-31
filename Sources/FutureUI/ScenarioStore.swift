@@ -128,7 +128,7 @@ public final class ScenarioStore {
 
     /// A lane's vertical range: its values with a little room above and below. Always a valid,
     /// finite range, whatever the values (building a range whose bounds are out of order traps).
-    nonisolated static func laneDomain(low: Double, high: Double) -> ClosedRange<Double> {
+    public nonisolated static func laneDomain(low: Double, high: Double) -> ClosedRange<Double> {
         let a = clampToPlot(low), b = clampToPlot(high)
         let low = min(a, b), high = max(a, b)
         let pad = max((high - low) * 0.12, max(abs(low), abs(high)) * 0.01, 1e-9)
@@ -180,6 +180,8 @@ public final class ScenarioStore {
     public private(set) var revision = 0
     public private(set) var message: String?
     public private(set) var messageIsError = false
+    /// How many messages have been said, so a request from outside can tell whether it got one.
+    @ObservationIgnored private(set) var messageCount = 0
     /// Incremented to ask the view to focus the command bar.
     public private(set) var commandBarFocusRequest = 0
 
@@ -912,6 +914,13 @@ public final class ScenarioStore {
         }
     }
 
+    /// Reads a slot's values for the command line or Shortcuts, after everything already queued.
+    func read(_ request: ScenarioEngine.ReadRequest) async -> ScenarioEngine.ReadResult {
+        await withCheckedContinuation { reply in
+            enqueue(.read(request, reply: reply))
+        }
+    }
+
     /// Results worth saving (docs/DESIGN.md, 15.5), by slot index in `configs` as it is now. The
     /// engine answers after everything already queued.
     func resultsToSave(minimumSeconds: Double) async -> [Int: SlotHistory] {
@@ -929,6 +938,7 @@ public final class ScenarioStore {
         case find(ScenarioEngine.FindRequest)
         case export(minimumSeconds: Double, reply: CheckedContinuation<[Int: SlotHistory], Never>)
         case copyForFitting(slot: Int, reply: CheckedContinuation<ScenarioEngine.FittingCopy, Never>)
+        case read(ScenarioEngine.ReadRequest, reply: CheckedContinuation<ScenarioEngine.ReadResult, Never>)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
@@ -955,7 +965,7 @@ public final class ScenarioStore {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
-        case .mutate, .find, .export, .copyForFitting: break
+        case .mutate, .find, .export, .copyForFitting, .read: break
         }
         engineQueue.append(operation)
         guard !isDraining else { return }
@@ -974,6 +984,7 @@ public final class ScenarioStore {
             case .find(let request): receive(await engine.find(request))
             case .export(let minimum, let reply): reply.resume(returning: await engine.resultsToSave(minimumSeconds: minimum))
             case .copyForFitting(let slot, let reply): reply.resume(returning: await engine.copyForFitting(slot: slot))
+            case .read(let request, let reply): reply.resume(returning: await engine.read(request))
             }
         }
         isDraining = false
@@ -1251,6 +1262,7 @@ public final class ScenarioStore {
     public func say(_ text: String, isError: Bool = false) {
         message = text
         messageIsError = isError
+        messageCount += 1
     }
 
     static func describe(_ rate: StepRate) -> String {

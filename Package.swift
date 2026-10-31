@@ -32,6 +32,7 @@ let package = Package(
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
         .executable(name: "etf-feed", targets: ["etf-feed"]),
+        .executable(name: "etf", targets: ["etf"]),
     ],
     targets: [
         .target(name: "FutureEngine"),
@@ -46,8 +47,14 @@ let package = Package(
         .target(name: "FutureFeeds", dependencies: ["FutureEngine", "FutureDocument"]),
         .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
                                                  "FutureFeeds"]),
+        // The compiler records the App Intents' constant values, which scripts/build-app.sh turns into
+        // the app's Metadata.appintents, as Xcode would, so Shortcuts, Siri and Spotlight find them.
         .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
-                                                                    "FutureDocument", "FutureFeeds"]),
+                                                                    "FutureDocument", "FutureFeeds"],
+                          swiftSettings: [.unsafeFlags(["-emit-const-values", "-Xfrontend", "-const-gather-protocols-file",
+                                                        "-Xfrontend", Context.packageDirectory + "/scripts/appintents-protocols.json"])]),
+        // The command-line tool that comes inside the app: etf value savings --at 2030 (docs/DESIGN.md, 10.2)
+        .executableTarget(name: "etf", dependencies: ["FutureCommands"]),
         // Fetches a feed without the app: swift run etf-feed "[feed: fred, series: DGS10]"
         .executableTarget(name: "etf-feed", dependencies: ["FutureFeeds", "FutureDocument", "FutureEngine"]),
         // Runs a script model without the app: swift run etf-script <file>
