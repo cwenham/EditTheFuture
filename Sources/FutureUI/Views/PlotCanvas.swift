@@ -17,6 +17,27 @@ struct PlotRule {
     var dash: [CGFloat] = []
 }
 
+/// Dim lines down the graph at the events a person added, so the eye can match a diamond in
+/// the events strip to where the line changes (docs/UI.md, 2.4). Drawn behind the lines.
+struct PlotEventLines {
+    var dates: [Date]
+    var color: Color
+
+    /// Lines closer than this to the last one drawn are skipped, so dense events don't fill the graph.
+    static let minSpacing: CGFloat = 4
+
+    /// Where the lines go in a plot `width` points wide: the dates in view, thinned to `minSpacing`.
+    static func xs(dates: [Date], frame: TimeFrame, width: CGFloat) -> [CGFloat] {
+        var xs: [CGFloat] = []
+        for date in dates.sorted() where frame.contains(date) {
+            let x = frame.x(date, width: width)
+            if let last = xs.last, x - last < minSpacing { continue }
+            xs.append(x)
+        }
+        return xs
+    }
+}
+
 /// Readings: dots on a thin line, at 85% opacity (docs/UI.md, 2.4). The dots are drawn only
 /// while there's room between them.
 struct PlotReadings {
@@ -53,6 +74,7 @@ struct PlotCanvas: View {
     var bands: [PlotBand] = []
     let series: [PlotSeries]
     var rules: [PlotRule] = []
+    var eventLines: PlotEventLines?
     var readings: PlotReadings?
     var marker: PlotMarker?
     /// The scenario's start, where the models' lines begin. When the frame reaches back before it,
@@ -86,6 +108,14 @@ struct PlotCanvas: View {
                     grid.addLine(to: CGPoint(x: size.width, y: lineY))
                 }
                 context.stroke(grid, with: .color(Theme.grid), lineWidth: 1)
+            }
+            if let eventLines, !eventLines.dates.isEmpty {
+                var path = Path()
+                for lineX in PlotEventLines.xs(dates: eventLines.dates, frame: frame, width: size.width) {
+                    path.move(to: CGPoint(x: lineX, y: 0))
+                    path.addLine(to: CGPoint(x: lineX, y: size.height))
+                }
+                context.stroke(path, with: .color(eventLines.color), lineWidth: 1)
             }
             for band in bands {
                 context.fill(Self.path(for: band.points, x: x, y: y), with: .color(band.color))

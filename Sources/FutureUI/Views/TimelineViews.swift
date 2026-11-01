@@ -169,6 +169,12 @@ struct YAxisLabels: View {
 struct FocusChart: View {
     let timeline: TimelineState
 
+    /// The dates of the events a person added: one-off events and where recurring ones start.
+    /// Not the ones a model generates, and not readings.
+    static func eventLineDates(_ markers: [EventMarker]) -> [Date] {
+        markers.filter { $0.kind != .generated }.map(\.date)
+    }
+
     var body: some View {
         let focus = timeline.focus
         // While a target is set, the line as it is fades, so the proposed path stands out.
@@ -196,6 +202,7 @@ struct FocusChart: View {
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
                           bands: bands, series: series, rules: rules,
+                          eventLines: PlotEventLines(dates: Self.eventLineDates(focus.events), color: focus.color.opacity(0.22)),
                           readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
                           modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
