@@ -170,6 +170,15 @@ struct PanelHeader: View {
                         .frame(width: 80)
                         .controlSize(.mini)
                         .accessibilityLabel("Panel opacity")
+                    #if os(macOS)
+                    Toggle("Blur", isOn: $store.blursBehind)
+                        .toggleStyle(.checkbox)
+                        .controlSize(.small)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondary)
+                        .help("Blur what's behind the panel. Off, the panel is clear, so you can read the windows beneath it.")
+                        .accessibilityLabel("Blur behind panel")
+                    #endif
                 }
                 .padding(.horizontal, 8)
                 IconButton(systemName: "xmark", label: "Hide panel (Escape)", action: actions.hide)

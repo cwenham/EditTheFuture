@@ -32,7 +32,7 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 
 | Token | Value | Use |
 |---|---|---|
-| `panel` | `rgba(20,22,27,α)`, α = 0.86 by default, user range 0.60–1.00 | Panel background over a blur of what's behind |
+| `panel` | `rgba(20,22,27,α)`, α = 0.86 by default, user range 0.60–1.00 | Panel background over a blur of what's behind, or over what's behind as it is when Blur is off |
 | `hairline` | `rgba(255,255,255,0.08)` | Dividers, chip borders |
 | `text` | `#ECEEF1` | Primary text, values |
 | `text.secondary` | `#A3A9B1` | Labels, axes, metadata. At least 4.5:1 at α ≥ 0.60 over a light window |
@@ -86,7 +86,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 
 **Window:**
 - An `NSPanel` (non-activating, floating level, `.canJoinAllSpaces`, `.fullScreenAuxiliary`), hosting SwiftUI.
-- Material background with the opacity from section 2.1. Corner radius 14.
+- Material background with the opacity from section 2.1. Corner radius 14. The header's Blur checkbox (on by default) turns the blur off, leaving the panel clear so numbers in the windows beneath can be read through it. Like the opacity, it isn't saved between launches.
 - Default size 1400×820, minimum 1100×600. Resizable; the frame is remembered per display. The focused graph takes all the height left after the axis, events strip and lanes, so making the window taller makes the graph taller.
 - Moves only by dragging the top bar. Drags on the timeline are kept for timeline gestures (drag the future, moving events).
 - No click-through mode: the panel always takes clicks while it's visible, and hides with Esc or the hot-key.
@@ -104,7 +104,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 
   New, Duplicate and Edit open a small form in a popover that hangs from the name, with Cancel (Esc) and Create, Duplicate or Save (↩). It says what's wrong instead of saving: no name, square brackets in it (the heading's settings use them), a name another scenario's folder already has, or a seed that isn't a whole number. New and Duplicate open what they made. Renaming renames the scenario's folder too (DESIGN.md, 15.1).
 - Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol.
-- Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider, and Hide.
+- Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider with a Blur checkbox beside it, and Hide.
 
 **Focus area:**
 - Slot name and model summary ("Market model · monthly · median with bands").

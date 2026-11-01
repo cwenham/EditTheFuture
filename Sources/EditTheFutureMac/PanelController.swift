@@ -13,6 +13,8 @@ final class PanelController {
     private var peekGesture = PeekGesture()
     private(set) var isPeeking = false
     private var eventMonitor: Any?
+    /// What's behind the panel, blurred; hidden when the panel is set to clear.
+    private weak var blur: NSVisualEffectView?
 
     var isVisible: Bool { panel.isVisible }
 
@@ -20,13 +22,19 @@ final class PanelController {
         self.store = store
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 820))
 
+        // The blur sits behind the content in a rounded container, so it can be turned off and
+        // leave the panel clear.
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 14
+        container.layer?.masksToBounds = true
         let blur = NSVisualEffectView()
         blur.material = .hudWindow
         blur.blendingMode = .behindWindow
         blur.state = .active
-        blur.wantsLayer = true
-        blur.layer?.cornerRadius = 14
-        blur.layer?.masksToBounds = true
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(blur)
+        self.blur = blur
 
         let actions = PanelActions(
             hide: { [weak self] in self?.hide() },
@@ -35,14 +43,16 @@ final class PanelController {
         )
         let hosting = NSHostingView(rootView: PanelView(store: store, actions: actions))
         hosting.translatesAutoresizingMaskIntoConstraints = false
-        blur.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: blur.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: blur.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
-        ])
-        panel.contentView = blur
+        container.addSubview(hosting)
+        for view in [blur, hosting] {
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+        }
+        panel.contentView = container
         self.hosting = hosting
         panel.setFrameAutosaveName("EditTheFuturePanel")
         if !panel.setFrameUsingName("EditTheFuturePanel") { panel.center() }
@@ -75,10 +85,20 @@ final class PanelController {
             }
         }
 
+        followBlurSetting()
+
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
             guard let self, event.window === self.panel else { return event }
             return self.handleGesture(event) ? nil : event
         }
+    }
+
+    /// Shows or hides the blur to match the store, and again each time the setting changes.
+    private func followBlurSetting() {
+        let blurs = withObservationTracking { store.blursBehind } onChange: { [weak self] in
+            Task { @MainActor in self?.followBlurSetting() }
+        }
+        if blur?.isHidden != !blurs { blur?.isHidden = !blurs }
     }
 
     // MARK: Showing and hiding
