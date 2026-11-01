@@ -12,6 +12,12 @@ struct TimelineInteractions {
     var editEvent: (UUID) -> Void
     /// A click on the drift pill opens Refit on the last year of readings (docs/UI.md, 5.6).
     var openDrift: () -> Void = {}
+    /// Drag the future (docs/UI.md, 5.2): whether a target can be set at a date, starting a drag
+    /// at a date and value, moving the target, and letting go.
+    var canSetGoal: (Date) -> Bool = { _ in false }
+    var beginGoal: (Date, Double) -> Void = { _, _ in }
+    var dragGoal: (Double) -> Void = { _ in }
+    var endGoal: () -> Void = {}
 }
 
 /// Where cursor-dependent views get their values: the live store (so only they redraw when the
@@ -45,6 +51,14 @@ struct TimelineRows: View {
                 FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
+                    .overlay {
+                        if let goal = timeline.focus.goal {
+                            GoalOverlay(goal: goal, frame: timeline.frame, domain: timeline.focus.yDomain, color: timeline.focus.color)
+                        }
+                    }
+                    .overlay {
+                        if let interactions { GoalHandle(cursor: cursor, timeline: timeline, interactions: interactions) }
+                    }
                     .overlay(alignment: .topLeading) {
                         if let drift = timeline.focus.drift {
                             DriftPill(drift: drift, timeline: timeline, width: plotWidth, action: interactions?.openDrift)
@@ -157,7 +171,8 @@ struct FocusChart: View {
 
     var body: some View {
         let focus = timeline.focus
-        var series = [PlotSeries(samples: focus.samples, color: focus.color, lineWidth: 2)]
+        // While a target is set, the line as it is fades, so the proposed path stands out.
+        var series = [PlotSeries(samples: focus.samples, color: focus.color.opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2)]
         if !focus.preview.isEmpty {
             series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
         }
@@ -170,6 +185,9 @@ struct FocusChart: View {
             series.append(PlotSeries(samples: drift.line, color: Theme.warning.opacity(0.8), lineWidth: 1.25, dash: [1.5, 3]))
         }
         var rules = [PlotRule(date: timeline.now, color: Theme.nowLine)]
+        if let goal = focus.goal {
+            rules.append(PlotRule(date: goal.date, color: Color.white.opacity(0.35), dash: [3, 4]))
+        }
         if let cutoff = focus.cutoff {
             rules.append(PlotRule(date: cutoff, color: Theme.proposal.opacity(0.45), dash: [1.5, 3]))
         }

@@ -284,6 +284,13 @@ public final class ScenarioStore {
     /// Called when a slot starts drifting, or drifts again with newer readings. The Mac app sends
     /// a notification when the panel isn't showing.
     @ObservationIgnored public var onDrift: ((DriftAlert) -> Void)?
+    /// Drag the future's target and fixes, while one is set (docs/UI.md, 5.2).
+    public internal(set) var goal: GoalState?
+    @ObservationIgnored var goalSequence = 0
+    /// The focused graph's range when a drag began, kept while dragging so the graph holds still.
+    @ObservationIgnored var goalDomain: ClosedRange<Double>?
+    /// How far the fixes' lines reach.
+    @ObservationIgnored var goalThrough: Date?
     /// The import sheet over the Slot tab, while it's open (docs/UI.md, 5.10).
     public internal(set) var readingImport: ReadingImportState?
     /// The table the import sheet reads from.
@@ -553,6 +560,7 @@ public final class ScenarioStore {
         updateRefittable()
         refitSlotsChanged()
         predictSlotsChanged()
+        goalSlotsChanged()
         scheduleDriftCheck()
         onScenarioChange?()
     }
@@ -573,6 +581,7 @@ public final class ScenarioStore {
         if let refit, refit.slot != slots[index].id { closeRefit() }
         if let predict, predict.slot != slots[index].id { closePredict() }
         if let readingImport, readingImport.slot != slots[index].id { cancelReadingImport() }
+        if let goal, goal.slot != slots[index].id { cancelGoal() }
         focusedIndex = index
         retargetDraft()
     }
@@ -723,6 +732,7 @@ public final class ScenarioStore {
         extendPreviewIfNeeded()
         extendRefitPreviewIfNeeded()
         extendPredictPreviewIfNeeded()
+        extendGoalIfNeeded()
     }
 
     // MARK: Editing
@@ -878,6 +888,7 @@ public final class ScenarioStore {
         for mutation in mutations { enqueue(.mutate(mutation)) }
         requestData()
         updateDraftPreview()
+        if goal != nil { requestGoalSolve() }
         onScenarioChange?()
     }
 
@@ -1005,8 +1016,10 @@ public final class ScenarioStore {
         case export(minimumSeconds: Double, reply: CheckedContinuation<[Int: SlotHistory], Never>)
         case copyForFitting(slot: Int, reply: CheckedContinuation<ScenarioEngine.FittingCopy, Never>)
         case read(ScenarioEngine.ReadRequest, reply: CheckedContinuation<ScenarioEngine.ReadResult, Never>)
+        case goal(ScenarioEngine.GoalRequest)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
+        var isGoal: Bool { if case .goal = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
         var previewOfModel: Bool? {
             guard case .preview(let request) = self else { return nil }
@@ -1031,6 +1044,7 @@ public final class ScenarioStore {
         switch operation {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
+        case .goal: engineQueue.removeAll(where: \.isGoal)
         case .mutate, .find, .export, .copyForFitting, .read: break
         }
         engineQueue.append(operation)
@@ -1051,6 +1065,7 @@ public final class ScenarioStore {
             case .export(let minimum, let reply): reply.resume(returning: await engine.resultsToSave(minimumSeconds: minimum))
             case .copyForFitting(let slot, let reply): reply.resume(returning: await engine.copyForFitting(slot: slot))
             case .read(let request, let reply): reply.resume(returning: await engine.read(request))
+            case .goal(let request): receiveGoal(await engine.solveGoal(request))
             }
         }
         isDraining = false
@@ -1102,6 +1117,10 @@ public final class ScenarioStore {
             say("\(slots[index].title) stopped after \(DateText.monthYear(failure.date)): \(failure.text)", isError: true)
         }
         if slots.indices.contains(focusedIndex), sidePane == .formula { updateFormulaCheck(forSlotAt: focusedIndex) }
+    }
+
+    func requestGoal(_ request: ScenarioEngine.GoalRequest) {
+        enqueue(.goal(request))
     }
 
     func requestPreview(_ request: ScenarioEngine.PreviewRequest) {
@@ -1413,7 +1432,10 @@ public final class ScenarioStore {
         let slotPreview = parameterPreview
         let dragging = previewSlot == focusSlot.id && !slotPreview.isEmpty
         let held = heldBack.flatMap { $0.slot == focusSlot.id ? $0 : nil }
-        let preview = dragging ? slotPreview : draftOnFocus == nil ? [] : draftPreview
+        let goalOnFocus = goal.flatMap { $0.slot == focusSlot.id ? $0 : nil }
+        let goalMark = goalMark(forSlotAt: focusedIndex)
+        let preview = goalOnFocus.map { $0.selectedFix?.line ?? [] }
+            ?? (dragging ? slotPreview : draftOnFocus == nil ? [] : draftPreview)
         let readings = visibleReadings(ofSlotAt: focusedIndex, from: from, through: through)
         let driftAlert = drifts[focusSlot.id]
         let driftMark = driftAlert.map {
@@ -1426,16 +1448,26 @@ public final class ScenarioStore {
                               readingRange?.low ?? .infinity, heldRange?.low ?? .infinity, bandRange?.low ?? .infinity]
         let highs: [Double] = [lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity,
                                readingRange?.high ?? -.infinity, heldRange?.high ?? -.infinity, bandRange?.high ?? -.infinity]
-        let low = lows.min()!, high = highs.max()!
-        let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
+        var low = lows.min()!, high = highs.max()!
+        if let goalMark {
+            low = min(low, goalMark.target)
+            high = max(high, goalMark.target)
+        }
+        var (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
+        // While the target is dragged, the graph holds still, so the drag stays under the pointer.
+        if goalOnFocus?.isDragging == true, let frozen = goalDomain {
+            domain = frozen
+            ticks = niceTicks(low: frozen.lowerBound, high: frozen.upperBound, includeZero: false).ticks.filter(frozen.contains)
+        }
         let focus = FocusedSlotState(
             index: focusedIndex, name: focusSlot.title, summary: focusSlot.summary, color: focusSlot.color,
             style: focusSlot.style, samples: focusSamples, readings: readings, preview: preview,
             heldBack: held?.line ?? [], cutoff: held?.cutoff,
-            draftDate: dragging ? nil : draftOnFocus?.date,
+            draftDate: goalOnFocus.map { $0.selectedFix?.event.time } ?? (dragging ? nil : draftOnFocus?.date),
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
             editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,
-            pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text, drift: driftMark)
+            pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text, drift: driftMark,
+            goal: goalMark)
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)

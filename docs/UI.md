@@ -229,11 +229,20 @@ The open scenario answers questions and takes commands from outside the panel (D
 
 ### 5.2 Drag the future
 
-1. **Grab:** hovering the projection after now shows a grab handle.
-2. **Drag:** dragging up or down sets a target at that date. A bracket shows the gap ("+$86,860").
-3. **Solve:** the solver re-runs as you drag, throttled to about 30 Hz, and each new request cancels the previous one. The proposed path is drawn dashed.
-4. **Choose a fix:** the side card ranks fixes by smallest change. "Change" (deposits, interest rate, withdrawals, anything) and "Starting" limit what the solver may touch. ↑/↓ chooses a fix and ⌘↩ adds it as events. Esc cancels.
-5. **Sketch instead:** ⇧-drag draws a whole curve, and the solver fits several events to it. Apple Pencil does the same on iPad (section 8).
+Built in November 2026, apart from sketching (step 5). DESIGN.md, 8.1.
+
+1. **Grab:** with the cursor after now, a grab handle sits on the focused line at the cursor: a ring in `proposal` that shows when the pointer is over it, with the open hand. It follows the cursor, so it's under the pointer whenever the pointer is near the line. A target can be set after now on a slot that runs, when a change can start before it.
+2. **Drag:** dragging up or down sets a target at that date. While dragging, the graph's range holds still, and the target snaps to a round step of it (a two-hundredth of the range, rounded down to a power of ten: $1,000 on a $300k graph), so it reads "$200,000 by Jan 2038". On letting go, the range takes in the target and the path.
+3. **On the graph:** the target as a filled `proposal` circle with a halo, its label above it in a light pill ("$200,000 by Jan 2038"), a dashed guide down the graph at its date, the line's value there as it is (a hollow dot), and a bracket between them with the gap beside it ("+$60,051"). The line as it is fades to 45%, and the selected fix's line is drawn dashed in `proposal` from where its change starts. The events strip shows the change's date as a dashed diamond.
+4. **Solve:** each new target asks the solver again. One still waiting is replaced by the newest, so solving keeps up at its own pace without falling behind the drag. It runs on the engine's thread, so the panel keeps drawing.
+5. **Choose a fix:** while a target is set, the side pane shows "Ways to get there" in place of its tab:
+   - "Reaching $200,000 by Jan 2038 needs $60,051 more than the current projection of $139,949."
+   - **Change:** Anything, one of the slot's parameters by its label, or a one-off event of a kind it takes ("One-off deposit").
+   - **Starting:** the slot's next point after now, the next January, and the January three years on, while they're before the target.
+   - **The fixes**, smallest change first, at most five, the first tagged "Smallest change": each parameter set from the start ("Monthly deposit $743 from Nov 2026", "+$343 from $400"; "Interest rate 8.489% from Nov 2026", "+3.99 points from 4.5%"), the same from the last start ("Starts later, so it changes more."), and one-off events ("One deposit of $36,366 in Nov 2026", "Once, then everything as before"). A change that can't reach the target within its range, or moves the line the wrong way (a withdrawal can't raise it), isn't listed. Values are whole units from 100 up and four significant figures below, so the line lands within a few units of the target. The size of a change is its share of the parameter's range (or of its value, without a range), or an amount's share of the line's size.
+   - Clicking a fix, or ↑ and ↓, selects it and shows its line. **Add event** (⌘↩) adds its event, which undo takes back, and the footer says "Added: Monthly deposit $743 from Nov 2026. Savings reaches $200,000 in Jan 2038." **Cancel** (Esc) drops the target. Esc cancels the target before it hides the panel.
+   - Dragging the target again moves it. Focusing another slot drops it.
+6. **Sketch instead** (not built yet): ⇧-drag draws a whole curve, and the solver fits several events to it. Apple Pencil does the same on iPad (section 8).
 
 ### 5.3 Adding an event
 
@@ -574,6 +583,11 @@ Sections:
   - `timelineState()` puts the focused slot's alert in `FocusedSlotState.drift` (a `DriftMark`, its band included in the graph's range) and each lane's in `LaneState.drift`. `PlotCanvas` fills the band (`PlotBand`); `DriftPill` places the pill.
   - `onDrift` passes on each new alert once (`driftNotified`). The Mac app's `DriftNotifier` sends a notification when the panel is hidden, keeps which it sent in its defaults (`drift.notified`, the last 200), and opens Refit when one is clicked, finding the slot by its name in the scenario that sent it.
   - `etf-bench predict` also prints each Forecast model's drift check, with its fitted values, and how long it took.
+- **Drag the future** (5.2, DESIGN.md 8.1):
+  - `DragTheFuture.swift` keeps the target (`ScenarioStore.goal`, a `GoalState`), works out the card's choices, the changes to try (`requestGoalSolve`) and the fixes from what the engine found (`receiveGoal`), and draws the target (`GoalMark` in `FocusedSlotState.goal`). `GoalViews.swift` has `GoalOverlay` (target, label, bracket, dot), `GoalHandle` (the grab handle and its drag) and `GoalCard`.
+  - `GoalHandle` reads the cursor (`CursorSource`), so it redraws as the pointer moves while the graph under it doesn't. Its drag measures in the panel's coordinate space and turns the vertical move into a value with the graph's range, which `goalDomain` holds still while dragging.
+  - The engine's `solveGoal` runs `Scenario.solve` for each change in turn, then reads each fix's line with its event in, and takes it out again. Goal requests replace one another in the store's queue, like fetches; one that has started runs to the end, and an answer for an older target or revision is ignored (`goalSequence`).
+  - The Mac panel sends Esc (`onEscape`), ⌘↩ (`onCommandReturn`) and ↑ ↓ to the target while one is set.
 - **Scenario menu** (3, DESIGN.md 15.1):
   - The menu is an `NSMenu` (`ScenarioMenu`), built each time the name is clicked and popped up under it from a plain view behind the button (`MenuAnchorView`). A SwiftUI `Menu` gives no moment to read the folder again as it opens.
   - What it needs from the app comes in `PanelActions.scenarios` (`ScenarioMenuActions`): the Scenarios folder, the open scenario, saving it, opening another, Show in Finder and Open Other…. Without them the name is plain text, as in tests and benchmarks.

@@ -56,6 +56,16 @@ final class PanelController {
         panel.onShowFormula = { [weak self] in self?.store.showFormulaEditor() }
         panel.onHide = { [weak self] in self?.hide() }
         panel.onKey = { [weak self] event in self?.handleKey(event) ?? false }
+        panel.onEscape = { [weak self] in
+            guard let store = self?.store, store.goal != nil else { return false }
+            store.cancelGoal()
+            return true
+        }
+        panel.onCommandReturn = { [weak self] in
+            guard let store = self?.store, store.goal?.selectedFix != nil else { return false }
+            store.applyGoalFix()
+            return true
+        }
 
         store.onAppAction = { [weak self] action in
             switch action {
@@ -191,6 +201,14 @@ final class PanelController {
     /// Keys from docs/UI.md, 4.1, when the command bar isn't being edited.
     private func handleKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // ↑ and ↓ choose among Drag the future's fixes while they show (docs/UI.md, 5.2).
+        if store.goal != nil, flags.subtracting(.numericPad).subtracting(.function).isEmpty {
+            switch event.keyCode {
+            case 126: store.moveGoalSelection(by: -1); return true
+            case 125: store.moveGoalSelection(by: 1); return true
+            default: break
+            }
+        }
         switch event.keyCode {
         case 123: store.moveCursor(by: -1, years: flags.contains(.shift)); return true  // ←
         case 124: store.moveCursor(by: 1, years: flags.contains(.shift)); return true   // →

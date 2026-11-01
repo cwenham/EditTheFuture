@@ -20,15 +20,19 @@ struct SidePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            switch store.sidePane {
-            case .event: AddEventPane(store: store)
-            case .slot: SlotPane(store: store)
-            case .formula:
-                #if os(macOS)
-                FormulaPane(store: store)
-                #else
-                SlotPane(store: store)
-                #endif
+            if let goal = store.goal, goal.slot == store.focused.id {
+                GoalCard(store: store, state: goal)
+            } else {
+                switch store.sidePane {
+                case .event: AddEventPane(store: store)
+                case .slot: SlotPane(store: store)
+                case .formula:
+                    #if os(macOS)
+                    FormulaPane(store: store)
+                    #else
+                    SlotPane(store: store)
+                    #endif
+                }
             }
         }
         .padding(16)

@@ -549,9 +549,11 @@ Drag the future and drift alerts are numerical and run anywhere, including Intel
 
 Grab the line at a future date and drag it to a target value. The app works out a change that gets there and proposes it as an event, like "add $640/month from January." The user accepts, adjusts or rejects it.
 
+Built in November 2026 (UI.md, 5.2), apart from sketching. `Scenario.solve` (`FutureEngine/GoalSeek.swift`) finds the value of one change, a `GoalLever`: a parameter set from a date, or a one-off event that takes an amount. A parameter with a range is searched within it; one without, and an amount (from zero up), widen their search from where they are, doubling the step until the target is passed, or give up after 60 doublings. Then bisection, then the answer is rounded (whole units from 100 up, four significant figures below) and checked again; the `GoalSolution` says what it reaches. Each try upserts one trial event, so only the time after it is computed, and it's taken out at the end. `Scenario.goalSeek` stays for a fixed range.
+
 - The user, or a sensible default, chooses what may change: a parameter from a date (`set deposit = x`), a one-off amount, a start date.
 - The solver tries values with bisection, or secant when the function behaves. Each try inserts a trial event, so only the time after that event is recomputed, thanks to checkpoints. The scaffold implements this as `Scenario.goalSeek`.
-- Several candidate fixes can be offered side by side: raise the deposit, extend the term, accept more risk.
+- Several candidate fixes are offered side by side, smallest change first: each parameter from a chosen start, the same from a later one, and each one-off event the slot takes. Extending a term or accepting more risk would need levers of their own.
 - **Apple Pencil, and dragging with the mouse:** sketch the whole curve you want. The solver fits the changes that best match it (least squares across many target points). It's the same solver Refit uses (8.4), with the sketch's points in place of readings.
 
 ### 8.2 Drift alerts
@@ -1199,7 +1201,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); the command-line tool. App Intents and the `etf` tool are done (10.3, 10.4), the tool through a local socket rather than XPC. The CoreMIDI adapter waits for the hardware. |
-| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with, the automatic pick, drift alerts and readings import are done (15.8, 4.6, 8.4, 8.2, 14). |
+| M3 | Drag the future UI; readings import; drift alerts. All done in November 2026, with feeds, direct-insertion assimilation, Refit, Predict with and the automatic pick (15.8, 4.6, 8.4, 8.2, 14, 8.1). Sketching a whole curve (8.1) is left for M5, with Apple Pencil. |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |

@@ -65,6 +65,8 @@ public struct FocusedSlotState: Sendable {
     public let stoppedReason: String?
     /// The slot's drift, while its latest readings are outside the range its model projected.
     public var drift: DriftMark? = nil
+    /// Drag the future's target, while one is set on this slot (docs/UI.md, 5.2).
+    public var goal: GoalMark? = nil
 }
 
 /// A drift on the focused graph (docs/UI.md, 5.6): the projection from before the latest

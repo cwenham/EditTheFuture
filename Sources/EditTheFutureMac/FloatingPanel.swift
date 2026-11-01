@@ -13,6 +13,10 @@ final class FloatingPanel: NSPanel {
     var onShowFormula: (() -> Void)?
     var onHide: (() -> Void)?
     var onKey: ((NSEvent) -> Bool)?
+    /// Esc before hiding: true when it dropped something, such as a Drag the future target.
+    var onEscape: (() -> Bool)?
+    /// ⌘↩: true when it was used.
+    var onCommandReturn: (() -> Bool)?
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
@@ -52,6 +56,8 @@ final class FloatingPanel: NSPanel {
             onToggleSlotSettings?()
             return true
         }
+        // ⌘↩ adds Drag the future's chosen fix, when one is showing.
+        if flags == .command, event.keyCode == 36, onCommandReturn?() == true { return true }
         if flags == [.command, .option] && key == "i" {
             onShowFormula?()
             return true
@@ -73,10 +79,13 @@ final class FloatingPanel: NSPanel {
         super.keyDown(with: event)
     }
 
-    /// Escape leaves the command bar first, then hides the panel.
+    /// Escape leaves the command bar first, then drops what's being proposed (a Drag the future
+    /// target), then hides the panel.
     override func cancelOperation(_ sender: Any?) {
         if isEditingText {
             makeFirstResponder(contentView)
+        } else if onEscape?() == true {
+            return
         } else {
             onHide?()
         }

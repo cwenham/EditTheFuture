@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-11-01, on `main`, after merging drift alerts and readings import.
+Where the work stands, for the next Claude session. Last updated 2026-11-01, on `main`, after merging Drag the future.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -49,8 +49,10 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `abd9fa9` | The handoff updated after the cursor fix. |
 | `92090ad` | Drift alerts: the latest readings checked against the range the model projected for them, with a pill by the now line, the projection and its range drawn, a mark on the lane, Refit on the last year, and a notification while the panel is hidden (DESIGN.md 8.2, UI.md 5.6). From `feature/drift-alerts`. |
 | `97c1249` | Readings import: Import CSV… and Paste in the Slot tab, with an import sheet that guesses columns and previews; single readings from the command bar, `etf reading` and Shortcuts' Add Reading (DESIGN.md 14, UI.md 5.10). Merged from `feature/readings-import` with drift alerts. |
+| `ec1fe46` | Merged readings import beside drift alerts. |
+| "Add Drag the future" | Drag the future: a grab handle on the line after now, a target dragged to a round value, and ranked fixes in "Ways to get there", added as an undoable event (DESIGN.md 8.1, UI.md 5.2). From `feature/drag-the-future`. |
 
-Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are done; the CoreMIDI adapter waits for the hardware. Of M3, feeds, Refit, Predict with, drift alerts and readings import are done; Drag the future is next.
+Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are done; the CoreMIDI adapter waits for the hardware. M3 is done, apart from sketching a whole curve for Drag the future, which waits for Apple Pencil (M5).
 
 ## What works
 
@@ -96,6 +98,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - **Predict with in the panel** (UI.md 5.11): for a slot with readings, the Slot tab's model name opens a popover listing the slot's own model, the Forecast models and matching library models. Each is fitted and scored on readings it didn't see, one at a time off the main thread, with the best tagged (lowest score; within a tenth of it, fewest fitted values). Hovering or ↑ and ↓ preview a model's fitted line dashed and its held-back projection dotted. Click or ↩ chooses it, undoably. A Which readings menu, Use the best, and `predict data with trend line` or `with best` in the command bar. Scores are kept until the model, values or readings change.
   - `swift run -c release etf-bench predict readings.csv [step day] [since 1976-01-01]` scores the Forecast models on a feed's saved readings. Europe's temperatures pick Trend line, US debt Steady growth, the S&P 500 Recent growth.
 - **Drift alerts** (DESIGN.md 8.2, UI.md 5.6): each slot with readings of the value its graph shows is checked after its readings, model, values or events change, and on opening. The last year of readings is hidden, the model is projected from the point before it, and earlier one-year projections size a 10–90% range. When the latest readings leave it, a pill by the now line says so ("Drift · 20.0% above the projection"), the graph draws the projection and its range, and the slot's lane gets a warning triangle. Clicking the pill opens Refit on the last year. With the panel hidden, the Mac sends a notification, once per drift.
+- **Drag the future** (DESIGN.md 8.1, UI.md 5.2): a grab handle on the focused line after now; dragging it sets a target at that date, snapped to a round value, with its label, the gap, and the line as it is faded. "Ways to get there" in the side pane ranks the fixes, smallest change first: each parameter from a start (next point, next January, three years on), the same from later, and one-off events. Change and Starting limit them. The selected fix's line is dashed; ↑↓ choose, ⌘↩ adds it as an event (undoable), Esc cancels.
 - **Importing readings** (DESIGN.md 14, UI.md 5.10): Import CSV… and Paste in the Slot tab's Readings open an import sheet that guesses the date and value columns (CSV, spreadsheet tabs, European semicolons and decimal commas, money with symbols), previews what it would bring, and adds it as one undoable change: up to 100 readings in a `csv` block in `scenario.md`, more in `readings/<Slot>-<Title>.csv`. Every source of readings can be removed with its ×. Single readings: `reading 41,200` in the command bar, `etf reading savings 41200 [--of VALUE] [--at DATE]`, and Shortcuts' Add Reading, into the slot's `csv` block, replacing one for the same date.
 - **Readings on the graph** (UI.md 2.4): the focused graph draws readings of the value it shows as dots on a thin line (just the line when they're dense), and the readout says "Reading" over them.
 - **Before the start** (UI.md 2.4, 5.1): the view and cursor reach back to the earliest reading a slot's graph shows (`ScenarioStore.earliest`), not just to the scenario's start. Before the start the plots are shaded, a dashed line labelled "Start · Jan 2022" marks where the models' lines begin, and the readout shows the reading at the cursor or "Before the start".
@@ -184,7 +187,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **From the slot inspector mockup:** Variables, Events and Readings beside the formula, with values at the cursor, and the links view.
 - **Panel features from UI.md:**
   - Editing recurring events, and dragging events to move them (5.4). One-off events can be edited by clicking them.
-  - Drag the future (5.2). The engine's `GoalSeek` exists.
+  - Sketching a whole curve with ⇧-drag for Drag the future (5.2), fitted with the least-squares solver, and levers beyond a parameter or a one-off amount (a recurring deposit for a while, extending a term).
   - Bands for stochastic models, and readings in the lanes. Drift alerts are built (5.6).
   - Mute and solo, and banks ([ and ]).
   - Click to pin the cursor, and ⌥-scroll to zoom the value axis.
@@ -238,6 +241,14 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The check runs for every slot with readings after each change to it, 0.8 seconds later. A slot that reads other slots, or converts money, is checked again after any change in the scenario, since what it reads may have changed.
   - Only the value the graph shows is checked. A slot whose readings are of another value has no alert.
   - The wording is in the value's terms ("20.0% above"), not time ("2 days behind"); see DESIGN.md 8.2, Not yet.
+- **Drag the future:**
+  - Checked in tests (the engine's solver: parameters up and down, amounts, ranges, rounding, cancelling; the store: where targets can go, ranked fixes, the frozen range, choices, adding and undo, cancelling, dragging again) and in offscreen renders of the real panel with a target set.
+  - **Not checked by hand:** the grab handle and the drag itself in the floating panel, the hand pointers, the card's menus, and Esc, ↑↓ and ⌘↩ through the panel's hooks. Mouse drags can't be sent to the panel from here, and SwiftUI gestures don't run in offscreen windows.
+  - The handle follows the cursor, so it moves sideways with the pointer. A drag that starts on it keeps the date it started at.
+  - A solve that has started runs to the end; only waiting ones are replaced. A slow model (a Python script, a differential equation) could make the fixes lag behind a fast drag. Not timed in a release build.
+  - Ranking mixes kinds of change: a parameter's share of its range against an amount's share of the line's size. It suits the savings models; others may rank oddly.
+  - Event kinds are tried as one-off amounts (`event.amount`). A kind that uses other values is never bracketed, so it isn't listed.
+  - The slider's step isn't used for rounding: $50 steps in a monthly deposit missed a target by 2% over 13 years.
 - **Importing readings:**
   - Checked in tests (the table reader on statements, spreadsheet text, European exports, slashed dates, years and amounts, repeats and mistakes; the sheet, small and large imports, the file in `readings/` read back after saving, removing and undo; the command bar, the etf tool's arguments and outside requests), with `etf reading` against the real app on a scratch scenario, and the sheet in an offscreen render of the real panel.
   - **Not checked by hand:** the file chooser over the floating panel (its level is `.modalPanel`, and the app activates first), Paste, the sheet's menus and ⌘↩, and Shortcuts' Add Reading.
@@ -300,7 +311,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 475 tests in about 50 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Tests:** `swift test` runs about 485 tests in about 50 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
 - **Exchange rates against the live sources:** `swift run etf-feed --rates GBP,EUR --since 2026-10-01` (the ECB, through Frankfurter), and `--live` with `--key` for Open Exchange Rates.
 - **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
 - **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.

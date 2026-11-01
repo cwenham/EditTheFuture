@@ -113,7 +113,11 @@ struct TimelineArea: View {
                                     store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
                                 },
                                 editEvent: { store.editEvent(id: $0) },
-                                openDrift: { store.openDriftRefit(slot: store.focused.id) }))
+                                openDrift: { store.openDriftRefit(slot: store.focused.id) },
+                                canSetGoal: { store.canSetGoal(at: $0) },
+                                beginGoal: { store.beginGoal(at: $0, value: $1) },
+                                dragGoal: { store.dragGoal(to: $0) },
+                                endGoal: { store.endGoalDrag() }))
                     .contentShape(Rectangle())
                     .onContinuousHover { phase in
                         guard case .active(let location) = phase else { return }

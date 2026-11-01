@@ -397,6 +397,68 @@ actor ScenarioEngine {
         return FindResult(request: request, startValue: startValue, found: nil)
     }
 
+    /// Drag the future (docs/UI.md, 5.2): the changes to try, each solved for the value that brings
+    /// the slot's line to the target.
+    struct GoalRequest: Sendable {
+        struct Lever: Sendable {
+            let id: String
+            let lever: GoalLever
+            let bounds: ClosedRange<Double>?
+            let step: Double?
+        }
+
+        let version: Int
+        let sequence: Int
+        let slot: Int
+        let variable: String
+        let date: Date
+        let target: Double
+        let levers: [Lever]
+        /// Where the changes start, for the line's value there.
+        let start: Date
+        /// How far each fix's line reaches.
+        let through: Date
+    }
+
+    struct GoalResult: Sendable {
+        struct Fix: Sendable {
+            let id: String
+            let solution: GoalSolution
+            /// The line with the change, from the point before it.
+            let line: [Sample]
+        }
+
+        let version: Int
+        let sequence: Int
+        /// The line's value at the target's date, and at the changes' start, as it is.
+        let current: Double?
+        let atStart: Double?
+        let fixes: [Fix]
+    }
+
+    /// Solves each change in turn. Each try computes only this slot (and what it reads) from the
+    /// change on, and takes the change out again.
+    func solveGoal(_ request: GoalRequest) -> GoalResult {
+        guard ids.indices.contains(request.slot), let id = ids[request.slot] else {
+            return GoalResult(version: request.version, sequence: request.sequence, current: nil, atStart: nil, fixes: [])
+        }
+        let current = try? scenario.value(request.variable, of: id, at: request.date)
+        let atStart = try? scenario.value(request.variable, of: id, at: request.start)
+        var fixes: [GoalResult.Fix] = []
+        for lever in request.levers {
+            guard let solution = try? scenario.solve(request.variable, of: id, at: request.date, target: request.target,
+                                                     lever: lever.lever, bounds: lever.bounds, step: lever.step) else { continue }
+            var trial = solution.event
+            trial.id = UUID()
+            scenario.add(trial, to: id)
+            let from = (try? scenario.point(request.variable, of: id, atOrBefore: lever.lever.date).time) ?? lever.lever.date
+            let line = (try? scenario.series(request.variable, of: id, from: from, through: request.through)) ?? []
+            scenario.removeEvent(id: trial.id, from: id)
+            fixes.append(GoalResult.Fix(id: lever.id, solution: solution, line: line))
+        }
+        return GoalResult(version: request.version, sequence: request.sequence, current: current, atStart: atStart, fixes: fixes)
+    }
+
     /// What the command line or Shortcuts asks of a slot (docs/DESIGN.md, 10.2).
     struct ReadRequest: Sendable {
         enum Points: Sendable {
