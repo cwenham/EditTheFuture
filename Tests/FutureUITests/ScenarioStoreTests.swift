@@ -110,6 +110,78 @@ struct ScenarioStoreTests {
         await store.waitUntilIdle()
     }
 
+    /// Commands that place the cursor while the pointer rests over the graph.
+    enum CursorCommand: String, CaseIterable {
+        case link = "an etf:// link or etf show --at"
+        case goto = "goto in the command bar or etf"
+        case now = "the Now button or T"
+        case arrowKey = "an arrow key"
+
+        @MainActor func run(on store: ScenarioStore) {
+            switch self {
+            case .link: store.show(utc(2030, 1))
+            case .goto:
+                store.commandText = "goto 2030"
+                _ = store.runCommand()
+            case .now: store.jumpToNow()
+            case .arrowKey: store.moveCursor(by: 1, years: true)
+            }
+        }
+    }
+
+    @Test("A command's cursor stays put under a still pointer, and follows the pointer once it moves",
+          arguments: CursorCommand.allCases)
+    func cursorWaitsForThePointer(_ command: CursorCommand) async throws {
+        let store = try await makeStore()
+        // The pointer rests over the graph, a fifth of the way across, with the cursor under it.
+        let resting = CGPoint(x: 500, y: 400)
+        store.pointerHovered(at: resting, fraction: 0.2)
+        #expect(store.cursor == store.frame.date(atFraction: 0.2))
+
+        command.run(on: store)
+        let placed = store.cursor
+        try #require(placed != store.frame.date(atFraction: 0.2))
+        // SwiftUI reports hover under a pointer that hasn't moved, as when a link shows the panel
+        // under it. The engine's results arrive in between.
+        store.pointerHovered(at: resting, fraction: 0.2)
+        await store.waitUntilIdle()
+        store.pointerHovered(at: resting, fraction: 0.2)
+        #expect(store.cursor == placed)
+
+        // Scrolling with the wheel still carries the cursor along.
+        let start = store.frame.start
+        store.pan(by: 0.1)
+        store.pointerHovered(at: resting, fraction: 0.2)
+        #expect(store.cursor == placed.addingTimeInterval(store.frame.start.timeIntervalSince(start)))
+
+        // Once the pointer moves, the cursor follows it again.
+        store.pointerHovered(at: CGPoint(x: resting.x + 6, y: resting.y), fraction: 0.21)
+        #expect(store.cursor == store.frame.date(atFraction: 0.21))
+        store.pointerHovered(at: CGPoint(x: resting.x + 12, y: resting.y), fraction: 0.22)
+        #expect(store.cursor == store.frame.date(atFraction: 0.22))
+        await store.waitUntilIdle()
+    }
+
+    @Test("A link that shows the panel keeps its cursor, wherever the pointer rests as the panel appears")
+    func cursorWaitsWhenThePanelAppears() async throws {
+        let store = try await makeStore()
+        store.pointerHovered(at: CGPoint(x: 500, y: 400), fraction: 0.2)
+        // The panel hides, the pointer moves on, and a link shows the panel at Jan 2030 with the
+        // pointer resting over another part of the graph.
+        store.show(utc(2030, 1))
+        let resting = CGPoint(x: 900, y: 450)
+        store.pointerHovered(at: resting, fraction: 0.6)
+        store.pointerHovered(at: resting, fraction: 0.6)
+        #expect(store.cursor == utc(2030, 1))
+
+        // Over the labels left of the plot, the pointer doesn't move the cursor.
+        store.pointerHovered(at: CGPoint(x: 400, y: 450), fraction: -0.05)
+        #expect(store.cursor == utc(2030, 1))
+        store.pointerHovered(at: CGPoint(x: 910, y: 450), fraction: 0.61)
+        #expect(store.cursor == store.frame.date(atFraction: 0.61))
+        await store.waitUntilIdle()
+    }
+
     @Test("Scrolling carries the cursor along, so the readout follows the pointer far into the future")
     func cursorFollowsScrolling() async throws {
         let store = try await makeStore()

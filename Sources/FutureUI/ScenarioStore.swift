@@ -175,6 +175,9 @@ public final class ScenarioStore {
 
     public private(set) var focusedIndex = 0
     public private(set) var cursor: Date
+    /// Whether the cursor follows the pointer, or waits for it to move after a command placed the
+    /// cursor (`pointerHovered(at:fraction:)`).
+    @ObservationIgnored private(set) var pointerHold = PointerHold.following
     public private(set) var frame: TimeFrame
     /// Bumped whenever the scenario's data changes, so views refresh.
     public private(set) var revision = 0
@@ -582,21 +585,57 @@ public final class ScenarioStore {
         setCursor(frame.date(atFraction: min(max(fraction, 0), 1)))
     }
 
+    /// The pointer is over the timeline at `pointer` on screen, `fraction` of the way across the
+    /// plot (outside 0...1 over the labels). The cursor follows it, except after a command placed
+    /// the cursor: SwiftUI reports hover under a pointer that hasn't moved (when a link shows the
+    /// panel under it, for one), so the cursor waits until the pointer itself moves (docs/UI.md, 5.1).
+    public func pointerHovered(at pointer: CGPoint, fraction: Double) {
+        switch pointerHold {
+        case .following:
+            break
+        case .waiting:
+            pointerHold = .resting(pointer)
+            return
+        case .resting(let rest):
+            guard hypot(pointer.x - rest.x, pointer.y - rest.y) > Self.pointerSlop else { return }
+            pointerHold = .following
+        }
+        guard (0...1).contains(fraction) else { return }
+        setCursor(fraction: fraction)
+    }
+
+    /// How far the pointer moves, in points, before the cursor follows it again after a command.
+    static let pointerSlop: CGFloat = 1
+
+    /// After a command places the cursor, the pointer waits to move before the cursor follows it.
+    enum PointerHold: Equatable {
+        /// The cursor follows the pointer.
+        case following
+        /// A command placed the cursor. The next hover report says where the pointer rests.
+        case waiting
+        /// A command placed the cursor while the pointer rested here, on screen.
+        case resting(CGPoint)
+    }
+
     /// Moves the cursor by steps of the focused slot's rate, or by years.
     public func moveCursor(by steps: Int, years: Bool = false) {
         let component: Calendar.Component = years ? .year : .month
         let next = DateText.calendar.date(byAdding: component, value: steps, to: cursor) ?? cursor
+        pointerHold = .waiting
         setCursor(next)
         reveal(cursor)
     }
 
     public func jumpToNow() {
+        pointerHold = .waiting
         cursor = now
         reveal(now)
     }
 
-    /// Moves the cursor to `date`, scrolling it into view if needed.
+    /// Moves the cursor to `date`, scrolling it into view if needed. Links, `goto` and finding a
+    /// value come here.
     public func show(_ date: Date) {
+        pointerHold = .waiting
         setCursor(date)
         reveal(cursor)
     }

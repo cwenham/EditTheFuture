@@ -117,14 +117,22 @@ struct TimelineArea: View {
                     .onContinuousHover { phase in
                         guard case .active(let location) = phase else { return }
                         let x = location.x - TimelineLayout.plotLeading
-                        if x >= 0 && x <= plotWidth {
-                            store.setCursor(fraction: Double(x / plotWidth))
-                        }
+                        store.pointerHovered(at: Self.pointerOnScreen(else: location), fraction: Double(x / plotWidth))
                     }
             }
             // The app sends the mouse wheel to time only over this area.
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelView.panelSpace)) } action: { store.timelineFrame = $0 }
         }
+    }
+
+    /// Where the pointer is on screen, which changes only when the pointer moves. The hover's own
+    /// location also changes when the timeline shifts under a still pointer (a wider side pane).
+    static func pointerOnScreen(else local: CGPoint) -> CGPoint {
+        #if os(macOS)
+        NSEvent.mouseLocation
+        #else
+        local
+        #endif
     }
 }
 

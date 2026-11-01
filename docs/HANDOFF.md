@@ -99,7 +99,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Moves only by dragging its top bar.
 - **The timeline:**
   - A focused graph plus a lane for each other slot.
-  - A cursor that follows the pointer, with readouts.
+  - A cursor that follows the pointer, with readouts. After a command places it (a link, `goto`, Now, the arrow keys), it stays put until the pointer moves (UI.md 5.1).
   - Generated events (Heatwave) on the events strip.
 - **Scrolling and zooming:**
   - On a two-wheel mouse, the horizontal wheel scrolls and the vertical wheel zooms. The second wheel is detected automatically, and the menu has a toggle to override that.
@@ -235,7 +235,6 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **The etf tool and Shortcuts:**
   - Checked in tests (the tool's arguments and printing, the wire format, real socket round trips, a refused caller, an Apple-signed `nc` let through by a code-signing requirement, stale sockets, the store's answers and edits on the demo and runaway scenarios) and in the real app with a scratch copy of a scenario: `etf` started the app hidden in about 2.4 seconds, read values and CSV, added a monthly deposit, refused a deposit in the wrong currency, set a rate, found where Savings reaches £1m, and undid back to the file as it was.
   - **Not seen in Shortcuts yet.** The bundle's `Metadata.appintents` lists all five intents and the slot entity, and `linkd` (the daemon that runs App Intents) connected to the app as it launched, but the actions weren't looked at in the Shortcuts app, nor Siri's phrases, the snippet, the confirmations, or Spotlight's results. Computer use gets Shortcuts only for clicking (no typing), its Gallery doesn't list apps' actions, and its action catalogue (`~/Library/Shortcuts/ToolKit`) is privacy-protected. To check: in Shortcuts, make a new shortcut and search the actions for "Edit The Future".
-  - **The cursor follows a resting pointer.** `etf goto 2030` or `etf show --at` puts the cursor there, but if the mouse pointer rests over the graph when the panel appears, the cursor moves to the pointer within a second. Links do the same. The cursor's hover tracking would need to ignore the pointer until it moves.
   - On macOS 14 the editing intents ask with `requestConfirmation(result:confirmationActionName:)`, which is deprecated (the build warns); macOS 15 uses the new one.
   - An ad-hoc rebuild changes the bundled `etf`'s hash, so an `etf` from an older build can't talk to a newer app, and says so. A link on the PATH to the bundle's copy always matches.
   - `CallerCheck.forApp` trusts the same team's code once the app is signed with a team. With a Developer ID, it may be worth also pinning the identifier `com.editthefuture.etf`.
@@ -291,6 +290,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Results are noisy when other apps keep the Mac busy, so check `uptime` first.
   - For a fair before-and-after, build the previous commit in a scratch folder: `git archive HEAD | tar -x -C <dir>`.
 - **The app:** `scripts/build-app.sh`, then `open .build/EditTheFuture.app`. It's a menu bar app with no Dock icon. To restart it: `pkill -f "EditTheFuture.app/Contents/MacOS/EditTheFuture"`.
+  - **In a worktree,** a plain `open "etf://…"` can start the main checkout's copy alongside yours, and the link goes there while your `etf` talks to yours. Send links with `open -a "$PWD/.build/EditTheFuture.app" "etf://…"`.
+  - **A resting pointer:** `CGWarpMouseCursorPosition` moves the pointer without sending mouse events, and needs no permission (posting events needs Accessibility). `etf status` then prints the cursor. Ask first: it takes the pointer from the user.
 - **Seeing the app.** The computer-use screenshot tool couldn't see the panel, and typing keys through `osascript` wasn't allowed. What worked:
   - Show the panel with a link: `open "etf://show?timeline=savings&at=2060-01"`.
   - Capture the window by ID. Get the ID with a few lines of Swift calling `CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)`, filtered on the owner name "Edit The Future". Then run `screencapture -x -o -l <id> out.png`.
@@ -346,6 +347,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Undo puts back whole slot lists, readings included. Without `keepingReadings`, undoing an unrelated change put back older feed readings.
 - **Writing Swift with Python:** a `"\n"` in a Python string becomes a real line break in the Swift file. Use a raw string or `\\n`.
 - **The mouse pointer:** SwiftUI's hosting view handles `cursorUpdate:` and `mouseMoved:` and sets the pointer itself (macOS 15). `NSCursor.set()` from a hover handler fights it and flickers. Use `.pointerStyle(...)` on a view under the pointer (`linkPointer()` in `TimelineViews.swift`). Synthetic mouse events in tests don't reach SwiftUI's hover, so the pointer can only be checked by hand.
+- **Hover under a still pointer:** `onContinuousHover` reports `.active` under a pointer that hasn't moved, for example when the panel appears under it. So the cursor ignores hover after a command until the pointer moves on screen (`ScenarioStore.pointerHovered(at:fraction:)`, UI.md 5.1). Compare `NSEvent.mouseLocation`, not the hover's location, which shifts when the layout does. Checked with the pointer warped over the graph and the panel hidden: a link to Jan 2030 left the cursor at the pointer's date within 0.2 seconds before the fix, and at Jan 2030 after it. The cursor following again once the pointer moves was checked only in tests, since the pointer can't be moved with events here.
 - **SwiftUI's global coordinates start at the window's top,** not the hosting view's: in a window with a title bar they're 28 points lower. Measure in a space named on the panel's root (`PanelView.panelSpace`), which matches `hosting.convert(event.locationInWindow, from: nil)`.
 - **Popovers from the panel:** a SwiftUI `.popover` works from the non-activating `NSPanel`. To check one in a test, put the view in an on-screen `NSPanel` (`orderFrontRegardless`) and look for an `_NSPopoverWindow` in `NSApp.windows`; offscreen windows don't show popovers.
 - **Removing slots shifts indices.** Undo records refer to slots by their `id`, not their index, and results are remapped by `id` when the list changes.

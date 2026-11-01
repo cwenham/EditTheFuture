@@ -209,6 +209,8 @@ The open scenario answers questions and takes commands from outside the panel (D
 ### 5.1 Scrubbing and the cursor
 
 - Scrubbing is free; computation follows lazily. If the cursor moves past what's computed, the readout shows a small spinner and the lanes fill in as results arrive.
+- **Commands and a still pointer:** when a command places the cursor (an `etf://show?at=` link, `goto`, `etf show --at`, Show Timeline in Shortcuts, Now or T, ← and →), it stays there until the pointer itself moves, even with the pointer resting over the graph. Once the pointer moves more than a point, the cursor follows it again. Scrolling and zooming with the wheel still carry the cursor along while it waits.
+  - Before, the cursor slid back to a resting pointer within a second: SwiftUI reports hover under a pointer that hasn't moved, for example when a link shows the panel under it.
 - **Before the start:** the models' lines begin at the scenario's start, but readings often go back further (a feed of Europe's temperatures starts in 1850).
   - **How far back:** the view and the cursor reach back to the earliest reading of the value any slot's graph shows. Without readings before the start, they stop at the start, as before. Taking readings away brings the view back within reach.
   - **Opening:** the panel still opens at the start at the earliest, so readings before it are a scroll away. Opening a few months before the start showed only a sliver of shade at the left edge, too narrow for its label.
@@ -514,6 +516,7 @@ Sections:
     - `statusText()`: the footer.
     - The add-event pane reads the draft, and only its effect box reads the cursor.
   - Never assign an `@Observable` property its current value. Even setting `nil` to `nil` redraws every view that reads it.
+  - **The pointer and the cursor** (5.1): the timeline's hover handler passes the pointer to `ScenarioStore.pointerHovered(at:fraction:)`, which decides whether the cursor follows. `show`, `jumpToNow` and `moveCursor` set `pointerHold` to wait: the next hover report says where the pointer rests, and reports from there are ignored until the pointer moves. The pointer's place is `NSEvent.mouseLocation` on screen, not the hover's own location, which also changes when the timeline shifts under a still pointer (the side pane is wider on some tabs).
   - The store never computes. It asks `ScenarioEngine` (an actor on its own thread) for the visible range and draws the latest results it has. Past the end of those results, lines stop and readouts show "…" until the rest arrives (DESIGN.md, 4.8).
 - **Slots** (5.7):
   - The store keeps each slot as a plain record: its position, name, model source, its own values, display settings, events and rules. Every change to slots replaces the whole list, so undo puts the old list back.
