@@ -61,6 +61,14 @@ struct CommandLineToolTests {
                                                    at: PartialDate(year: 2027, month: 1, day: 1)))))
         #expect(try request("event add mortgage overpay 10k")
                 == .command(.addEvent(EventRequest(slot: "mortgage", kind: "overpay", values: ["amount": Amount(10_000)]))))
+        #expect(try request("reading savings 41,200 --at 2026-10-01")
+                == .command(.addReading(ReadingRequest(slot: "savings", value: Amount(41_200), at: PartialDate(year: 2026, month: 10, day: 1)))))
+        #expect(try request("reading savings 4.2% --of rate")
+                == .command(.addReading(ReadingRequest(slot: "savings", variable: "rate", value: Amount(0.042, isFraction: true)))))
+        #expect(try request("reading savings £41k")
+                == .command(.addReading(ReadingRequest(slot: "savings", value: Amount(41_000), currency: "£"))))
+        #expect(throws: UsageError.self) { try request("reading savings") }
+        #expect(throws: UsageError.self) { try request("reading savings 5 --every monthly") }
         #expect(try request("add savings account --slot 7") == .command(.addModel(name: "savings account", slot: 7)))
         #expect(try request("remove climate") == .command(.removeSlot("climate")))
         #expect(try request("undo") == .command(.undo))

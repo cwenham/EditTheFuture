@@ -72,6 +72,8 @@ final class CommandRouter {
             return .done("Opened the Event tab at the cursor.")
         case .addEvent(let request):
             return store.addEvent(request)
+        case .addReading(let request):
+            return store.addReading(request)
         case .addModel(let name, let slot):
             return await store.addModel(named: name, toSlot: slot)
         case .removeSlot(let text):

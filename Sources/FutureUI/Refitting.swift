@@ -126,6 +126,7 @@ extension ScenarioStore {
         }
         closeRefit()
         closePredict()
+        cancelReadingImport()
         showSlotSettings(forSlotAt: index)
         cancelRemoval()
         refit = RefitState(slot: slot.id, choices: choices, window: .all, phase: .fitting, noneMarked: marked.isEmpty)

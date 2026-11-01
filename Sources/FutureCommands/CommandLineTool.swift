@@ -58,6 +58,8 @@ public enum CommandLineTool {
       etf deposit SLOT AMOUNT [--at DATE] [--every monthly]
       etf withdraw SLOT AMOUNT [--at DATE] [--every monthly]
       etf set SLOT PARAMETER VALUE [--at DATE]
+      etf reading SLOT AMOUNT [--of VALUE] [--at DATE]
+                                              Adds a reading, today unless asked
       etf event add SLOT KIND [NAME=VALUE ...] [--at DATE] [--every monthly]
       etf add MODEL [--slot N]                Adds a model from the library
       etf remove SLOT                         Asks in the panel before removing a slot
@@ -80,7 +82,7 @@ public enum CommandLineTool {
     """
 
     /// Options that take a value.
-    static let valueOptions: Set<String> = ["at", "from", "through", "every", "format", "slot", "timeout"]
+    static let valueOptions: Set<String> = ["at", "from", "through", "every", "format", "slot", "of", "timeout"]
     /// Options that are just there or not.
     static let flags: Set<String> = ["json", "number", "no-launch", "help"]
 
@@ -232,6 +234,12 @@ public enum CommandLineTool {
             let (value, currency) = try amount(rest[2])
             return done(.command(.addEvent(EventRequest(slot: try slotName(rest[0]), kind: "set", values: [rest[1]: value],
                                                         currency: currency, at: try date("at"), every: try every()))))
+        case "reading", "read":
+            try allow(["at", "of"]); try most(2, "a slot and an amount")
+            guard rest.count == 2 else { throw UsageError("etf reading needs a slot and an amount: etf reading savings 41200.") }
+            let (value, currency) = try amount(rest[1])
+            return done(.command(.addReading(ReadingRequest(slot: try slotName(rest[0]), variable: options["of"], value: value,
+                                                            currency: currency, at: try date("at")))))
         case "event":
             try allow(["at", "every"])
             guard rest.first?.lowercased() == "add" else { throw UsageError("Try etf event add SLOT KIND NAME=VALUE.") }

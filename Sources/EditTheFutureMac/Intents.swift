@@ -237,6 +237,47 @@ struct SetParameterIntent: AppIntent {
     }
 }
 
+struct AddReadingIntent: AppIntent {
+    static let title: LocalizedStringResource = "Add Reading"
+    static let description = IntentDescription(
+        "Adds a reading of a slot’s value in Edit The Future, such as a balance from a statement or a meter reading. Readings correct the model up to now. Asks before adding it.")
+
+    @Parameter(title: "Slot", requestValueDialog: "Which slot?")
+    var slot: SlotEntity
+
+    @Parameter(title: "Reading", description: "In the slot’s currency or unit. For a percent, 4.5 means 4.5%.",
+               requestValueDialog: "What does it read?")
+    var value: Double
+
+    @Parameter(title: "Of", description: "Which of its values, such as balance. Leave it empty for the one its graph shows.")
+    var variable: String?
+
+    @Parameter(title: "Date", description: "Leave it empty for today.")
+    var date: Date?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Add a reading of \(\.$value) to \(\.$slot)") {
+            \.$variable
+            \.$date
+        }
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let name = variable?.trimmingCharacters(in: .whitespaces)
+        let request = ReadingRequest(slot: slot.id, variable: name?.isEmpty == false ? name : nil, value: Amount(value),
+                                     at: scenarioDay(date))
+        let store = await Outside.shared.store()
+        switch store.describe(request) {
+        case .failure(let problem): throw IntentProblem(problem.description)
+        case .success(let summary): try await confirm(summary + "?", action: .add)
+        }
+        let reply = await Outside.shared.handle(.command(.addReading(request)), from: .appIntent, confirmed: true)
+        guard reply.ok else { throw IntentProblem(reply.message) }
+        return .result(dialog: IntentDialog(stringLiteral: reply.message))
+    }
+}
+
 // MARK: Copying
 
 enum SnapshotChoice: String, AppEnum {
@@ -278,6 +319,9 @@ struct EditTheFutureShortcuts: AppShortcutsProvider {
         AppShortcut(intent: AddEventIntent(),
                     phrases: ["Add a deposit in \(.applicationName)", "Add to \(\.$slot) in \(.applicationName)"],
                     shortTitle: "Add Deposit", systemImageName: "plus.circle")
+        AppShortcut(intent: AddReadingIntent(),
+                    phrases: ["Add a reading in \(.applicationName)", "Add a reading to \(\.$slot) in \(.applicationName)"],
+                    shortTitle: "Add Reading", systemImageName: "gauge.with.needle")
         AppShortcut(intent: CopySnapshotIntent(),
                     phrases: ["Copy a snapshot from \(.applicationName)", "Copy \(.applicationName) snapshot"],
                     shortTitle: "Copy Snapshot", systemImageName: "doc.on.clipboard")

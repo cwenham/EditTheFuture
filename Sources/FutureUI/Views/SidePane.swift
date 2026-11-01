@@ -83,6 +83,7 @@ struct SidePane: View {
             if tab != .slot {
                 store.closeRefit()
                 store.closePredict()
+                store.cancelReadingImport()
             }
             if tab == .formula {
                 store.showFormulaEditor()
