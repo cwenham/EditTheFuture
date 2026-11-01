@@ -189,6 +189,9 @@ public final class ScenarioStore {
     public private(set) var commandBarFocusRequest = 0
 
     public var opacity = 0.86
+    /// Whether the panel blurs what's behind it. Off, it's clear, so numbers in the windows
+    /// beneath can be read through it (docs/UI.md, 2.1).
+    public var blursBehind = true
     public var commandText = ""
 
     /// Which tab the side pane shows.
