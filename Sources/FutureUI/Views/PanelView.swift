@@ -112,7 +112,8 @@ struct TimelineArea: View {
                                 pickDateOnLane: { index, fraction in
                                     store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
                                 },
-                                editEvent: { store.editEvent(id: $0) }))
+                                editEvent: { store.editEvent(id: $0) },
+                                openDrift: { store.openDriftRefit(slot: store.focused.id) }))
                     .contentShape(Rectangle())
                     .onContinuousHover { phase in
                         guard case .active(let location) = phase else { return }

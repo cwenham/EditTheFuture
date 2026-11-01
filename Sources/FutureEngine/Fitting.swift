@@ -360,7 +360,7 @@ struct RecordedModel: TimelineModel {
 
 /// The copy's slot on its own, in a scenario of its own that reads recordings of the slots it
 /// reads, with some of its readings. Each try swaps in the model with other values.
-private final class Trial<Model: AuthoredModel> {
+final class Trial<Model: AuthoredModel> {
     let copy: SlotCopy
     let model: Model
     let readings: [Reading]
@@ -445,7 +445,7 @@ extension SlotCopy {
         }
     }
 
-    private static func runStart(_ model: some AuthoredModel, copy: SlotCopy, fitting names: [String]) -> Date {
+    static func runStart(_ model: some AuthoredModel, copy: SlotCopy, fitting names: [String]) -> Date {
         let descriptor = model.descriptor
         return copy.runStart(stepRate: descriptor.stepRate,
                              outputs: Set(descriptor.variables.filter { $0.causality == .output }.map(\.name)),
@@ -629,7 +629,7 @@ extension SlotCopy {
 }
 
 /// Which misses count, and how each is measured (docs/DESIGN.md, 8.4).
-private struct Scoring {
+struct Scoring {
     /// Values whose readings are all above zero, so their misses are ratios: amounts and plain
     /// numbers, not temperatures or percents.
     let ratios: Set<String>

@@ -16,6 +16,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Takes commands from the etf tool (docs/DESIGN.md, 10.2).
     private var commandServer: CommandServer?
     private let hotKeys = HotKeyCenter()
+    /// Notifies of drifting readings while the panel is hidden (docs/UI.md, 5.6).
+    private lazy var driftNotifier: DriftNotifier = {
+        let notifier = DriftNotifier()
+        notifier.onOpen = { [weak self] folder, slot in
+            guard let self, let document = self.document, document.package.url.path == folder,
+                  let store = self.store, let index = store.slots.firstIndex(where: { $0.title == slot }) else { return }
+            self.panel?.showFully()
+            store.openDriftRefit(slot: store.slots[index].id)
+        }
+        return notifier
+    }()
     private var statusItem: NSStatusItem?
     private var hasLaunched = false
     /// A scenario the app was asked to open before it finished launching.
@@ -154,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         opened.store.onScenarioChange = {
             saving?()
             Outside.shared.slotsMayHaveChanged()
+        }
+        opened.store.onDrift = { [weak self, weak panel, weak opened] alert in
+            guard let self, let panel, let opened, !panel.isVisible else { return }
+            self.driftNotifier.notify(alert, scenario: opened.store.name, folder: opened.package.url.path)
         }
         UserDefaults.standard.set(opened.package.url.path, forKey: Self.lastScenarioKey)
         // Renaming the scenario in the panel can rename its folder (docs/DESIGN.md, 15.1).

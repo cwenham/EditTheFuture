@@ -10,6 +10,8 @@ struct TimelineInteractions {
     var pickDateOnLane: (Int, Double) -> Void
     /// A click on a one-off event's diamond loads it into the add-event pane (docs/UI.md, 5.4).
     var editEvent: (UUID) -> Void
+    /// A click on the drift pill opens Refit on the last year of readings (docs/UI.md, 5.6).
+    var openDrift: () -> Void = {}
 }
 
 /// Where cursor-dependent views get their values: the live store (so only they redraw when the
@@ -43,6 +45,11 @@ struct TimelineRows: View {
                 FocusChart(timeline: timeline)
                     .frame(width: plotWidth, height: focusHeight)
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
+                    .overlay(alignment: .topLeading) {
+                        if let drift = timeline.focus.drift {
+                            DriftPill(drift: drift, timeline: timeline, width: plotWidth, action: interactions?.openDrift)
+                        }
+                    }
                     .overlay { if timeline.showsStart { StartLabel(timeline: timeline) } }
                     .overlay {
                         if let reason = timeline.focus.pausedReason { PausedNote(reason: reason, large: true) }
@@ -157,6 +164,11 @@ struct FocusChart: View {
         if !focus.heldBack.isEmpty {
             series.append(PlotSeries(samples: focus.heldBack, color: Theme.proposal, lineWidth: 1.25, dash: [1.5, 3]))
         }
+        var bands: [PlotBand] = []
+        if let drift = focus.drift {
+            bands.append(PlotBand(points: drift.band, color: Theme.warning.opacity(0.12)))
+            series.append(PlotSeries(samples: drift.line, color: Theme.warning.opacity(0.8), lineWidth: 1.25, dash: [1.5, 3]))
+        }
         var rules = [PlotRule(date: timeline.now, color: Theme.nowLine)]
         if let cutoff = focus.cutoff {
             rules.append(PlotRule(date: cutoff, color: Theme.proposal.opacity(0.45), dash: [1.5, 3]))
@@ -165,7 +177,7 @@ struct FocusChart: View {
             rules.append(PlotRule(date: draftDate, color: Theme.proposal, dash: [3, 3]))
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
-                          series: series, rules: rules,
+                          bands: bands, series: series, rules: rules,
                           readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
                           modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
@@ -217,6 +229,52 @@ struct CursorOverlay: View {
         let span = focusDomain.upperBound - focusDomain.lowerBound
         let y = focusHeight * (1 - CGFloat((value - focusDomain.lowerBound) / (span == 0 ? 1 : span)))
         return y >= 0 && y <= focusHeight ? y : nil
+    }
+}
+
+/// The drift pill (docs/UI.md, 5.6): just left of the now line, at the Now label's height, or right
+/// of the label when there isn't room on the left. Clicking it opens Refit on the last year.
+struct DriftPill: View {
+    let drift: DriftMark
+    let timeline: TimelineState
+    let width: CGFloat
+    let action: (() -> Void)?
+
+    /// About as wide as the pill gets; enough to tell which side of the now line it fits.
+    static let roomNeeded: CGFloat = 250
+
+    var body: some View {
+        let nowX = timeline.frame.x(timeline.now, width: width)
+        let pill = Button { action?() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
+                Text("Drift · " + drift.text).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            }
+            .foregroundStyle(Theme.warning)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Theme.warningFill, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.warning.opacity(0.35), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(drift.detail + (action == nil ? "" : " Click to refit to the last year of readings."))
+        .accessibilityLabel("Drift: " + drift.detail)
+        .accessibilityHint("Opens Refit on the last year of readings")
+        let onLeft = nowX >= Self.roomNeeded && nowX <= width
+        HStack(spacing: 0) {
+            if onLeft {
+                Spacer(minLength: 0)
+                pill.padding(.trailing, max(8, width - nowX + 8))
+            } else {
+                // Past the Now label, or at the left edge when now is off to the left.
+                pill.padding(.leading, nowX > width ? 8 : max(8, nowX + 120))
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(width: width)
+        .padding(.top, 2)
     }
 }
 
@@ -458,7 +516,16 @@ struct LaneRow: View {
                         .frame(width: 10)
                     RoundedRectangle(cornerRadius: 2).fill(lane.color).frame(width: 3, height: 22)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(lane.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text(lane.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            if let drift = lane.drift {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Theme.warning)
+                                    .help(drift)
+                                    .accessibilityLabel("Drift: " + drift)
+                            }
+                        }
                         if let reads = lane.reads {
                             Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
                         }

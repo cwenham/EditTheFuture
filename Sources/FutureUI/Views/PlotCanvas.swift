@@ -24,6 +24,12 @@ struct PlotReadings {
     var color: Color
 }
 
+/// A range around a line, filled: drift's 10–90% band (docs/UI.md, 2.4).
+struct PlotBand {
+    var points: [DriftOutcome.BandPoint]
+    var color: Color
+}
+
 /// A dot on a line (the cursor's value).
 struct PlotMarker {
     var date: Date
@@ -44,6 +50,7 @@ struct PlotCanvas: View {
     let domain: ClosedRange<Double>
     let now: Date
     var gridValues: [Double] = []
+    var bands: [PlotBand] = []
     let series: [PlotSeries]
     var rules: [PlotRule] = []
     var readings: PlotReadings?
@@ -79,6 +86,9 @@ struct PlotCanvas: View {
                     grid.addLine(to: CGPoint(x: size.width, y: lineY))
                 }
                 context.stroke(grid, with: .color(Theme.grid), lineWidth: 1)
+            }
+            for band in bands {
+                context.fill(Self.path(for: band.points, x: x, y: y), with: .color(band.color))
             }
             for line in series {
                 let path = Self.path(for: line.samples, frame: frame, size: size, x: x, y: y)
@@ -185,6 +195,19 @@ struct PlotCanvas: View {
             last = sample.value
         }
         flush()
+        return path
+    }
+
+    /// The band's outline: along its top, then back along its bottom. A band covers a stretch of
+    /// readings, so it's never long enough to need thinning. Points that can't be drawn are left out.
+    nonisolated static func path(for points: [DriftOutcome.BandPoint], x: (Date) -> CGFloat, y: (Double) -> CGFloat) -> Path {
+        let drawable = points.filter { $0.low.isFinite && $0.high.isFinite }
+        var path = Path()
+        guard drawable.count > 1 else { return path }
+        path.move(to: CGPoint(x: x(drawable[0].time), y: y(drawable[0].high)))
+        for point in drawable.dropFirst() { path.addLine(to: CGPoint(x: x(point.time), y: y(point.high))) }
+        for point in drawable.reversed() { path.addLine(to: CGPoint(x: x(point.time), y: y(point.low))) }
+        path.closeSubpath()
         return path
     }
 

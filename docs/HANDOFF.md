@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-11-01, at commit `ac6f929` on `main`.
+Where the work stands, for the next Claude session. Last updated 2026-11-01, on `feature/drift-alerts` (not committed yet), from `abd9fa9` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -92,6 +92,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - **The Forecast models** (`ForecastModels.swift`): Hold the latest, Steady change, Steady growth, Recent change, Recent growth, Trend line, S-curve and Seasonal, written around whichever value a slot's readings are of, each with a first guess from the readings. A Forecast category in the model picker.
   - **Predict with in the panel** (UI.md 5.11): for a slot with readings, the Slot tab's model name opens a popover listing the slot's own model, the Forecast models and matching library models. Each is fitted and scored on readings it didn't see, one at a time off the main thread, with the best tagged (lowest score; within a tenth of it, fewest fitted values). Hovering or ↑ and ↓ preview a model's fitted line dashed and its held-back projection dotted. Click or ↩ chooses it, undoably. A Which readings menu, Use the best, and `predict data with trend line` or `with best` in the command bar. Scores are kept until the model, values or readings change.
   - `swift run -c release etf-bench predict readings.csv [step day] [since 1976-01-01]` scores the Forecast models on a feed's saved readings. Europe's temperatures pick Trend line, US debt Steady growth, the S&P 500 Recent growth.
+- **Drift alerts** (DESIGN.md 8.2, UI.md 5.6): each slot with readings of the value its graph shows is checked after its readings, model, values or events change, and on opening. The last year of readings is hidden, the model is projected from the point before it, and earlier one-year projections size a 10–90% range. When the latest readings leave it, a pill by the now line says so ("Drift · 20.0% above the projection"), the graph draws the projection and its range, and the slot's lane gets a warning triangle. Clicking the pill opens Refit on the last year. With the panel hidden, the Mac sends a notification, once per drift.
 - **Readings on the graph** (UI.md 2.4): the focused graph draws readings of the value it shows as dots on a thin line (just the line when they're dense), and the readout says "Reading" over them.
 - **Before the start** (UI.md 2.4, 5.1): the view and cursor reach back to the earliest reading a slot's graph shows (`ScenarioStore.earliest`), not just to the scenario's start. Before the start the plots are shaded, a dashed line labelled "Start · Jan 2022" marks where the models' lines begin, and the readout shows the reading at the cursor or "Before the start".
 - **The panel:**
@@ -159,7 +160,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **More for saving** (DESIGN.md, 15):
   - Deleting a scenario from the panel. For now, move its folder to the Trash in Finder.
   - Remembering where the panel was looking for each scenario.
-  - Better assimilation than direct insertion (nudging, Kalman filters), and drift alerts (UI.md 5.6).
+  - Better assimilation than direct insertion (nudging, Kalman filters).
   - Readings in the lanes, and the Readings toggle in the focus area (UI.md, 3).
   - Asking before running scripts from a scenario someone else made (DESIGN.md, 17).
   - Sync, iOS documents, branches, and the sandbox's related-files declaration for SQLite.
@@ -180,7 +181,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 - **Panel features from UI.md:**
   - Editing recurring events, and dragging events to move them (5.4). One-off events can be edited by clicking them.
   - Drag the future (5.2). The engine's `GoalSeek` exists.
-  - Bands, readings and drift alerts (5.6).
+  - Bands for stochastic models, and readings in the lanes. Drift alerts are built (5.6).
   - Mute and solo, and banks ([ and ]).
   - Click to pin the cursor, and ⌥-scroll to zoom the value axis.
   - Glance HUD and settings.
@@ -208,7 +209,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The sandboxed app (Mac App Store) will need the outgoing network entitlement (`com.apple.security.network.client`).
 
 - **Fitting:**
-  - The app's scenario doesn't keep misses (`recordsMisses` is off), because saved results (`SlotCache`) don't include them. Drift alerts will need both.
+  - The app's scenario doesn't keep misses (`recordsMisses` is off), because saved results (`SlotCache`) don't include them. Drift alerts didn't need them: they run their own projections on a copy of the slot.
   - Refit takes the slots a slot reads as they are. A loop back through another slot isn't refitted.
   - A differential equation makes each try slow in debug builds: an S-curve over 15 years of months took 2.6 seconds in a test. Release builds are much faster, but this wasn't measured.
   - Refit in the panel was checked in tests and offscreen renders of the real panel (the sheet, the Refit… link, the dashed line), not by clicking in the app. Not checked by hand: Esc and ⌘↩ reaching the sheet's buttons in the floating panel, and the readings menu.
@@ -226,6 +227,13 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - A slot going from waiting for rates to running rebuilds the engine's scenario, as unpausing a slot does, so every slot computes again once. With the copy in `readings/`, that only happens the first time a currency is needed.
   - Live rates are a single latest point per currency. Between the ECB's daily rates and the live one, the live one is used from its time on, so today's readout follows the live rate.
   - A 4,300-request month assumes the scenario is open around the clock; the free plan's 1,000 runs out in about a week of that.
+- **Drift alerts:**
+  - Checked in tests (the engine's check on steady, jumped, temperature, short, yearly and one-odd-reading series; the store's alerts, pill, lane mark, clearing, notifying once and Refit on the last year), with `etf-bench predict` on real feeds, and in the real app: a scratch scenario with US debt under a Trend line showed "Drift · 60.9% above the projection" by the now line, the dotted projection and its range, and no mark on a Steady growth slot of the same readings. The user's own "Home & money" has no drifting slot.
+  - On real feeds (release build): Europe's temperatures since 1850 don't drift under any Forecast model; US debt drifts only under Trend line and Seasonal (+61%); the S&P 500 likewise (+22%). A check took 0.3 seconds for monthly readings since 1850, and about 1.2 for 30 years of daily ones.
+  - **Not checked by hand:** clicking the pill in the floating panel, the notification (the panel was showing when the drift was found, so none was sent), the permission prompt, and clicking a notification. Ad-hoc signing may affect whether macOS lets the app post notifications.
+  - The check runs for every slot with readings after each change to it, 0.8 seconds later. A slot that reads other slots, or converts money, is checked again after any change in the scenario, since what it reads may have changed.
+  - Only the value the graph shows is checked. A slot whose readings are of another value has no alert.
+  - The wording is in the value's terms ("20.0% above"), not time ("2 days behind"); see DESIGN.md 8.2, Not yet.
 - **The scenario menu:**
   - Checked in tests and in captures of the real menu and popover on screen in a throwaway test. Not checked by clicking in the app: the menu opening from the floating panel, typing in the form, Esc and ↩ reaching its buttons, and switching from the menu.
   - A new start date goes through `rebuild`, then `refreshSlots`, whose `updateEarliest` keeps the view and cursor within reach: back to the earliest reading when there are readings before the start.
@@ -280,7 +288,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 
 - **Python:** `scripts/fetch-python.sh` downloads CPython into `Vendor/Python` (not in git). Without it, everything builds and Python slots pause. Re-run it on a new checkout, and whenever a build leaves Python out although the folder is there: Python's tests show as skipped, and the picker says "Python isn't included in this build".
 - **iOS:** `FutureScript` builds for iOS, and `etf-script` built for the simulator runs scripts inside it. The commands are in DESIGN.md 6.4.
-- **Tests:** `swift test` runs about 445 tests in about 40 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
+- **Tests:** `swift test` runs about 460 tests in about 60 seconds. Feed tests never touch the network: they answer from fixtures (`FakeTransport`, `QueuedTransport`) and keep sign-ins in memory.
 - **Exchange rates against the live sources:** `swift run etf-feed --rates GBP,EUR --since 2026-10-01` (the ECB, through Frankfurter), and `--live` with `--key` for Open Exchange Rates.
 - **Feeds against the live sources:** `swift run etf-feed --check` fetches the last 120 days of every ready-made feed that needs no key, and says which failed. In October 2026 all 45 worked, apart from NOAA's CO₂ server being down once.
 - **Feeds in the app:** write a scenario with feed lines in a scratch folder and `open -a .build/EditTheFuture.app "<folder>/Test.etf"`. The copies appear in its `readings/` within seconds. Opening it changes `scenario.lastOpened` in the app's defaults (`defaults read com.editthefuture.mac`), so put it back afterwards.

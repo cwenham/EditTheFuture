@@ -556,7 +556,18 @@ Grab the line at a future date and drag it to a target value. The app works out 
 
 ### 8.2 Drift alerts
 
-When real readings leave the projected band (for example outside the 10–90% ensemble range, or more than k standard deviations from the projection), notify the user: "Your fermentation is running 2 days behind the model." Offer Refit (8.4), which fits the model's parameters to the new readings.
+When real readings leave the range the model projected for them, the app says so: a pill on the graph, and a notification when the panel is hidden (UI.md, 5.6). It offers Refit (8.4), which fits the model's values to the new readings.
+
+Built in November 2026, in `FutureEngine/Drift.swift` (`SlotCopy.drift`) and `FutureUI/Drifting.swift`.
+
+- **The projection:** the latest stretch of readings is hidden from the model, which is projected from the slot's point before it, with the slot's own values and only the readings up to there, as the automatic pick's projections are (8.4). The stretch is the last year, or the last fifth of the readings' span when they span less than five years, and always holds at least the last three readings.
+- **The range:** most models have no randomness, so there's no ensemble to draw bands from (4.6). Instead, earlier stretches of the same length, back to back before the latest one (up to 20), are each projected from the point before them, and their misses size the range: the typical miss (root mean square) at each quarter of the way through a stretch, never narrower further ahead, times 1.28, which holds the middle 80% (10–90%) of misses that spread normally. A projection that carries on from the latest reading starts close and wanders, so its range widens; a trend line's stays about the same. A steady bias, such as a held value under a rising series, counts in the typical miss, so it doesn't drift on its own.
+- **Misses** are ratios (logs) where every reading is above zero, and differences for temperatures, percents and values that reach zero, as in fitting (8.4).
+- **Drift** is the last reading outside the range, with most of the last three outside on the same side. A single odd reading isn't drift.
+- **Too little to tell:** fewer than five readings, fewer than three readings after the cut-off or two before it, or fewer than three earlier stretches with readings. Then there's no check and no alert.
+- **The outcome** (`DriftOutcome`): the cut-off, the projection and its range point by point, how many readings were checked and how many fell outside, whether it drifts, and how far the last reading is from the projection (a share of it, or in the value's units).
+- **Speed:** a projection is one run of the slot, so a check is at most 21 runs. `etf-bench predict` times it for each Forecast model.
+- **Not yet:** time-based wording ("running 2 days behind the model") for models of processes that run their course, such as a fermentation. That would need the model to say which of its values is progress. Bands from the held-back misses (8.4, Later) could also draw a range ahead of now, not only over the latest readings.
 
 ### 8.3 Natural-language events
 
@@ -1187,7 +1198,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); the command-line tool. App Intents and the `etf` tool are done (10.3, 10.4), the tool through a local socket rather than XPC. The CoreMIDI adapter waits for the hardware. |
-| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with and the automatic pick are done (15.8, 4.6, 8.4). |
+| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with, the automatic pick and drift alerts are done (15.8, 4.6, 8.4, 8.2). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -1203,7 +1214,8 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 - Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
 - Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
-- Should Refit, or the automatic pick, run on its own when new readings arrive (8.4)? It would change values without a preview, and rewrite `scenario.md` after every fetch.
+- Should Refit, or the automatic pick, run on its own when new readings arrive (8.4)? It would change values without a preview, and rewrite `scenario.md` after every fetch. Drift alerts (8.2) now say when a refit is worth a look.
+- Should drift alerts check readings of a slot's other values, not only the one its graph shows? And should a slot be able to turn its alerts off?
 - Predict with writes the Forecast models around whatever value the readings are of, but only offers library models that have that value (8.4). Should it also offer library models whose value has another name, and point the readings at that value when one is chosen (a feed's `into`, a CSV file's column)?
 - Should models be able to read their own past readings (`t.readings` in scripts)? A script could then fit itself, for example with a statistics library.
 - Should stochastic models be fitted to their ensemble's median (4.6), rather than to one seeded run?
@@ -1232,7 +1244,7 @@ docs/
   HANDOFF.md         where the work stands, for the next session
 Package.swift
 Sources/
-  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit)
+  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
@@ -1240,8 +1252,8 @@ Sources/
   FutureCommands/    Command vocabulary, questions and replies, DeviceFeedback, etf:// URL scheme, the etf tool's arguments and printing, the local socket and its caller check, MIDI decoding, profile and feedback
   FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, feeds' lines and copies, cache files, the scenario folder
   FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping, answers and edits for the etf tool and Shortcuts (OutsideRequests)
-  EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links, the command router and the socket server, App Intents
+  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, drift alerts, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping, answers and edits for the etf tool and Shortcuts (OutsideRequests)
+  EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links, the command router and the socket server, App Intents, drift notifications
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
   etf-script/        runs a script model without the app and prints CSV
   etf/               the command-line tool inside the app: sends one request and prints the reply (10.3)
@@ -1249,12 +1261,12 @@ Sources/
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares
-  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit
+  FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
   FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, the etf tool's arguments, amounts and printing, the wire format, the socket (round trips, refused callers, stale sockets), MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
   FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts, drift alerts
 scripts/
   build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, the .etf document type, the etf tool and the App Intents metadata
   appintents-protocols.json  the protocols whose constant values the compiler records for App Intents

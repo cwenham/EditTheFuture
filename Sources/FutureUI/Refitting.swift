@@ -100,8 +100,8 @@ extension ScenarioStore {
     }
 
     /// Opens Refit for a slot in the Slot tab, with the values its model marks `fit` ticked, and
-    /// starts fitting them.
-    public func openRefit(slotAt index: Int) {
+    /// starts fitting them to the readings in `window`.
+    public func openRefit(slotAt index: Int, window: RefitState.Window = .all) {
         guard isSlot(index) else { return }
         let slot = slots[index], config = configs[index]
         guard canRefit(slot: slot.id) else {
@@ -128,7 +128,7 @@ extension ScenarioStore {
         closePredict()
         showSlotSettings(forSlotAt: index)
         cancelRemoval()
-        refit = RefitState(slot: slot.id, choices: choices, window: .all, phase: .fitting, noneMarked: marked.isEmpty)
+        refit = RefitState(slot: slot.id, choices: choices, window: window, phase: .fitting, noneMarked: marked.isEmpty)
         runRefit()
     }
 

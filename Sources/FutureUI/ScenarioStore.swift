@@ -269,6 +269,21 @@ public final class ScenarioStore {
     @ObservationIgnored var predictPreview: (id: String, values: [String: Double], from: Date, through: Date)?
     /// The slot `parameterPreview` belongs to, while a slider is dragged or a formula edited.
     @ObservationIgnored var previewSlot: UUID?
+    /// Slots whose latest readings left the range their model projected (docs/UI.md, 5.6).
+    public internal(set) var drifts: [UUID: DriftAlert] = [:]
+    /// Each slot's last drift check, with what it depended on, so it isn't checked again for nothing.
+    @ObservationIgnored var driftChecked: [UUID: (key: String, outcome: DriftOutcome?)] = [:]
+    @ObservationIgnored var driftTask: Task<Void, Never>?
+    @ObservationIgnored var driftFlag: CancelFlag?
+    @ObservationIgnored var driftSequence = 0
+    /// How long after a change the check waits, in case more changes follow (feeds bring readings
+    /// for several slots at once).
+    @ObservationIgnored public var driftDelay = Duration.milliseconds(800)
+    /// Drifts already passed on, so each is notified once.
+    @ObservationIgnored var driftNotified: Set<String> = []
+    /// Called when a slot starts drifting, or drifts again with newer readings. The Mac app sends
+    /// a notification when the panel isn't showing.
+    @ObservationIgnored public var onDrift: ((DriftAlert) -> Void)?
 
     /// Formulas being edited and not yet applied, by slot id.
     public internal(set) var formulaDrafts: [UUID: String] = [:]
@@ -354,6 +369,7 @@ public final class ScenarioStore {
         if !restore.isEmpty { enqueue(.mutate(.restore(restore))) }
         updateRefittable()
         requestData()
+        scheduleDriftCheck()
     }
 
     /// The slots a definition describes, in position order. A slot without a free position is left out.
@@ -529,6 +545,7 @@ public final class ScenarioStore {
         updateRefittable()
         refitSlotsChanged()
         predictSlotsChanged()
+        scheduleDriftCheck()
         onScenarioChange?()
     }
 
@@ -865,6 +882,7 @@ public final class ScenarioStore {
         requestData()
         updateDraftPreview()
         updateRefittable()
+        scheduleDriftCheck()
     }
 
     /// Forgets undo and redo, when the scenario is replaced from its file with a new start or seed.
@@ -1361,12 +1379,17 @@ public final class ScenarioStore {
         let held = heldBack.flatMap { $0.slot == focusSlot.id ? $0 : nil }
         let preview = dragging ? slotPreview : draftOnFocus == nil ? [] : draftPreview
         let readings = visibleReadings(ofSlotAt: focusedIndex, from: from, through: through)
+        let driftAlert = drifts[focusSlot.id]
+        let driftMark = driftAlert.map {
+            DriftMark(text: $0.text, detail: $0.detail, line: $0.outcome.line, band: $0.outcome.band, cutoff: $0.outcome.cutoff)
+        }
         let lineRange = range(focusSamples), previewRange = range(preview), readingRange = range(readings)
         let heldRange = range(held?.line ?? [])
+        let bandRange = range((driftMark?.band ?? []).flatMap { [Sample(time: $0.time, value: $0.low), Sample(time: $0.time, value: $0.high)] })
         let lows: [Double] = [lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity,
-                              readingRange?.low ?? .infinity, heldRange?.low ?? .infinity]
+                              readingRange?.low ?? .infinity, heldRange?.low ?? .infinity, bandRange?.low ?? .infinity]
         let highs: [Double] = [lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity,
-                               readingRange?.high ?? -.infinity, heldRange?.high ?? -.infinity]
+                               readingRange?.high ?? -.infinity, heldRange?.high ?? -.infinity, bandRange?.high ?? -.infinity]
         let low = lows.min()!, high = highs.max()!
         let (domain, ticks) = niceTicks(low: low, high: high, includeZero: focusSlot.format == .currency)
         let focus = FocusedSlotState(
@@ -1376,14 +1399,15 @@ public final class ScenarioStore {
             draftDate: dragging ? nil : draftOnFocus?.date,
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
             editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,
-            pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text)
+            pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text, drift: driftMark)
 
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)
             let bounds = range(list) ?? (0, 1)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
                              yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads,
-                             pausedReason: slot.pausedReason, stoppedReason: slotFailures[slot.id]?.text)
+                             pausedReason: slot.pausedReason, stoppedReason: slotFailures[slot.id]?.text,
+                             drift: drifts[slot.id]?.detail)
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, start: start, focus: focus, lanes: lanes,

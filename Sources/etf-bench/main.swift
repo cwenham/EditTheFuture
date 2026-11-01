@@ -224,6 +224,15 @@ func benchPredict(_ arguments: [String]) throws {
             let amount = outcome.miss.isRatio ? String(format: "%.2f%%", outcome.miss.typical * 100) : String(format: "%.4g", outcome.miss.typical)
             let values = outcome.values.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.4g", $0.value))" }.joined(separator: ", ")
             print(String(format: "%-16@ off by %-10@ %5d runs %7.2f s  ", kind.name as NSString, amount as NSString, outcome.runs, seconds) + values)
+            // The drift check with the fitted values, as the panel runs it (docs/DESIGN.md, 8.2).
+            let fitted = copy.replacingModel(try model.replacingValues(outcome.values))
+            let checked = Date()
+            let drift = try fitted.drift("value")
+            let driftText = drift.map { drift -> String in
+                let amount = drift.isRatio ? String(format: "%+.2f%%", drift.offset * 100) : String(format: "%+.4g", drift.offset)
+                return (drift.isDrifting ? "DRIFTING " : "steady ") + amount + " at the last reading, \(drift.outside) of \(drift.checked) outside"
+            } ?? "too few readings to tell"
+            print(String(format: "%16@ drift: %@ (%.2f s)", "" as NSString, driftText as NSString, Date().timeIntervalSince(checked)))
             scores.append((kind, candidate.markedValues.count, outcome.miss.typical))
         } catch {
             print(String(format: "%-16@ ", kind.name as NSString) + "\(error)")

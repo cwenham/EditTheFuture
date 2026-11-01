@@ -79,7 +79,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 | Generated event | Hollow circle, italic secondary label |
 | Proposed event | Dashed diamond or dashed bar in `proposal` |
 | Event being edited | Ringed in `proposal`; faint once the draft moves it to another date |
-| Drift | Warning pill attached to the now line |
+| Drift | Warning pill attached to the now line. The projection from before the latest readings, dotted in `warning`, inside its 10–90% range filled in `warning` at 12% |
 
 ## 3. Mac panel anatomy
 
@@ -111,7 +111,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - The graph with its y axis.
 - A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection, Before the start), and the 10–90% range when there is one. "Reading" shows while the cursor is within the slot's readings of the value the graph shows. Long values shrink to fit.
 
-**Now line:** labelled "Now · Oct 2026". When the latest readings leave the projected band, a drift pill sits to its left.
+**Now line:** labelled "Now · Oct 2026". When the latest readings leave the range the model projected for them, a drift pill sits to its left (5.6).
 
 **Events strip:** one row under the time axis for the focused slot. Its label reads "click a date or an event": clicking a one-off event's diamond edits it (5.4), and clicking anywhere else picks that date.
 
@@ -272,8 +272,16 @@ The open scenario answers questions and takes commands from outside the panel (D
 
 ### 5.6 Drift alerts
 
-- A pill appears on the graph, and a notification is sent when the app isn't visible.
-- Clicking the pill opens Refit (5.11), set to the last year of readings: the model's parameters fitted again, shown as a preview before anything changes.
+Built in November 2026 (DESIGN.md, 8.2).
+
+- **When:** a slot drifts when the latest of its readings, of the value its graph shows, fall outside the range its model projected for them. The check hides the last year of readings from the model, projects the model from the point before them with the slot's own values, and sizes the range from how far earlier projections a year long missed (the middle 80% of misses, 10–90%, widening with the distance ahead). The last reading must be outside the range, and so must most of the last three, on the same side, so one odd reading isn't drift.
+- **Short and sparse series:** readings spanning less than five years check their last fifth instead of a year, and the stretch always holds at least the last three readings, so yearly readings check their last three years. Too few readings, or too little history before them (three earlier stretches), and there's no check.
+- **When it runs:** shortly after a slot's readings, model, values or events change (a feed bringing new readings, Refit's Apply), and when the scenario opens. It runs off the main thread and the engine's, one slot at a time, so the panel keeps scrolling. Each slot is checked again only when something it depends on changed.
+- **The pill:** "⚠ Drift · 20.0% above the projection", in `warning` on its fill, just left of the now line at the Now label's height, or right of the label when there's no room on the left. Its help says more: "Debt's readings since Sep 2025 are running 20.0% above what its model projected for them. Click to refit to the last year of readings." Amounts are a percent of the projection for amounts above zero, or the value's own units for temperatures, percents and values that reach zero ("0.8 °C below the projection").
+- **On the graph:** while the focused slot drifts, its projection from before the latest readings is drawn dotted in `warning`, inside its range filled in `warning` at 12%, so the readings can be seen leaving it.
+- **Lanes:** a drifting slot's lane has a warning triangle after its name, whose help says the same as the pill's.
+- **Clicking the pill** focuses the slot and opens Refit (5.11) set to the last year of readings: the model's values fitted again, shown as a preview before anything changes.
+- **Notifications:** when a slot starts drifting while the panel is hidden, the Mac sends a notification ("Debt is drifting"), asking for permission the first time. Clicking it shows the panel with Refit open. Each drift is notified once, until newer readings drift again; the app remembers which, so opening the scenario again doesn't repeat one.
 
 ### 5.7 Models and slots
 
@@ -545,6 +553,12 @@ Sections:
   - Scores are kept by model, values, readings, start and readings chosen (`predictScores`), and why a slot's models can't be compared, the same way (`predictProblems`).
   - The ranking is `PredictState.best(of:)`, so it can be tested without scoring anything.
   - `etf-bench predict readings.csv [start …] [step day|week|month|year] [since …]` scores the Forecast models on a feed's saved readings, as the menu does, and times each.
+- **Drift alerts** (5.6, DESIGN.md 8.2):
+  - `Drifting.swift` keeps the alerts (`ScenarioStore.drifts`, observed) and each slot's last check with what it depended on (`driftChecked`: the model and values, readings, events and start, and the store's revision for slots that read others or convert money).
+  - `scheduleDriftCheck` runs after slots or readings change, and on opening, after `driftDelay` (0.8 seconds) so a feed's fetches for several slots make one check. A newer request cancels the one before (`driftSequence`, a `CancelFlag`). Each slot is copied through the engine's queue, as for Refit, and `SlotCopy.drift` runs in a detached task.
+  - `timelineState()` puts the focused slot's alert in `FocusedSlotState.drift` (a `DriftMark`, its band included in the graph's range) and each lane's in `LaneState.drift`. `PlotCanvas` fills the band (`PlotBand`); `DriftPill` places the pill.
+  - `onDrift` passes on each new alert once (`driftNotified`). The Mac app's `DriftNotifier` sends a notification when the panel is hidden, keeps which it sent in its defaults (`drift.notified`, the last 200), and opens Refit when one is clicked, finding the slot by its name in the scenario that sent it.
+  - `etf-bench predict` also prints each Forecast model's drift check, with its fitted values, and how long it took.
 - **Scenario menu** (3, DESIGN.md 15.1):
   - The menu is an `NSMenu` (`ScenarioMenu`), built each time the name is clicked and popped up under it from a plain view behind the button (`MenuAnchorView`). A SwiftUI `Menu` gives no moment to read the folder again as it opens.
   - What it needs from the app comes in `PanelActions.scenarios` (`ScenarioMenuActions`): the Scenarios folder, the open scenario, saving it, opening another, Show in Finder and Open Other…. Without them the name is plain text, as in tests and benchmarks.

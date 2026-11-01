@@ -63,6 +63,20 @@ public struct FocusedSlotState: Sendable {
     public let pausedReason: String?
     /// The error that stopped the slot partway, such as a script's.
     public let stoppedReason: String?
+    /// The slot's drift, while its latest readings are outside the range its model projected.
+    public var drift: DriftMark? = nil
+}
+
+/// A drift on the focused graph (docs/UI.md, 5.6): the projection from before the latest
+/// readings, the range it allowed, and the pill by the now line.
+public struct DriftMark: Sendable {
+    /// "12% above the projection".
+    public let text: String
+    /// What the pill's help and VoiceOver say.
+    public let detail: String
+    public let line: [Sample]
+    public let band: [DriftOutcome.BandPoint]
+    public let cutoff: Date
 }
 
 public struct LaneState: Identifiable, Sendable {
@@ -78,6 +92,8 @@ public struct LaneState: Identifiable, Sendable {
     public let pausedReason: String?
     /// The error that stopped the slot partway, such as a script's.
     public let stoppedReason: String?
+    /// What the slot's drift alert says, while it's drifting.
+    public var drift: String? = nil
 }
 
 public struct YearTick: Identifiable, Hashable, Sendable {

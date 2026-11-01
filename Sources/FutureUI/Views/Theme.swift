@@ -17,6 +17,8 @@ public enum Theme {
     public static let cursorLine = Color.white.opacity(0.85)
     public static let proposal = Color(hex: "#A9D0FF")
     public static let warning = Color(hex: "#FFC77A")
+    /// Behind warnings such as the drift pill: rgba(255,180,84,0.16) (docs/UI.md, 2.1).
+    public static let warningFill = Color(.sRGB, red: 1, green: 180 / 255, blue: 84 / 255, opacity: 0.16)
     public static let error = Color(hex: "#FF9C9C")
     public static let success = Color(hex: "#9FE3C4")
     /// Readings: dots on a thin line, drawn at 85% (docs/UI.md, 2.4).
