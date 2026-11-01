@@ -1,6 +1,6 @@
 # Handoff
 
-Where the work stands, for the next Claude session. Last updated 2026-10-31, on `feature/intents-and-cli` (branched from `969f7c8` on `main`, not merged yet): App Intents and the `etf` command-line tool, from milestone M2.
+Where the work stands, for the next Claude session. Last updated 2026-11-01, at commit `ac6f929` on `main`.
 
 Read this first, then [DESIGN.md](DESIGN.md) (engine and architecture) and [UI.md](UI.md) (the UI spec, with implementation notes in section 12). The UI mockups are on a design canvas linked at the top of UI.md.
 
@@ -44,8 +44,10 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `dd77c64` | The graph scrolls back before the scenario's start, to the earliest reading, with the part before the start shaded and a dashed "Start" line. |
 | `3f2fd0e` | The scenario menu: switching, New, Duplicate and Edit (name, start date and seed) from the scenario's name in the panel. Merged from `feature/scenario-menu` (`b4e39a2`) and `feature/history-before-start`. |
 | `969f7c8` | Currencies, exchange rates and regional number styles: a currency for each scenario and slot, money converted between slots at the ECB's daily rates or live ones from Open Exchange Rates, and each currency written in its usual style (DESIGN.md 5.11). Merged from `feature/currencies`. |
+| `65c45bf` | App Intents and the `etf` command-line tool, from milestone M2: Get Value, Show Timeline, Add Deposit or Withdrawal, Change a Parameter and Copy Snapshot in Shortcuts, Siri and Spotlight, and `etf` inside the app, talking to it through a private socket (DESIGN.md 10.3, 10.4). Merged from `feature/intents-and-cli`. |
+| `ac6f929` | A cursor placed by a command (a link, `goto`, Now, the arrow keys) stays put until the pointer moves, instead of sliding back to a resting pointer (UI.md 5.1). Merged from `fix/cursor-follows-pointer-after-command`. |
 
-Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are built on `feature/intents-and-cli`; the CoreMIDI adapter waits for the hardware.
+Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are done; the CoreMIDI adapter waits for the hardware.
 
 ## What works
 
@@ -368,7 +370,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
 ## Working with the user
 
 - Asks for commits explicitly ("Commit … with a sensible message"). Commit only then.
-  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events`, `feature/data-feeds`, `feature/predict-with` and `feature/currencies`, all merged by fast-forward. `feature/scenario-menu` and `feature/history-before-start` were merged together in a merge commit.
+  - From 2026-10-26, each new feature or fix starts on its own branch from `main` (`feature/…` or `fix/…`). Commit there when asked, and merge into `main` only when asked. There's no remote. Everything up to `6764b20` went straight to `main`. `feature/scripting` was the first branch, then `feature/document-format`, `feature/edit-events`, `feature/data-feeds`, `feature/predict-with`, `feature/currencies`, `feature/intents-and-cli` and `fix/cursor-follows-pointer-after-command`, all merged by fast-forward. `feature/scenario-menu` and `feature/history-before-start` were merged together in a merge commit.
   - Messages have a plain-language subject, then a body saying what changed and why, with measurements where there are any. They end with the `Co-Authored-By` line.
 - Docs are kept in step with the code, written plainly in short sentences.
 - Tests the app by hand, thoroughly, and reports crashes. Expect fully zoomed-out views and fast scrolling thousands of years ahead.
