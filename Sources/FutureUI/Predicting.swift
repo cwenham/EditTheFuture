@@ -202,6 +202,7 @@ extension ScenarioStore {
 
         closeRefit()
         closePredict()
+        cancelReadingImport()
         showSlotSettings(forSlotAt: index)
         cancelRemoval()
         predictCandidates = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })

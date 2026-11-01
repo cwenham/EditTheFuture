@@ -41,6 +41,7 @@ extension ScenarioStore {
         if let index { focus(index: index) }
         closeRefit()
         closePredict()
+        cancelReadingImport()
         if sidePane != .formula { sidePane = .formula }
         updateFormulaCheck(forSlotAt: focusedIndex)
     }

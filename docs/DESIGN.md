@@ -771,7 +771,7 @@ Everything that's reasonable and secure (section 13):
 
 `etf` (`Sources/etf`) only reads its arguments, connects and prints. Reading the arguments and printing replies are in `FutureCommands` (`CommandLineTool`), so they're tested without the app.
 
-- **Commands:** `status`, `slots`, `value [SLOT] [VALUE] [--at DATE]`, `data [SLOT] [VALUE] [--from] [--through] [--every]` (CSV), `show`, `goto`, `focus`, `now`, `toggle`, `scroll`, `zoom`, `deposit`, `withdraw`, `set`, `event add`, `add`, `remove`, `undo`, `redo` and `copy`. `etf help` lists them.
+- **Commands:** `status`, `slots`, `value [SLOT] [VALUE] [--at DATE]`, `data [SLOT] [VALUE] [--from] [--through] [--every]` (CSV), `show`, `goto`, `focus`, `now`, `toggle`, `scroll`, `zoom`, `deposit`, `withdraw`, `set`, `event add`, `reading SLOT AMOUNT [--of VALUE] [--at DATE]`, `add`, `remove`, `undo`, `redo` and `copy`. `etf help` lists them.
 - **Output:** text in the panel's words, the value as the panel writes it (`£96,420`), `--number` for every digit (`96420.12345`, `inf`, `nan`), CSV for `data`, and `--json` for the whole reply. Errors go to standard error. Exit codes: 0 done, 1 the app said no, 2 wrong arguments, 3 the app couldn't be reached.
 - **Numbers** use a point for decimals whatever the slot's style, as scripts expect: `1,200.50`, `1.5k`, `4.5%`, `£500`, `500eur`. Commas only group thousands, so `1,5` is refused rather than read as 15.
 - **Dates** are `2030`, `2030-06` or `2030-06-15`, in UTC like the engine. `value` gives the slot's last step at or before the date. `data` without dates covers ten years from today, one row a step, or one per `--every` holding the value then; it stops at 100,000 rows.
@@ -790,9 +790,10 @@ The intents are in the app (`EditTheFutureMac/Intents.swift`) and wait for its s
 | Show Timeline | Shows the panel at a slot and a date. Spotlight runs it when a slot is picked from its results (`OpenIntent`) | No |
 | Add Deposit or Withdrawal | Once or repeating, from a date | Yes |
 | Change a Parameter | From a date; 4.5 means 4.5% for a percent | Yes |
+| Add Reading | A reading of a slot's value, or another of its values by name, for a date or today; 4.5 means 4.5% for a percent | Yes |
 | Copy Snapshot | Everything, a picture, PDF, a table or data only | No |
 
-- **Siri phrases** (`EditTheFutureShortcuts`): "What's Savings in Edit The Future", "Show Savings in Edit The Future", "Add a deposit in Edit The Future", "Copy a snapshot from Edit The Future". Siri learns the slots' names from `updateAppShortcutParameters()`, called when a scenario opens and when slots change.
+- **Siri phrases** (`EditTheFutureShortcuts`): "What's Savings in Edit The Future", "Show Savings in Edit The Future", "Add a deposit in Edit The Future", "Add a reading in Edit The Future", "Copy a snapshot from Edit The Future". Siri learns the slots' names from `updateAppShortcutParameters()`, called when a scenario opens and when slots change.
 - **Spotlight** (macOS 15 and later): the slots are indexed as entities (`IndexedEntity`), and those no longer in the scenario are taken out.
 - **A date picked in Shortcuts** is the day it falls on in the Mac's time zone, as a UTC date for the engine (`PartialDate(day:in:)`).
 - **Asking first:** editing intents check the event (`ScenarioStore.describe`), ask with Shortcuts' own confirmation, then add it. The app's own alert isn't used for them.
@@ -895,7 +896,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 
 ## 14. Sources of readings
 
-- CSV or clipboard import; a Shortcuts "Add reading" action
+- CSV or clipboard import, and single readings from the command bar, the etf tool and a Shortcuts "Add Reading" action. Built in November 2026 (UI.md, 5.10): imports of up to 100 readings go in a `csv` block in `scenario.md`, larger ones in a file in `readings/` (15.3).
 - SQLite databases, read through a query (15.4)
 - Feeds from public sources, fetched as they update (15.8): FRED, the US Treasury, the World Bank, the Bureau of Labor Statistics, NOAA, Open-Meteo, open data portals such as the CDC's, Tiingo, and CSV or JSON at any web address
 - HealthKit (weight, for a body-weight model). The data lives on the iPhone, so it can be borrowed through section 7.
@@ -1059,7 +1060,7 @@ Branches (5.7) aren't in the format yet. One possibility is a section that lists
 - The first column is the date. The others are named after the slot's variables: `date,price`. The header line is required.
 - An empty cell means no reading.
 - Dates are written as in `scenario.md`.
-- Small sets go in a `csv` block under `### Readings`. When importing, the app writes sets of more than about 100 rows to a file in `readings/` and links to it.
+- Small sets go in a `csv` block under `### Readings`. When importing, the app writes sets of more than 100 rows to a file in `readings/` and links to it (`readings/Savings-Statements.csv`), and readings added one at a time go in the slot's first `csv` block.
 - The link's text says where the readings came from.
 
 ### 15.4 Readings from SQLite
@@ -1198,7 +1199,7 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 | M1 | Mac app shell: floating panel, hot-key, peek, graph and lanes, docked add-event pane, command bar, multi-format clipboard, URL scheme handling, menu bar item |
 | Scripts | Lua and Python models (6.4). Done in October 2026, between M1 and M2. |
 | M2 | CoreMIDI adapter and hardware prototype profile; App Intents (Shortcuts, Spotlight, Siri); the command-line tool. App Intents and the `etf` tool are done (10.3, 10.4), the tool through a local socket rather than XPC. The CoreMIDI adapter waits for the hardware. |
-| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with, the automatic pick and drift alerts are done (15.8, 4.6, 8.4, 8.2). |
+| M3 | Drag the future UI; readings import; drift alerts. Feeds, direct-insertion assimilation, Refit, Predict with, the automatic pick, drift alerts and readings import are done (15.8, 4.6, 8.4, 8.2, 14). |
 | M4 | WebAssembly host; remote-host protocol; iPhone app with capability borrowing for natural-language events |
 | M5 | iPad with Apple Pencil curve sketching; widgets and Control Center controls; CloudKit sync |
 | Later | Ensembles and fan charts; FMU import; ExtensionKit plug-ins on Mac; custom Bluetooth LE service |
@@ -1251,7 +1252,7 @@ Sources/
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
   FutureCommands/    Command vocabulary, questions and replies, DeviceFeedback, etf:// URL scheme, the etf tool's arguments and printing, the local socket and its caller check, MIDI decoding, profile and feedback
   FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, feeds' lines and copies, cache files, the scenario folder
-  FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching
+  FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching; tables of readings to import (ImportTable)
   FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, drift alerts, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping, answers and edits for the etf tool and Shortcuts (OutsideRequests)
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links, the command router and the socket server, App Intents, drift notifications
   etf-bench/         performance benchmarks (swift run -c release etf-bench)

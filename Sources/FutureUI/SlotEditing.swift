@@ -52,6 +52,7 @@ extension ScenarioStore {
         if sidePane == .slot {
             closeRefit()
             closePredict()
+            cancelReadingImport()
         }
         sidePane = sidePane == .slot ? .event : .slot
     }

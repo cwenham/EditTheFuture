@@ -103,14 +103,7 @@ extension ScenarioStore {
     }
 
     public func removeFeed(at source: Int, inSlotAt index: Int) {
-        guard isSlot(index), configs[index].readings.sources.indices.contains(source) else { return }
-        var config = configs[index]
-        var sources = config.readings.sources
-        let removed = sources.remove(at: source)
-        config.readings = config.readings.with(sources: sources)
-        closeFeedSetup()
-        applySlotChange(configs.replacing(index, with: config), focus: config.id)
-        say("Removed the feed “\(removed.feed?.title ?? "")”. ⌘Z brings it back.")
+        removeReadingSource(at: source, inSlotAt: index)
     }
 
     /// Adds a slot of its own for a feed, with a model that follows its readings and holds the

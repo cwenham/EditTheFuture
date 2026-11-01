@@ -175,6 +175,7 @@ extension ScenarioStore {
         if sidePane != .event {
             closeRefit()
             closePredict()
+            cancelReadingImport()
             sidePane = .event
             focusEventFieldOnAppear = true
         }

@@ -36,6 +36,22 @@ struct CommandBarTests {
                 == .addEvent(kind: "deposit", amount: 250, at: nil, repeats: .weeks(2)))
     }
 
+    @Test("Adding readings")
+    func readings() throws {
+        #expect(try CommandBarParser.parse("reading 41200")
+                == .addReading(slot: nil, value: 41_200, format: nil, currency: nil, percent: false, at: nil))
+        #expect(try CommandBarParser.parse("reading savings £41,200 on 2026-10-01")
+                == .addReading(slot: "savings", value: 41_200, format: .currency, currency: "£", percent: false, at: utc(2026, 10, 1)))
+        #expect(try CommandBarParser.parse("reading Index fund 5.2k at Oct 2026")
+                == .addReading(slot: "Index fund", value: 5_200, format: nil, currency: nil, percent: false, at: utc(2026, 10, 1)))
+        #expect(try CommandBarParser.parse("reading 21.5°C")
+                == .addReading(slot: nil, value: 21.5, format: .temperature, currency: nil, percent: false, at: nil))
+        #expect(try CommandBarParser.parse("reading 4.5%")
+                == .addReading(slot: nil, value: 0.045, format: nil, currency: nil, percent: true, at: nil))
+        #expect(throws: CommandBarError.self) { try CommandBarParser.parse("reading savings") }
+        #expect(throws: CommandBarError.self) { try CommandBarParser.parse("reading 5 on someday") }
+    }
+
     @Test("Setting parameters")
     func parameters() throws {
         #expect(try CommandBarParser.parse("set rate 4% from 2027-06") == .setParameter(name: "rate", value: 0.04, at: utc(2027, 6)))

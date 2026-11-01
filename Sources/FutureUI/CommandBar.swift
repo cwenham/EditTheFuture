@@ -16,6 +16,10 @@ public enum CommandBarAction: Equatable, Sendable {
     /// `currency` is the currency typed with the amount, as typed.
     case addEvent(kind: String, amount: Double, at: Date?, repeats: StepRate?, currency: String? = nil)
     case setParameter(name: String, value: Double, at: Date?)
+    /// A reading of a slot's value (docs/DESIGN.md, 14): `slot` nil for the focused one, `at` nil for
+    /// today. `format` and `currency` are the unit typed with it, if any; `percent` says whether it
+    /// was typed with a percent sign, so `value` is already a fraction.
+    case addReading(slot: String?, value: Double, format: ValueFormat?, currency: String?, percent: Bool, at: Date?)
     /// Adds a library model by name, to a slot number (1...8) or the first free one.
     case addModel(String, slot: Int?)
     /// Asks to remove a slot, by name or number.
@@ -57,6 +61,7 @@ public enum CommandBarError: Error, Equatable, CustomStringConvertible {
 /// - `focus savings`, `3`
 /// - `+500`, `+500 monthly from 2027-03`, `-6,000 on Aug 2028`, `+1.2k every year`
 /// - `set rate 4% from 2027-06`, `set monthly 650`
+/// - `reading 41200`, `reading savings £41,200 on 2026-10-01`, `reading 21.5°C`
 /// - `add savings account`, `add loan to 7`, `remove climate`
 /// - `refit`, `refit savings`
 /// - `predict`, `predict data with trend line`, `predict data with best`
@@ -139,6 +144,28 @@ public enum CommandBarParser {
 
         if ["remove", "delete"].contains(words.first), words.count >= 2 {
             return .removeSlot(text.split(whereSeparator: \.isWhitespace).dropFirst().joined(separator: " "))
+        }
+
+        if words.first == "reading", words.count >= 2 {
+            var rest = Array(text.split(whereSeparator: \.isWhitespace).map(String.init).dropFirst())
+            // A date comes last, after on, at or in.
+            var at: Date?
+            if let cut = rest.indices.first(where: { ["on", "at", "in"].contains(rest[$0].lowercased()) && $0 > 0 }) {
+                at = try parseWhen(rest[cut...].map { $0.lowercased() })
+                rest.removeSubrange(cut...)
+            }
+            let whole = rest.joined(separator: " ")
+            let percent = whole.contains("%")
+            if let parsed = parseValue(whole, numbers: numbers) {
+                return .addReading(slot: nil, value: parsed.value, format: parsed.format, currency: parsed.currency, percent: percent, at: at)
+            }
+            for split in 1..<max(rest.count, 1) {
+                if let parsed = parseValue(rest[split...].joined(separator: " "), numbers: numbers) {
+                    return .addReading(slot: rest[..<split].joined(separator: " "), value: parsed.value, format: parsed.format,
+                                       currency: parsed.currency, percent: percent, at: at)
+                }
+            }
+            throw CommandBarError.badAmount(whole)
         }
 
         if words.first == "set", words.count >= 3 {

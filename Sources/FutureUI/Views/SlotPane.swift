@@ -13,6 +13,10 @@ struct SlotPane: View {
         ScrollView {
             if let refit = store.refit, refit.slot == slot.id {
                 RefitSheet(store: store, slot: slot, state: refit)
+            } else if let readingImport = store.readingImport, readingImport.slot == slot.id {
+                ImportSheet(store: store, slot: slot, state: readingImport)
+                    // The title field starts afresh for each import.
+                    .id(readingImport.origin + readingImport.slot.uuidString)
             } else {
                 SlotSettings(store: store, saved: slot)
                     // Fields start afresh for each slot.
@@ -472,25 +476,51 @@ private struct ReadingsSection: View {
                 if let spec = source.feed {
                     FeedRow(store: store, slot: slot, source: offset, spec: spec)
                 } else {
-                    Label(Self.describe(source), systemImage: "doc.text")
-                        .font(.system(size: 12))
+                    HStack(alignment: .top, spacing: 6) {
+                        Label(Self.describe(source), systemImage: "doc.text")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(2)
+                            .help("Edit it in scenario.md")
+                        Spacer(minLength: 4)
+                        Button {
+                            if let index { store.removeReadingSource(at: offset, inSlotAt: index) }
+                        } label: {
+                            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
                         .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
-                        .help("Edit it in scenario.md")
+                        .help("Remove these readings. Undo brings them back.")
+                        .accessibilityLabel("Remove \(Self.describe(source))")
+                    }
                 }
             }
             if sources.isEmpty {
                 Text("Real-world values that correct the model: market prices, rates, debt, climate, disease…")
                     .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Button("Add a feed…") { store.openFeedSetup(.add(slot: slot.id)) }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.proposal)
-                .popover(isPresented: Binding(get: { store.feedSetup == .add(slot: slot.id) },
-                                              set: { if !$0 { store.closeFeedSetup() } }), arrowEdge: .leading) {
-                    FeedSetup(store: store, request: .add(slot: slot.id))
+            HStack(spacing: 14) {
+                Button("Add a feed…") { store.openFeedSetup(.add(slot: slot.id)) }
+                    .popover(isPresented: Binding(get: { store.feedSetup == .add(slot: slot.id) },
+                                                  set: { if !$0 { store.closeFeedSetup() } }), arrowEdge: .leading) {
+                        FeedSetup(store: store, request: .add(slot: slot.id))
+                    }
+                #if os(macOS)
+                Button("Import CSV…") {
+                    ReadingFiles.choose { url in
+                        if let index = store.slotIndex(id: slot.id) { store.importReadings(from: url, slotAt: index) }
+                    }
                 }
+                .help("Import readings from a CSV file, such as a bank's or a spreadsheet's export")
+                Button("Paste") {
+                    if let index { store.pasteReadings(NSPasteboard.general.string(forType: .string), slotAt: index) }
+                }
+                .help("Import readings copied from a spreadsheet: a column of dates and a column of values")
+                #endif
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.proposal)
         }
     }
 
@@ -586,3 +616,26 @@ private struct FeedRow: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
+
+#if os(macOS)
+/// Chooses a file of readings to import, over the floating panel.
+enum ReadingFiles {
+    @MainActor
+    static func choose(_ chosen: @escaping (URL) -> Void) {
+        let panel = NSOpenPanel()
+        panel.title = "Import Readings"
+        panel.prompt = "Import"
+        panel.message = "Choose a CSV file with a column of dates and a column of values."
+        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText, .text]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        // Above the floating panel, which would otherwise cover it.
+        panel.level = .modalPanel
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            chosen(url)
+        }
+    }
+}
+#endif

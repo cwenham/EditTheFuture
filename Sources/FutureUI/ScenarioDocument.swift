@@ -72,6 +72,7 @@ public final class ScenarioDocument {
         self.package = package
         self.store = store
         self.parsed = parsed
+        store.scenarioFolder = package.url
         feeds = FeedCenter(store: store, folder: package.url)
         rates = RateCenter(store: store, folder: package.url)
         lastSeen = Self.stamp(package)
@@ -214,6 +215,7 @@ public final class ScenarioDocument {
             return
         }
         package = target
+        store.scenarioFolder = target.url
         lastSeen = Self.stamp(package)
         // A fetch on its way still writes to the old folder, so the old center stops (its fetch
         // finds the folder gone) and a new one reads the copies where they are now.

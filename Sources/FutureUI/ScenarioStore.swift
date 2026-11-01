@@ -284,6 +284,14 @@ public final class ScenarioStore {
     /// Called when a slot starts drifting, or drifts again with newer readings. The Mac app sends
     /// a notification when the panel isn't showing.
     @ObservationIgnored public var onDrift: ((DriftAlert) -> Void)?
+    /// The import sheet over the Slot tab, while it's open (docs/UI.md, 5.10).
+    public internal(set) var readingImport: ReadingImportState?
+    /// The table the import sheet reads from.
+    @ObservationIgnored var importTable: ImportTable?
+    @ObservationIgnored var importTask: Task<Void, Never>?
+    /// The scenario's folder, where large imports are saved in `readings/`. Nil without a document,
+    /// as in tests: then imports go in scenario.md whatever their size.
+    @ObservationIgnored public var scenarioFolder: URL?
 
     /// Formulas being edited and not yet applied, by slot id.
     public internal(set) var formulaDrafts: [UUID: String] = [:]
@@ -564,6 +572,7 @@ public final class ScenarioStore {
         guard slots.indices.contains(index) else { return }
         if let refit, refit.slot != slots[index].id { closeRefit() }
         if let predict, predict.slot != slots[index].id { closePredict() }
+        if let readingImport, readingImport.slot != slots[index].id { cancelReadingImport() }
         focusedIndex = index
         retargetDraft()
     }
@@ -1181,6 +1190,27 @@ public final class ScenarioStore {
             let when = at ?? cursor
             add(Event.set([name: value], at: when), toSlotAt: focusedIndex)
             say("Set \(name) to \(ValueStyle.number.axis(value)) from \(DateText.monthYear(when)) in \(focused.title)")
+        case .addReading(let name, let value, let format, let typed, let percent, let at):
+            guard let index = name.map(slotIndex(named:)) ?? focusedIndex else {
+                say("There's no slot called “\(name ?? "")”. Slots: \(slots.map(\.title).joined(separator: ", ")).", isError: true)
+                return true
+            }
+            let slot = slots[index]
+            if let typed, !slot.currency.answers(to: typed) {
+                say("\(slot.title) is in \(slot.currency.plural). Type the reading in \(slot.money.writing.symbol), or without a currency.",
+                    isError: true)
+                return true
+            }
+            if let format, format != slot.format {
+                say("\(slot.title) isn't in \(format == .temperature ? "°C" : "money"). Type the reading without a unit, or choose another slot.",
+                    isError: true)
+                return true
+            }
+            // As in the Slot tab, a plain number for a percent is in percent: 4.5 is 4.5%.
+            let reading = slot.format == .percent && !percent ? value / 100 : value
+            if case .failure(let problem) = addReading(reading, at: at ?? Self.today(), toSlotAt: index) {
+                say(problem.description, isError: true)
+            }
         case .addModel(let text, let key):
             guard let template = ModelLibrary.named(text) else {
                 say("There's no model called “\(text)”. Try savings account, loan, index fund or seasonal temperature.", isError: true)
@@ -1230,6 +1260,12 @@ public final class ScenarioStore {
             return false
         }
         return true
+    }
+
+    /// The start of today, in UTC as the engine counts days: when a reading without a date is for.
+    nonisolated static func today(_ clock: Date = Date()) -> Date {
+        let day = CivilDate(clock)
+        return CivilDate.date(year: day.year, month: day.month, day: day.day)
     }
 
     // MARK: Finding values

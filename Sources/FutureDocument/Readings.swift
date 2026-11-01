@@ -197,8 +197,9 @@ public enum CSVReadings {
     }
 
     /// CSV text as rows of fields, for sources that aren't readings yet (docs/DESIGN.md, 15.8).
-    public static func table(_ text: String) -> [[String]] {
-        records(text).map(\.fields)
+    /// `separator` splits fields: a comma, a tab (text copied from a spreadsheet) or a semicolon.
+    public static func table(_ text: String, separator: Character = ",") -> [[String]] {
+        records(text, separator: separator).map(\.fields)
     }
 
     struct Record {
@@ -207,7 +208,7 @@ public enum CSVReadings {
     }
 
     /// Splits CSV text into records, with quoted fields that may hold commas, quotes and line breaks.
-    static func records(_ text: String) -> [Record] {
+    static func records(_ text: String, separator: Character = ",") -> [Record] {
         var records: [Record] = []
         var fields: [String] = []
         var field = ""
@@ -233,7 +234,7 @@ public enum CSVReadings {
             }
             switch character {
             case "\"": inQuotes = true
-            case ",": fields.append(field); field = ""
+            case separator: fields.append(field); field = ""
             case "\n", "\r\n", "\r":
                 fields.append(field)
                 records.append(Record(line: recordLine, fields: fields))

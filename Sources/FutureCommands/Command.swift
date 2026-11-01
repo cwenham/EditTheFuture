@@ -60,6 +60,8 @@ public enum Command: Hashable, Sendable, Codable {
     case adjustParameter(name: String, ticks: Int)
     /// Adds an event to a slot, from the command line or Shortcuts.
     case addEvent(EventRequest)
+    /// Adds a reading of one of a slot's values, from the command line or Shortcuts (docs/DESIGN.md, 14).
+    case addReading(ReadingRequest)
     /// Adds a library model by name, to a slot number (1...8) or the first free one.
     case addModel(name: String, slot: Int?)
     /// Asks to remove a slot, by name or number. The panel always asks first (docs/DESIGN.md, 13).
@@ -85,7 +87,7 @@ public enum Command: Hashable, Sendable, Codable {
             return .navigation
         case .copySnapshot, .copyData:
             return .clipboard
-        case .insertEventAtCursor, .adjustParameter, .addEvent, .addModel, .removeSlot, .undo, .redo:
+        case .insertEventAtCursor, .adjustParameter, .addEvent, .addReading, .addModel, .removeSlot, .undo, .redo:
             return .editing
         }
     }
@@ -117,6 +119,8 @@ public enum Command: Hashable, Sendable, Codable {
         case .adjustParameter(let name, let value):
             return short(name) && ticks(value)
         case .addEvent(let request):
+            return request.isWellFormed
+        case .addReading(let request):
             return request.isWellFormed
         case .addModel(let name, let slot):
             return short(name) && (slot.map { (1...8).contains($0) } ?? true)
@@ -213,6 +217,35 @@ public struct EventRequest: Hashable, Sendable, Codable {
         if let currency, !short(currency, 32) { return false }
         return !values.isEmpty && values.count <= 16
             && values.allSatisfy { short($0.key, 64) && $0.value.value.isFinite }
+    }
+}
+
+/// A reading of a slot's value to add from outside the panel: the command line or Shortcuts.
+public struct ReadingRequest: Hashable, Sendable, Codable {
+    /// The slot's name or number; nil for the focused slot.
+    public var slot: String?
+    /// Which of its values (or parameters) it's a reading of; nil for the one its graph shows.
+    public var variable: String?
+    public var value: Amount
+    /// The currency given with the value, as given ("£", "eur"). It must be the slot's.
+    public var currency: String?
+    /// When it was read; nil for today.
+    public var at: PartialDate?
+
+    public init(slot: String?, variable: String? = nil, value: Amount, currency: String? = nil, at: PartialDate? = nil) {
+        self.slot = slot
+        self.variable = variable
+        self.value = value
+        self.currency = currency
+        self.at = at
+    }
+
+    public var isWellFormed: Bool {
+        func short(_ text: String, _ limit: Int = Command.maxTextLength) -> Bool { !text.isEmpty && text.count <= limit }
+        if let slot, !short(slot) { return false }
+        if let variable, !short(variable, 64) { return false }
+        if let currency, !short(currency, 32) { return false }
+        return value.value.isFinite
     }
 }
 
