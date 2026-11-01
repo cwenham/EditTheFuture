@@ -18,7 +18,7 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 ## Rules
 
 - **Branches:** start each new feature or fix on its own branch from `main`, named like `feature/links-view` or `fix/wheel-scrolling`.
-- **Commits:** commit only when the user asks, on that branch. Merge into `main` only when the user asks. There's no remote.
+- **Commits:** commit only when the user asks, on that branch. Merge into `main` only when the user asks. The remote is `origin` (github.com/cwenham/EditTheFuture); push only when the user asks.
 - **Docs:** keep DESIGN.md and UI.md in step with the code, written plainly.
 - **Threads:** the main thread never computes. `ScenarioEngine` (an actor) owns the scenario, and `ScenarioStore` draws from its cached results. Tests `await store.waitUntilIdle()` before reading results.
 - **Redraws:** never assign an `@Observable` property its current value. Views read only what they draw (`timelineState()`, `cursorState()`, `statusText()`).
