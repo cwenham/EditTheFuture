@@ -79,6 +79,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 | Generated event | Hollow circle, italic secondary label |
 | Proposed event | Dashed diamond or dashed bar in `proposal` |
 | Event being edited | Ringed in `proposal`; faint once the draft moves it to another date |
+| Event lines | A dim 1-point line down the focused graph, in the slot color at 22%, at each event a person added (one-off events and where recurring ones start), so the eye can match a diamond to where the line changes. Drawn behind the lines. Not for generated events or readings. Lines closer than 4 points to the last one are skipped. |
 | Drift | Warning pill attached to the now line. The projection from before the latest readings, dotted in `warning`, inside its 10–90% range filled in `warning` at 12% |
 
 ## 3. Mac panel anatomy

@@ -269,4 +269,22 @@ struct EventEditingTests {
         // The same diamonds get the pointing hand: one-off events in view.
         #expect(EventsStrip.diamonds(markers: markers, frame: frame, width: width).map(\.id) == [first.id, second.id])
     }
+
+    @Test func eventLinesAreForAddedEventsOnly() {
+        let frame = TimeFrame(start: utc(2026, 1), end: utc(2036, 1))
+        let width: CGFloat = 1000
+        func marker(_ date: Date, _ kind: EventMarker.Kind) -> EventMarker {
+            EventMarker(id: UUID(), date: date, endDate: nil, label: "", kind: kind)
+        }
+        let oneOff = marker(utc(2028, 8), .oneOff), rule = marker(utc(2030, 1), .recurring)
+        let generated = marker(utc(2032, 1), .generated), early = marker(utc(2020, 1), .oneOff)
+        let dates = FocusChart.eventLineDates([early, oneOff, rule, generated])
+        #expect(dates == [early.date, oneOff.date, rule.date])
+        // Only the ones in view get a line.
+        #expect(PlotEventLines.xs(dates: dates, frame: frame, width: width)
+                == [frame.x(oneOff.date, width: width), frame.x(rule.date, width: width)])
+        // A day apart over ten years is well under 4 points: one line, not two.
+        let nextDay = oneOff.date.addingTimeInterval(86_400)
+        #expect(PlotEventLines.xs(dates: [nextDay, oneOff.date], frame: frame, width: width).count == 1)
+    }
 }
