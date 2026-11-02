@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import FutureEngine
 
 /// Click handlers for the timeline. Fractions are 0...1 across the plot width.
@@ -9,7 +10,8 @@ struct TimelineInteractions {
     var pickDate: (Double) -> Void
     /// A click on a lane picks the date and switches the pane to that lane's slot.
     var pickDateOnLane: (Int, Double) -> Void
-    /// A click on a one-off event's diamond loads it into the add-event pane (docs/UI.md, 5.4).
+    /// A click on a one-off event's diamond, or a repeating event's bar or label, loads it into the
+    /// add-event pane (docs/UI.md, 5.4).
     var editEvent: (UUID) -> Void
     /// A click on the drift pill opens Refit on the last year of readings (docs/UI.md, 5.6).
     var openDrift: () -> Void = {}
@@ -148,19 +150,17 @@ struct TimelineRowsContent: View {
                 .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
                 .padding(.trailing, 8)
                 .padding(.top, 2)
+                let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
+                                               editingID: timeline.focus.editingEventID)
                 EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: timeline.focus.color,
                             draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
                     .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
                     .overlay(alignment: .topLeading) {
-                        if interactions != nil {
-                            DiamondHotspots(diamonds: EventsStrip.diamonds(markers: timeline.focus.events, frame: timeline.frame,
-                                                                           width: plotWidth))
-                        }
+                        if interactions != nil { EventHotspots(items: strip) }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                        if let id = EventsStrip.editableEvent(atX: location.x, markers: timeline.focus.events,
-                                                              frame: timeline.frame, width: plotWidth) {
+                        if let id = EventsStrip.editableEvent(at: location, in: strip) {
                             interactions?.editEvent(id)
                         } else {
                             interactions?.pickDate(Double(location.x / plotWidth))
@@ -168,8 +168,8 @@ struct TimelineRowsContent: View {
                     }
                     .accessibilityActions {
                         if let interactions {
-                            ForEach(timeline.focus.events.filter { $0.kind == .oneOff && timeline.frame.contains($0.date) }) { marker in
-                                Button("Edit \(marker.label), \(DateText.monthYear(marker.date))") { interactions.editEvent(marker.id) }
+                            ForEach(strip.filter { $0.kind != .generated }) { item in
+                                Button("Edit \(item.label), \(DateText.monthYear(item.date))") { interactions.editEvent(item.id) }
                             }
                         }
                     }
@@ -475,70 +475,167 @@ struct EventsStrip: View {
     let frame: TimeFrame
     let color: Color
     var draftDate: Date?
-    /// The one-off event being edited in the add-event pane.
+    /// The event or repeating event being edited in the add-event pane.
     var editingID: UUID?
 
     /// How far from a diamond's centre a click still lands on it, in points.
     static let hitSlop: CGFloat = 8
+    /// The middle of the label row, and of the row of diamonds and circles.
+    static let labelY: CGFloat = 10
+    static let markerY: CGFloat = 25
+    static let labelHeight: CGFloat = 14
+    /// Space kept clear between two labels.
+    static let labelGap: CGFloat = 8
+    /// Repeating events that overlap in time get rows of their own, up to three.
+    static let barRows = 3
 
-    /// Where the one-off events' diamonds are in a strip `width` points wide: the ones a click can edit.
-    static func diamonds(markers: [EventMarker], frame: TimeFrame, width: CGFloat) -> [Diamond] {
-        markers.filter { $0.kind == .oneOff && frame.contains($0.date) }
-            .map { Diamond(id: $0.id, x: frame.x($0.date, width: width)) }
-    }
+    nonisolated static func barY(row: Int) -> CGFloat { 22 + CGFloat(row) * 5 }
 
-    struct Diamond: Identifiable, Equatable {
+    /// A marker in view, where it's drawn, and where its label went.
+    struct Item: Identifiable, Equatable {
         let id: UUID
+        let kind: EventMarker.Kind
+        let label: String
+        let date: Date
+        /// A diamond or circle's centre, or where a repeating event's bar starts in view.
         let x: CGFloat
+        /// Where a repeating event's bar ends in view, and its row.
+        var barEnd: CGFloat = 0
+        var row = 0
+        /// Where the label is drawn, or nil when there was no room for it: its help still says it.
+        var labelRect: CGRect?
     }
 
-    /// The one-off event whose diamond is at `x` in a strip `width` points wide: the nearest within
-    /// `hitSlop`, so the small diamonds are easy to hit.
-    static func editableEvent(atX x: CGFloat, markers: [EventMarker], frame: TimeFrame, width: CGFloat) -> UUID? {
-        var best: (id: UUID, distance: CGFloat)?
-        for diamond in diamonds(markers: markers, frame: frame, width: width) {
-            let distance = abs(diamond.x - x)
-            if distance <= hitSlop, distance < (best?.distance ?? .infinity) { best = (diamond.id, distance) }
+    /// Lays out the strip `width` points wide: rows for repeating events that overlap, and labels
+    /// that never cover each other. Labels go in order of importance: the event being edited, then
+    /// one-off events, repeating events and generated ones, each from the left. One that would touch
+    /// a label already placed is left out (docs/UI.md, 5.4). Drawing and clicks use the same layout.
+    nonisolated static func layout(markers: [EventMarker], frame: TimeFrame, width: CGFloat, editingID: UUID? = nil,
+                       measure: (String, Bool) -> CGFloat = EventsStrip.labelWidth) -> [Item] {
+        var items: [Item] = []
+        var rowEnds = [CGFloat](repeating: -.infinity, count: barRows)
+        for marker in markers {
+            let x = frame.x(marker.date, width: width)
+            switch marker.kind {
+            case .recurring:
+                let start = max(0, x), end = min(width, frame.x(marker.endDate ?? frame.end, width: width))
+                guard end > start else { continue }
+                // The first row free by then, or else the one that frees up soonest.
+                let row = rowEnds.firstIndex { $0 + 4 < start } ?? rowEnds.indices.min { rowEnds[$0] < rowEnds[$1] } ?? 0
+                rowEnds[row] = end
+                items.append(Item(id: marker.id, kind: .recurring, label: marker.label, date: marker.date, x: start, barEnd: end, row: row))
+            case .oneOff, .generated:
+                guard x >= 0 && x <= width else { continue }
+                items.append(Item(id: marker.id, kind: marker.kind, label: marker.label, date: marker.date, x: x))
+            }
         }
-        return best?.id
+
+        func rank(_ item: Item) -> Int {
+            if item.id == editingID { return 0 }
+            switch item.kind {
+            case .oneOff: return 1
+            case .recurring: return 2
+            case .generated: return 3
+            }
+        }
+        var widths: [String: CGFloat] = [:]
+        var placed: [CGRect] = []
+        let order = items.indices.sorted { (rank(items[$0]), items[$0].x) < (rank(items[$1]), items[$1].x) }
+        for index in order where !items[index].label.isEmpty {
+            let item = items[index]
+            let key = (item.kind == .generated ? "i:" : "r:") + item.label
+            let labelWidth = widths[key] ?? measure(item.label, item.kind == .generated)
+            widths[key] = labelWidth
+            guard labelWidth <= width else { continue }
+            // Repeating events' labels start at their bar; the others are centred on their marker.
+            let left = item.kind == .recurring ? item.x : item.x - labelWidth / 2
+            let rect = CGRect(x: min(max(0, left), width - labelWidth), y: labelY - labelHeight / 2,
+                              width: labelWidth, height: labelHeight)
+            let clearance = rect.insetBy(dx: -labelGap / 2, dy: 0)
+            guard !placed.contains(where: { $0.intersects(clearance) }) else { continue }
+            placed.append(clearance)
+            items[index].labelRect = rect
+        }
+        return items
     }
+
+    /// The one-off event or repeating event a click at `point` means: the nearest diamond within
+    /// `hitSlop` across, then a label, then a bar. Generated events can't be edited, so a click on
+    /// one's circle picks a date.
+    nonisolated static func editableEvent(at point: CGPoint, in items: [Item]) -> UUID? {
+        var best: (id: UUID, distance: CGFloat)?
+        for item in items where item.kind == .oneOff {
+            let distance = abs(item.x - point.x)
+            if distance <= hitSlop, distance < (best?.distance ?? .infinity) { best = (item.id, distance) }
+        }
+        if let best { return best.id }
+        // A generated event's circle isn't editable, even where it sits on a repeating event's bar.
+        let onCircle = items.contains {
+            $0.kind == .generated && abs($0.x - point.x) <= 5 && abs(markerY - point.y) <= 5
+        }
+        if onCircle { return nil }
+        for item in items where item.kind != .generated {
+            if let rect = item.labelRect, rect.insetBy(dx: -2, dy: -2).contains(point) { return item.id }
+        }
+        let bars = items.filter { $0.kind == .recurring && point.x >= $0.x - 2 && point.x <= $0.barEnd + 2 }
+        return bars.map { (id: $0.id, distance: abs(barY(row: $0.row) - point.y)) }
+            .filter { $0.distance <= 3 }
+            .min { $0.distance < $1.distance }?.id
+    }
+
+    /// A label's width in the strip's 11-point font, italic for generated events.
+    nonisolated static func labelWidth(_ text: String, italic: Bool) -> CGFloat {
+        let font = italic ? italicFont : regularFont
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]))
+        return ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
+    }
+
+    nonisolated(unsafe) private static let regularFont = CTFontCreateUIFontForLanguage(.system, 11, nil)
+        ?? CTFontCreateWithName("Helvetica" as CFString, 11, nil)
+    nonisolated(unsafe) private static let italicFont = CTFontCreateCopyWithSymbolicTraits(regularFont, 0, nil, .traitItalic, .traitItalic)
+        ?? regularFont
 
     /// Drawn in one Canvas instead of a few views per marker, which kept SwiftUI busy on every scroll.
     var body: some View {
         Canvas { context, size in
             let width = size.width
             context.clip(to: Path(CGRect(origin: .zero, size: size)))
-            for marker in markers {
-                let x = frame.x(marker.date, width: width)
-                switch marker.kind {
+            let items = Self.layout(markers: markers, frame: frame, width: width, editingID: editingID)
+            // Bars first, so diamonds and circles sit on top of them.
+            for item in items where item.kind == .recurring {
+                let editing = item.id == editingID
+                let thickness: CGFloat = editing ? 3 : 2
+                let bar = CGRect(x: item.x, y: Self.barY(row: item.row) - thickness / 2, width: item.barEnd - item.x, height: thickness)
+                context.fill(Path(bar), with: .color(editing ? Theme.proposal : color.opacity(0.45)))
+            }
+            for item in items {
+                let center = CGPoint(x: item.x, y: Self.markerY)
+                switch item.kind {
                 case .recurring:
-                    let startX = max(0, x)
-                    let endX = min(width, frame.x(marker.endDate ?? frame.end, width: width))
-                    guard endX > startX else { continue }
-                    context.fill(Path(CGRect(x: startX, y: 25, width: endX - startX, height: 2)), with: .color(color.opacity(0.45)))
-                    let label = context.resolve(Text(marker.label).font(.system(size: 11)).foregroundStyle(Theme.text))
-                    context.draw(label, at: CGPoint(x: startX, y: 10), anchor: .leading)
+                    break
                 case .oneOff:
-                    guard x >= 0 && x <= width else { continue }
-                    let editing = marker.id == editingID
+                    let editing = item.id == editingID
                     // Being edited: ringed, and faint once the draft moves it to another date.
-                    let moved = editing && draftDate != marker.date
-                    context.fill(Self.diamond(at: CGPoint(x: x, y: 25), size: 9), with: .color(color.opacity(moved ? 0.35 : 1)))
+                    let moved = editing && draftDate != item.date
+                    context.fill(Self.diamond(at: center, size: 9), with: .color(color.opacity(moved ? 0.35 : 1)))
                     if editing {
-                        context.stroke(Self.diamond(at: CGPoint(x: x, y: 25), size: 12), with: .color(Theme.proposal), lineWidth: 1.5)
+                        context.stroke(Self.diamond(at: center, size: 12), with: .color(Theme.proposal), lineWidth: 1.5)
                     }
-                    let label = context.resolve(Text(marker.label).font(.system(size: 11)).foregroundStyle(Theme.text))
-                    context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
                 case .generated:
-                    guard x >= 0 && x <= width else { continue }
-                    context.stroke(Path(ellipseIn: CGRect(x: x - 4, y: 21, width: 8, height: 8)), with: .color(color), lineWidth: 1.5)
-                    let label = context.resolve(Text(marker.label).font(.system(size: 11).italic()).foregroundStyle(Theme.secondary))
-                    context.draw(label, at: CGPoint(x: x, y: 10), anchor: .center)
+                    context.stroke(Path(ellipseIn: CGRect(x: item.x - 4, y: Self.markerY - 4, width: 8, height: 8)),
+                                   with: .color(color), lineWidth: 1.5)
+                }
+                if let rect = item.labelRect {
+                    let font: Font = item.kind == .generated ? .system(size: 11).italic() : .system(size: 11)
+                    let label = context.resolve(Text(item.label).font(font)
+                        .foregroundStyle(item.kind == .generated ? Theme.secondary : Theme.text))
+                    context.draw(label, at: CGPoint(x: rect.minX, y: Self.labelY), anchor: .leading)
                 }
             }
             let editedDate = markers.first { $0.id == editingID }?.date
             if let draftDate, frame.contains(draftDate), draftDate != editedDate {
-                context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: 25), size: 10),
+                context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: Self.markerY), size: 10),
                                with: .color(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
             }
         }
@@ -558,26 +655,34 @@ struct EventsStrip: View {
     }
 }
 
-/// Clear areas over the diamonds, so the pointer turns into a hand over them as it does over a
-/// link. Clicks go on to the strip's own tap.
-///
-/// SwiftUI's hosting view sets the pointer itself as the mouse moves, so setting `NSCursor`
-/// from a hover handler flickered between the hand and the arrow. A pointer style on a view is
-/// SwiftUI's own way, and stays steady.
-struct DiamondHotspots: View {
-    let diamonds: [EventsStrip.Diamond]
+/// Where the pointer turns into a hand over the strip: one-off events' diamonds, and repeating
+/// events' bars and labels. Each says its event in its help, which matters when its label had no room.
+struct EventHotspots: View {
+    let items: [EventsStrip.Item]
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            ForEach(diamonds) { diamond in
-                Color.clear
-                    .frame(width: EventsStrip.hitSlop * 2, height: TimelineLayout.eventsHeight)
-                    .contentShape(Rectangle())
-                    .linkPointer()
-                    .offset(x: diamond.x - EventsStrip.hitSlop)
+            ForEach(items.filter { $0.kind != .generated }) { item in
+                if item.kind == .oneOff {
+                    spot(CGRect(x: item.x - EventsStrip.hitSlop, y: 0, width: EventsStrip.hitSlop * 2,
+                                height: TimelineLayout.eventsHeight), help: item.label)
+                } else {
+                    spot(CGRect(x: item.x, y: EventsStrip.barY(row: item.row) - 3, width: item.barEnd - item.x, height: 6),
+                         help: item.label)
+                    if let rect = item.labelRect { spot(rect, help: item.label) }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func spot(_ rect: CGRect, help: String) -> some View {
+        Color.clear
+            .frame(width: max(1, rect.width), height: max(1, rect.height))
+            .contentShape(Rectangle())
+            .linkPointer()
+            .help(help)
+            .offset(x: rect.minX, y: rect.minY)
     }
 }
 

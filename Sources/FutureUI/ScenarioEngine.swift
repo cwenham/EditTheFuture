@@ -106,7 +106,7 @@ actor ScenarioEngine {
         let change: PreviewChange
         let from: Date
         let through: Date
-        /// The authored event a draft event replaces, while one is being edited: it's left out of the preview.
+        /// The authored event or repeating event a draft replaces, while one is being edited: it's left out of the preview.
         var replacing: UUID? = nil
     }
 
@@ -529,7 +529,9 @@ actor ScenarioEngine {
         var failure: SlotFailure?
         switch request.change {
         case .event(let built):
+            // The event or repeating event being edited is left out while the draft stands in for it.
             let replaced = request.replacing.flatMap { scenario.removeEvent(id: $0, from: id) }
+            let replacedRule = replaced == nil ? request.replacing.flatMap { scenario.removeRecurring(id: $0, from: id) } : nil
             switch built {
             case .event(let event):
                 scenario.add(event, to: id)
@@ -541,6 +543,7 @@ actor ScenarioEngine {
                 scenario.removeRecurring(id: rule.id, from: id)
             }
             if let replaced { scenario.add(replaced, to: id) }
+            if let replacedRule { scenario.add(replacedRule, to: id) }
         case .model(let setup):
             // Only this slot and what it reads are computed for the line; putting the model back
             // leaves this slot and those downstream to be recomputed by the next fetch.

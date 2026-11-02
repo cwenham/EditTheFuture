@@ -2,53 +2,86 @@ import Foundation
 import FutureDocument
 import FutureEngine
 
-/// An authored event loaded into the add-event pane to be changed (docs/UI.md, 5.4).
+/// An authored event, one-off or repeating, loaded into the add-event pane to be changed (docs/UI.md, 5.4).
 public struct EditedEvent: Equatable, Sendable {
     /// The slot it belongs to.
     public let slot: UUID
-    /// The event as it was when it was loaded.
-    public let event: Event
+    /// The event or repeating event as it was when it was loaded.
+    let original: EventDraft.Built
     /// What the pane held before, put back when editing ends.
     let previousDraft: EventDraft
+
+    public var id: UUID { original.id }
+    /// When it happens, or first happens.
+    public var time: Date { original.time }
+    /// The one-off event being edited, or nil for a repeating one.
+    public var event: Event? {
+        if case .event(let event) = original { return event }
+        return nil
+    }
+    /// The repeating event being edited, or nil for a one-off one.
+    public var rule: RecurringEvent? {
+        if case .rule(let rule) = original { return rule }
+        return nil
+    }
 }
 
 extension ScenarioStore {
-    /// Loads one of the focused slot's one-off events into the add-event pane, after its marker
-    /// was clicked. Save (or ↩) changes it, Delete removes it, and Cancel leaves it as it was.
+    /// Loads one of the focused slot's own events into the add-event pane, after its diamond, or a
+    /// repeating event's bar or label, was clicked. Save (or ↩) changes it, Delete removes it, and
+    /// Cancel leaves it as it was.
     public func editEvent(id: UUID) {
-        guard slots.indices.contains(focusedIndex),
-              let event = configs[focusedIndex].events.first(where: { $0.id == id }) else { return }
+        guard slots.indices.contains(focusedIndex) else { return }
+        let original: EventDraft.Built
+        if let event = configs[focusedIndex].events.first(where: { $0.id == id }) {
+            original = .event(event)
+        } else if let rule = configs[focusedIndex].rules.first(where: { $0.id == id }) {
+            original = .rule(rule)
+        } else {
+            return
+        }
         let slot = slots[focusedIndex]
-        var draft = EventDraft(slotIndex: focusedIndex, date: event.time, kind: .setParameter)
+        var draft = EventDraft(slotIndex: focusedIndex, date: original.time, kind: .setParameter)
         draft.parameter = slot.parameters.first ?? ""
-        if event.kind == Event.setKind {
-            // The pane changes one parameter at a time.
-            guard event.values.count == 1, let entry = event.values.first else {
-                say("This event sets several parameters at once. Change it in scenario.md.", isError: true)
+        let values = original.values
+        if original.kind == Event.setKind {
+            // The pane changes one parameter at a time, once.
+            guard values.count == 1, let entry = values.first, !original.isRule else {
+                say(original.isRule ? "The Event tab can't change a repeating parameter change. Change it in scenario.md."
+                                    : "This event sets several parameters at once. Change it in scenario.md.", isError: true)
                 return
             }
             draft.parameter = entry.key
             let percent = slot.parameterValues.first { $0.name == entry.key }?.quantity == .percent
             draft.valueText = Self.editableText(entry.value, percent: percent, numbers: slot.writing.numbers)
         } else {
-            guard event.values.count == 1, let amount = event.values["amount"] else {
-                say("The Event tab can't change this \(event.kind) event. Change it in scenario.md.", isError: true)
+            guard values.count == 1, let amount = values["amount"] else {
+                say("The Event tab can't change this \(original.kind) event. Change it in scenario.md.", isError: true)
                 return
             }
-            draft.kind = .event(event.kind)
+            draft.kind = .event(original.kind)
             draft.amountText = Self.editableText(amount, percent: false, numbers: slot.writing.numbers)
+        }
+        if case .rule(let rule) = original {
+            guard let repeats = EventDraft.Repeat.allCases.first(where: { $0.rate == rule.every }) else {
+                say("This event repeats \(Self.describe(rule.every)), which the Event tab can't show. Change it in scenario.md.",
+                    isError: true)
+                return
+            }
+            draft.repeats = repeats
         }
         // Clicking another marker while editing still goes back to the pane as it was before the first.
         let previous = editingEvent?.previousDraft ?? eventDraft
         if confirmingEventDeletion { confirmingEventDeletion = false }
         if draftError != nil { draftError = nil }
-        editingEvent = EditedEvent(slot: slot.id, event: event, previousDraft: previous)
+        editingEvent = EditedEvent(slot: slot.id, original: original, previousDraft: previous)
         if draft != eventDraft { eventDraft = draft } else { updateDraftPreview() }
         requestEventFieldFocus()
     }
 
     /// Saves the pane's changes to the event being edited, as one change that undo takes back.
-    /// Choosing a repeat turns it into a recurring event.
+    /// Choosing a repeat turns a one-off event into a repeating one, and Never the other way round.
+    /// A repeating event keeps its end ("until") and count, which the pane doesn't show.
     @discardableResult
     public func saveEditedEvent() -> Bool {
         guard let editing = editingEvent else { return false }
@@ -60,11 +93,17 @@ extension ScenarioStore {
         case .failure(let problem):
             draftError = problem.message
             return false
-        case .success(let built):
-            let old = editing.event
-            let before = "\(label(for: old, inSlotAt: index)) on \(DateText.monthYear(old.time))"
+        case .success(var built):
+            let old = editing.original
+            if case .rule(let oldRule) = old, case .rule(var rule) = built {
+                rule.count = oldRule.count
+                // An end before the new first date would leave nothing, so it goes.
+                if let until = oldRule.until, until >= rule.first { rule.until = until }
+                built = .rule(rule)
+            }
+            let before = describe(old, inSlotAt: index)
             let title = slots[index].title
-            if case .event(let event) = built, event.time == old.time, event.kind == old.kind, event.values == old.values {
+            if built.sameAs(old) {
                 stopEditingEvent()
                 say("No changes to \(before)")
                 return true
@@ -75,15 +114,23 @@ extension ScenarioStore {
                 return false
             }
             switch built {
-            case .event(let event):
-                say("Changed \(before) to \(label(for: event, inSlotAt: index)) on \(DateText.monthYear(event.time)) in \(title)")
+            case .event:
+                say("Changed \(before) to \(describe(built, inSlotAt: index)) in \(title)")
             case .rule(let rule):
-                let amount = rule.values["amount"].map(money(inSlotAt: index).full) ?? ""
+                let amount = rule.values["amount"].map(amountStyle(inSlotAt: index, kind: rule.kind).full) ?? ""
                 say("Changed \(before) to a \(EventDraft.title(forKind: rule.kind).lowercased()) of \(amount) "
                     + "\(Self.describe(rule.every)) from \(DateText.monthYear(rule.first)) in \(title)")
             }
             stopEditingEvent()
             return true
+        }
+    }
+
+    /// "−$6,000 on Aug 2028", or "Vaccinate 6,000 every week from Mar 2022".
+    func describe(_ item: EventDraft.Built, inSlotAt index: Int) -> String {
+        switch item {
+        case .event(let event): return "\(label(for: event, inSlotAt: index)) on \(DateText.monthYear(event.time))"
+        case .rule(let rule): return "\(label(for: rule, inSlotAt: index)) from \(DateText.monthYear(rule.first))"
         }
     }
 
@@ -100,17 +147,16 @@ extension ScenarioStore {
     /// "Delete −$6,000 on Aug 2028 from Savings?"
     public var eventDeletionQuestion: String {
         guard let editing = editingEvent, let index = slotIndex(id: editing.slot) else { return "" }
-        return "Delete \(label(for: editing.event, inSlotAt: index)) on \(DateText.monthYear(editing.event.time)) "
-            + "from \(slots[index].title)? Undo brings it back."
+        return "Delete \(describe(editing.original, inSlotAt: index)) from \(slots[index].title)? Undo brings it back."
     }
 
     /// Deletes the event being edited, as one change that undo takes back.
     public func deleteEditedEvent() {
         guard let editing = editingEvent else { return }
         if let index = slotIndex(id: editing.slot) {
-            let what = "\(label(for: editing.event, inSlotAt: index)) on \(DateText.monthYear(editing.event.time))"
+            let what = describe(editing.original, inSlotAt: index)
             let title = slots[index].title
-            if changeEvent(id: editing.event.id, inSlotAt: index, to: nil) {
+            if changeEvent(id: editing.id, inSlotAt: index, to: nil) {
                 say("Deleted \(what) from \(title)")
             }
         }
@@ -135,7 +181,8 @@ extension ScenarioStore {
     func followEditedEvent() {
         guard let editing = editingEvent else { return }
         guard let index = slotIndex(id: editing.slot), index == focusedIndex,
-              configs[index].events.contains(where: { $0.id == editing.event.id }) else {
+              configs[index].events.contains(where: { $0.id == editing.id })
+                || configs[index].rules.contains(where: { $0.id == editing.id }) else {
             stopEditingEvent()
             return
         }
