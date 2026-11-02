@@ -245,29 +245,153 @@ struct EventEditingTests {
         }
     }
 
-    @Test("A click lands on the nearest diamond within a few points, and only on one-off events, which get the pointing hand")
+    @Test("A click lands on the nearest diamond within a few points, or a repeating event's bar or label, never a generated event")
     func hitTesting() {
         let frame = TimeFrame(start: utc(2026, 1), end: utc(2036, 1))
         let width: CGFloat = 1000
-        func marker(_ date: Date, _ kind: EventMarker.Kind) -> EventMarker {
-            EventMarker(id: UUID(), date: date, endDate: nil, label: "", kind: kind)
+        func marker(_ date: Date, _ kind: EventMarker.Kind, end: Date? = nil) -> EventMarker {
+            EventMarker(id: UUID(), date: date, endDate: end, label: "", kind: kind)
         }
         let first = marker(utc(2028, 8), .oneOff), second = marker(utc(2028, 9), .oneOff)
-        let rule = marker(utc(2030, 1), .recurring), generated = marker(utc(2032, 1), .generated)
+        let rule = marker(utc(2030, 1), .recurring, end: utc(2033, 1)), generated = marker(utc(2032, 1), .generated)
         let early = marker(utc(2020, 1), .oneOff)
-        let markers = [early, first, second, rule, generated]
-        func hit(_ date: Date, nudge: CGFloat = 0) -> UUID? {
-            EventsStrip.editableEvent(atX: frame.x(date, width: width) + nudge, markers: markers, frame: frame, width: width)
+        let items = EventsStrip.layout(markers: [early, first, second, rule, generated], frame: frame, width: width) { _, _ in 40 }
+        func hit(_ date: Date, nudge: CGFloat = 0, y: CGFloat = EventsStrip.markerY) -> UUID? {
+            EventsStrip.editableEvent(at: CGPoint(x: frame.x(date, width: width) + nudge, y: y), in: items)
         }
         #expect(hit(utc(2028, 8)) == first.id)
         #expect(hit(utc(2028, 8), nudge: -7) == first.id)
         #expect(hit(utc(2028, 9), nudge: 2) == second.id)
         #expect(hit(utc(2028, 8), nudge: -9) == nil)
-        #expect(hit(utc(2030, 1)) == nil)
+        // A repeating event's bar, anywhere along it, but not above or past it.
+        #expect(hit(utc(2031, 6), y: EventsStrip.barY(row: 0)) == rule.id)
+        #expect(hit(utc(2031, 6), y: EventsStrip.labelY) == nil)
+        #expect(hit(utc(2034, 1), y: EventsStrip.barY(row: 0)) == nil)
         #expect(hit(utc(2032, 1)) == nil)
         #expect(hit(frame.start) == nil)
-        // The same diamonds get the pointing hand: one-off events in view.
-        #expect(EventsStrip.diamonds(markers: markers, frame: frame, width: width).map(\.id) == [first.id, second.id])
+        // Only events in view are laid out.
+        #expect(items.map(\.id) == [first.id, second.id, rule.id, generated.id])
+    }
+
+    @Test("Labels never overlap: the edited event's goes first, then one-off, repeating and generated ones")
+    func labelsDontOverlap() throws {
+        let frame = TimeFrame(start: utc(2026, 1), end: utc(2036, 1))
+        let width: CGFloat = 1000
+        func marker(_ date: Date, _ kind: EventMarker.Kind, _ label: String, end: Date? = nil) -> EventMarker {
+            EventMarker(id: UUID(), date: date, endDate: end, label: label, kind: kind)
+        }
+        // A year is 100 points; each label is 80.
+        let peak = marker(utc(2028, 1), .generated, "Peak"), herd = marker(utc(2028, 2), .generated, "HerdImmunity")
+        let set = marker(utc(2028, 6), .oneOff, "R₀ → 1.1"), later = marker(utc(2031, 1), .oneOff, "R₀ → 2.5")
+        let first = marker(utc(2027, 1), .recurring, "Vaccinate 6,000 every week")
+        let second = marker(utc(2027, 3), .recurring, "Vaccinate 250 every week")
+        let markers = [first, second, peak, herd, set, later]
+        let items = EventsStrip.layout(markers: markers, frame: frame, width: width) { _, _ in 80 }
+        let rects = items.compactMap(\.labelRect)
+        for (i, a) in rects.enumerated() {
+            for b in rects.dropFirst(i + 1) { #expect(!a.insetBy(dx: -EventsStrip.labelGap / 2 + 0.01, dy: 0).intersects(b)) }
+            #expect(a.minX >= 0 && a.maxX <= width)
+        }
+        func shown(_ marker: EventMarker) -> Bool { items.first { $0.id == marker.id }?.labelRect != nil }
+        #expect(shown(set) && shown(later) && shown(first))
+        #expect(!shown(second) && !shown(peak) && !shown(herd))
+        // Overlapping repeating events get rows of their own.
+        #expect(items.first { $0.id == first.id }?.row == 0)
+        #expect(items.first { $0.id == second.id }?.row == 1)
+
+        // The event being edited wins its place over a one-off event's.
+        let editing = EventsStrip.layout(markers: markers, frame: frame, width: width, editingID: second.id) { _, _ in 80 }
+        #expect(editing.first { $0.id == second.id }?.labelRect != nil)
+        #expect(editing.first { $0.id == first.id }?.labelRect == nil)
+
+        // Labels are measured in the strip's font.
+        #expect(EventsStrip.labelWidth("HerdImmunity", italic: true) > EventsStrip.labelWidth("Peak", italic: true))
+        #expect(EventsStrip.labelWidth("Peak", italic: false) > 15)
+    }
+
+    @Test("Clicking a repeating event loads it with its repeat; saving keeps its end, and undo and redo cover it")
+    func editsRepeating() async throws {
+        let store = try await makeStore()
+        let rule = RecurringEvent(kind: "deposit", values: ["amount": 300], first: utc(2027, 3), every: .monthly, until: utc(2035, 12))
+        store.add(rule, toSlotAt: 0)
+        let added = try #require(store.configs[0].rules.last)
+        store.editEvent(id: added.id)
+        #expect(store.editingEvent?.rule == added)
+        #expect(store.eventDraft.kind == .event("deposit"))
+        #expect(store.eventDraft.amountText == "300")
+        #expect(store.eventDraft.repeats == .monthly)
+        #expect(store.eventDraft.date == added.first)
+        #expect(store.timelineState().focus.editingEventID == added.id)
+
+        store.eventDraft.amountText = "450"
+        #expect(store.commitEvent())
+        #expect(store.message == "Changed +$300 every month from Mar 2027 to a deposit of $450 every month from Mar 2027 in Savings")
+        let changed = try #require(store.configs[0].rules.last)
+        #expect(changed.values == ["amount": 450])
+        #expect(changed.until == utc(2035, 12))
+        #expect(store.configs[0].rules.count == 1)
+        #expect(store.timelineState().focus.events.filter { $0.kind == .recurring }.map(\.label) == ["+$450 every month"])
+
+        store.undo()
+        #expect(store.configs[0].rules == [added])
+        store.redo()
+        #expect(store.configs[0].rules == [changed])
+        await store.waitUntilIdle()
+    }
+
+    @Test("A repeating event can become a one-off, or be deleted, and undo puts it back")
+    func repeatingToOneOffAndDelete() async throws {
+        let store = try await makeStore()
+        store.add(RecurringEvent(kind: "deposit", values: ["amount": 300], first: utc(2027, 3), every: .monthly), toSlotAt: 0)
+        let rule = try #require(store.configs[0].rules.last)
+        let events = store.configs[0].events
+
+        store.editEvent(id: rule.id)
+        store.eventDraft.repeats = .never
+        #expect(store.commitEvent())
+        #expect(store.configs[0].rules.isEmpty)
+        #expect(store.configs[0].events.count == events.count + 1)
+        store.undo()
+        #expect(store.configs[0].rules == [rule])
+        #expect(store.configs[0].events == events)
+
+        store.editEvent(id: rule.id)
+        store.requestEventDeletion()
+        #expect(store.eventDeletionQuestion == "Delete +$300 every month from Mar 2027 from Savings? Undo brings it back.")
+        store.deleteEditedEvent()
+        #expect(store.configs[0].rules.isEmpty)
+        #expect(store.message == "Deleted +$300 every month from Mar 2027 from Savings")
+        store.undo()
+        #expect(store.configs[0].rules == [rule])
+        await store.waitUntilIdle()
+    }
+
+    @Test("The preview of an edited repeating event replaces it, not adds to it")
+    func repeatingPreviewReplaces() async throws {
+        let store = try await makeStore()
+        store.add(RecurringEvent(kind: "deposit", values: ["amount": 300], first: utc(2027, 3), every: .monthly), toSlotAt: 0)
+        store.show(utc(2035, 1))
+        await store.waitUntilIdle()
+        let current = try #require(store.cursorState().focusValue)
+        store.editEvent(id: try #require(store.configs[0].rules.last).id)
+        await store.waitUntilIdle()
+        // Unchanged, the preview matches the line: the rule isn't counted twice.
+        #expect(ScenarioStore.held(store.draftPreview, at: store.cursor) == current)
+        #expect(store.panelState().eventPreview?.atCursor == "No change")
+    }
+
+    @Test("Event kinds other than money name themselves, with the amount in the slot's own units")
+    func labels() async throws {
+        let store = try await makeStore()
+        store.focus(index: 3)  // Climate: shows a temperature, not money.
+        #expect(store.label(for: Event(time: now, kind: "vaccinate", values: ["amount": 6000]), inSlotAt: 3) == "Vaccinate 6,000")
+        #expect(store.label(for: RecurringEvent(kind: "vaccinate", values: ["amount": 250], first: now, every: .weekly), inSlotAt: 3)
+                == "Vaccinate 250 every week")
+        #expect(store.label(for: Event(time: now, kind: "deposit", values: ["amount": 500]), inSlotAt: 3) == "+$500")
+        #expect(store.label(for: RecurringEvent(kind: "overpay", values: ["amount": 100], first: now, every: .monthly), inSlotAt: 2)
+                == "−$100 overpayment every month")
+        #expect(store.label(for: Event(time: now, kind: "bonus", values: ["amount": 1, "extra": 2]), inSlotAt: 0) == "Bonus")
+        await store.waitUntilIdle()
     }
 
     @Test func eventLinesAreForAddedEventsOnly() {

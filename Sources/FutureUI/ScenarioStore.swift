@@ -102,9 +102,9 @@ public final class ScenarioStore {
     private enum Change {
         case addedEvent(slot: UUID, Event)
         case addedRule(slot: UUID, RecurringEvent)
-        /// An authored event was changed in the add-event pane (`new`), or deleted (nil). `at` is
-        /// where it was in its slot's list.
-        case changedEvent(slot: UUID, old: Event, at: Int, new: EventDraft.Built?)
+        /// An authored event or repeating event was changed in the add-event pane (`new`), or deleted
+        /// (nil). `at` is where it was in its slot's list of events or of repeating events.
+        case changedEvent(slot: UUID, old: EventDraft.Built, at: Int, new: EventDraft.Built?)
         /// Slots were added, removed, moved or changed. Undo puts the old list back.
         case slots(before: [SlotConfig], after: [SlotConfig], focusBefore: UUID?, focusAfter: UUID?)
         /// The scenario's name, start or seed was changed in the app (docs/UI.md, 3).
@@ -778,33 +778,61 @@ public final class ScenarioStore {
     /// as one change that undo takes back. Returns false when the event isn't there.
     @discardableResult
     func changeEvent(id: UUID, inSlotAt index: Int, to new: EventDraft.Built?) -> Bool {
-        guard configs.indices.contains(index), let position = configs[index].events.firstIndex(where: { $0.id == id }) else {
-            return false
-        }
-        let old = configs[index].events.remove(at: position)
+        guard configs.indices.contains(index), let (old, position) = takeAuthored(id: id, inSlotAt: index) else { return false }
         var change: EventDraft.Built?
-        var mutations: [ScenarioEngine.Mutation] = [.removeEvent(slot: index, id: old.id)]
-        switch new {
-        case .event(var event)?:
+        var mutations: [ScenarioEngine.Mutation] = [removal(of: old, inSlotAt: index)]
+        if var new {
             // The id reading the scenario's file would give it, as for a new event (DESIGN.md, 15.2).
-            event.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(event),
-                                           taken: Set(configs[index].events.map(\.id)))
-            configs[index].events.insert(event, at: position)
-            change = .event(event)
-            mutations.append(.addEvent(slot: index, event))
-        case .rule(var rule)?:
-            rule.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(rule),
-                                          taken: Set(configs[index].rules.map(\.id)))
-            configs[index].rules.append(rule)
-            change = .rule(rule)
-            mutations.append(.addRule(slot: index, rule))
-        case nil:
-            break
+            switch new {
+            case .event(var event):
+                event.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(event),
+                                               taken: Set(configs[index].events.map(\.id)))
+                new = .event(event)
+            case .rule(var rule):
+                rule.id = EventIdentity.newID(slot: configs[index].name, key: EventIdentity.key(rule),
+                                              taken: Set(configs[index].rules.map(\.id)))
+                new = .rule(rule)
+            }
+            mutations.append(putAuthored(new, inSlotAt: index, replacing: old, at: position))
+            change = new
         }
         undoStack.append(.changedEvent(slot: configs[index].id, old: old, at: position, new: change))
         redoStack.removeAll()
         send(mutations)
         return true
+    }
+
+    /// Takes the authored event or repeating event out of the slot's lists, with where it was.
+    private func takeAuthored(id: UUID, inSlotAt index: Int) -> (EventDraft.Built, Int)? {
+        if let position = configs[index].events.firstIndex(where: { $0.id == id }) {
+            return (.event(configs[index].events.remove(at: position)), position)
+        }
+        if let position = configs[index].rules.firstIndex(where: { $0.id == id }) {
+            return (.rule(configs[index].rules.remove(at: position)), position)
+        }
+        return nil
+    }
+
+    /// Puts an authored event or repeating event into the slot's lists: where `old` was when it's the
+    /// same kind of thing, at the end otherwise.
+    private func putAuthored(_ item: EventDraft.Built, inSlotAt index: Int, replacing old: EventDraft.Built? = nil,
+                             at position: Int) -> ScenarioEngine.Mutation {
+        let keepsPlace = old.map { $0.isRule == item.isRule } ?? true
+        switch item {
+        case .event(let event):
+            configs[index].events.insert(event, at: keepsPlace ? min(position, configs[index].events.count) : configs[index].events.count)
+            return .addEvent(slot: index, event)
+        case .rule(let rule):
+            configs[index].rules.insert(rule, at: keepsPlace ? min(position, configs[index].rules.count) : configs[index].rules.count)
+            return .addRule(slot: index, rule)
+        }
+    }
+
+    private func removal(of item: EventDraft.Built, inSlotAt index: Int) -> ScenarioEngine.Mutation {
+        switch item {
+        case .event(let event): return .removeEvent(slot: index, id: event.id)
+        case .rule(let rule): return .removeRule(slot: index, id: rule.id)
+        }
     }
 
     public var canUndo: Bool { !undoStack.isEmpty }
@@ -826,18 +854,10 @@ public final class ScenarioStore {
         case .changedEvent(let slot, let old, let position, let new):
             if let index = configs.firstIndex(where: { $0.id == slot }) {
                 var mutations: [ScenarioEngine.Mutation] = []
-                switch new {
-                case .event(let event)?:
-                    configs[index].events.removeAll { $0.id == event.id }
-                    mutations.append(.removeEvent(slot: index, id: event.id))
-                case .rule(let rule)?:
-                    configs[index].rules.removeAll { $0.id == rule.id }
-                    mutations.append(.removeRule(slot: index, id: rule.id))
-                case nil:
-                    break
+                if let new, takeAuthored(id: new.id, inSlotAt: index) != nil {
+                    mutations.append(removal(of: new, inSlotAt: index))
                 }
-                configs[index].events.insert(old, at: min(position, configs[index].events.count))
-                mutations.append(.addEvent(slot: index, old))
+                mutations.append(putAuthored(old, inSlotAt: index, at: position))
                 send(mutations)
             }
         case .slots(let before, _, let focusBefore, _):
@@ -866,18 +886,9 @@ public final class ScenarioStore {
             }
         case .changedEvent(let slot, let old, let position, let new):
             if let index = configs.firstIndex(where: { $0.id == slot }) {
-                configs[index].events.removeAll { $0.id == old.id }
-                var mutations: [ScenarioEngine.Mutation] = [.removeEvent(slot: index, id: old.id)]
-                switch new {
-                case .event(let event)?:
-                    configs[index].events.insert(event, at: min(position, configs[index].events.count))
-                    mutations.append(.addEvent(slot: index, event))
-                case .rule(let rule)?:
-                    configs[index].rules.append(rule)
-                    mutations.append(.addRule(slot: index, rule))
-                case nil:
-                    break
-                }
+                var mutations: [ScenarioEngine.Mutation] = []
+                if takeAuthored(id: old.id, inSlotAt: index) != nil { mutations.append(removal(of: old, inSlotAt: index)) }
+                if let new { mutations.append(putAuthored(new, inSlotAt: index, replacing: old, at: position)) }
                 send(mutations)
             }
         case .slots(_, let after, _, let focusAfter):
@@ -1489,7 +1500,7 @@ public final class ScenarioStore {
             heldBack: held?.line ?? [], cutoff: held?.cutoff,
             draftDate: goalOnFocus.map { $0.selectedFix?.event.time } ?? (dragging ? nil : draftOnFocus?.date),
             yDomain: domain, yTicks: ticks, events: markers(forSlotAt: focusedIndex),
-            editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.event.id : nil,
+            editingEventID: editingEvent?.slot == focusSlot.id ? editingEvent?.id : nil,
             pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text, drift: driftMark,
             goal: goalMark)
 
@@ -1576,10 +1587,8 @@ public final class ScenarioStore {
         }
         for rule in configs[index].rules where rule.first <= frame.end {
             let end = min(rule.until ?? frame.end, frame.end)
-            let amount = rule.values["amount"].map(money(inSlotAt: index).full) ?? ""
-            let sign = rule.kind == "withdraw" ? "−" : "+"
-            markers.append(EventMarker(id: rule.id, date: rule.first, endDate: end,
-                                       label: "\(sign)\(amount) \(Self.describe(rule.every))", kind: .recurring))
+            markers.append(EventMarker(id: rule.id, date: rule.first, endDate: end, label: label(for: rule, inSlotAt: index),
+                                       kind: .recurring))
         }
         let generated = computed.flatMap { $0.generated.indices.contains(index) ? $0.generated[index] : nil } ?? []
         for event in generated where frame.contains(event.time) {
@@ -1619,7 +1628,7 @@ public final class ScenarioStore {
     /// words: "+£500", "Interest rate → 4%".
     func label(for event: Event, inSlotAt index: Int) -> String {
         guard event.kind == Event.setKind, slots.indices.contains(index) else {
-            return Self.label(for: event, currency: money(inSlotAt: index).currency)
+            return Self.label(for: event, amounts: amountStyle(inSlotAt: index, kind: event.kind))
         }
         return event.values.sorted { $0.key < $1.key }.map { name, value in
             guard let parameter = slots[index].parameterValues.first(where: { $0.name == name }) else {
@@ -1636,8 +1645,26 @@ public final class ScenarioStore {
         return ValueStyle(.currency, currency: currency, writing: currency.writing(numberSetting))
     }
 
-    static func label(for event: Event, currency: Currency) -> String {
-        let amount = event.values["amount"].map(ValueStyle.money(currency).full)
+    /// "+$500 every month", "Vaccinate 6,000 every week".
+    func label(for rule: RecurringEvent, inSlotAt index: Int) -> String {
+        label(for: Event(time: rule.first, kind: rule.kind, values: rule.values), inSlotAt: index) + " " + Self.describe(rule.every)
+    }
+
+    /// How the amounts of a slot's events are written. Deposits, withdrawals and overpayments are
+    /// money; other kinds are money only when the slot's graph shows money, so vaccinating 6,000
+    /// people in an Epidemic slot doesn't read as $6,000.
+    func amountStyle(inSlotAt index: Int, kind: String) -> ValueStyle {
+        guard slots.indices.contains(index), !Self.moneyKinds.contains(kind), slots[index].format != .currency else {
+            return money(inSlotAt: index)
+        }
+        return ValueStyle(.number, currency: slots[index].currency, writing: slots[index].writing)
+    }
+
+    static let moneyKinds: Set<String> = ["deposit", "withdraw", "overpay"]
+
+    /// "+$500", "−$6,000 overpayment", "Vaccinate 6,000", or the kind alone when it has no single amount.
+    static func label(for event: Event, amounts: ValueStyle) -> String {
+        let amount = event.values["amount"].map(amounts.full)
         switch event.kind {
         case "deposit": return "+" + (amount ?? "")
         case "withdraw": return "−" + (amount ?? "")
@@ -1645,7 +1672,10 @@ public final class ScenarioStore {
         case Event.setKind:
             return event.values.sorted { $0.key < $1.key }
                 .map { "\($0.key) → \(ValueStyle.number.axis($0.value))" }.joined(separator: ", ")
-        default: return event.kind
+        default:
+            let name = EventDraft.title(forKind: event.kind)
+            guard let amount, event.values.count == 1 else { return name }
+            return name + " " + amount
         }
     }
 

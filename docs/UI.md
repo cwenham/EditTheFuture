@@ -266,17 +266,20 @@ Built in November 2026, apart from sketching (step 5). DESIGN.md, 8.1.
 
 ### 5.4 Editing and moving events
 
-- **Open:** clicking a one-off event's diamond loads it into the Event tab: its kind, its amount (or parameter and value) and its date. A click within 8 points of a diamond counts, and the pointer turns into a hand over one. The pane says "Editing an event", and the diamond gets a ring.
+- **Open:** clicking a one-off event's diamond, or a repeating event's bar or label, loads it into the Event tab: its kind, its amount (or parameter and value), its date and how often it repeats. A click within 8 points of a diamond counts, and the pointer turns into a hand over a diamond, a bar or a repeating event's label. The pane says "Editing an event"; the diamond gets a ring, or the bar turns `proposal` and thicker. Generated events' circles can't be edited (5.5), so a click on one picks a date.
+- **Repeating events** keep their end ("until") and count when saved, though the pane doesn't show them. One that repeats in a way the Repeats menu can't show (every 3 days), or a repeating parameter change, is left for scenario.md, and clicking it says so.
 - **Change:** anything in the form.
   - Picking a date moves the event: click the graph, press E, or use the date picker. The old diamond fades, and a dashed one shows the new date.
-  - Choosing a repeat turns it into a recurring event.
+  - Choosing a repeat turns a one-off event into a repeating one, and Never turns a repeating one into a one-off.
   - The dashed line previews the scenario with the event as edited, in place of the old one. The effect counts from whichever date is earlier, so moving an event later shows the difference from where it was.
 - **Save** (or ↩) replaces the event, as one change that undo takes back. **Cancel** (or Esc) leaves it as it was. Either way, the pane goes back to what it held before the click.
 - **Delete…** asks first, in the pane (DESIGN.md, section 13), then removes the event. Undo brings it back.
 - **Stopping:** focusing another slot or pressing ⌃⌥E stops editing, and so does undoing the event's addition.
 - **Limits:** the pane changes one value at a time. An event that sets several parameters, or carries values other than an amount, can't be loaded; clicking one says to change it in scenario.md.
-- **VoiceOver:** the events strip has an "Edit" action for each one-off event in view.
-- **Not built yet:** editing a recurring event by clicking its bar, and dragging a marker sideways to move it in time, snapping to step boundaries (hold ⌥ to move freely).
+- **VoiceOver:** the events strip has an "Edit" action for each one-off and repeating event in view.
+- **The strip's layout:** repeating events that overlap in time get rows of their own, up to three. Labels never cover each other: the edited event's goes first, then one-off events', repeating events' and generated ones', each from the left, and a label that would touch one already placed is left out. Hovering over the event still shows it. Drawing and clicks use the same layout (`EventsStrip.layout`).
+- **Labels:** deposits, withdrawals and overpayments are money ("+$500", "−$100 overpayment every month"). Other kinds say their name, with the amount in money only when the slot's graph shows money ("Vaccinate 6,000 every week").
+- **Not built yet:** dragging a marker sideways to move it in time, snapping to step boundaries (hold ⌥ to move freely).
 - Undo and redo cover every change.
 
 ### 5.5 Generated events

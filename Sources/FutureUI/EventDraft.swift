@@ -76,9 +76,57 @@ public struct EventDraft: Equatable, Sendable {
         }
     }
 
-    enum Built: Sendable {
+    /// A one-off event or a repeating one: what the pane adds, or the authored event it's editing.
+    enum Built: Equatable, Sendable {
         case event(Event)
         case rule(RecurringEvent)
+
+        var id: UUID {
+            switch self {
+            case .event(let event): return event.id
+            case .rule(let rule): return rule.id
+            }
+        }
+
+        var isRule: Bool {
+            if case .rule = self { return true }
+            return false
+        }
+
+        /// When it happens, or first happens.
+        var time: Date {
+            switch self {
+            case .event(let event): return event.time
+            case .rule(let rule): return rule.first
+            }
+        }
+
+        var kind: String {
+            switch self {
+            case .event(let event): return event.kind
+            case .rule(let rule): return rule.kind
+            }
+        }
+
+        var values: [String: Double] {
+            switch self {
+            case .event(let event): return event.values
+            case .rule(let rule): return rule.values
+            }
+        }
+
+        /// The same apart from its id: saving it would change nothing.
+        func sameAs(_ other: Built) -> Bool {
+            switch (self, other) {
+            case (.event(let a), .event(let b)):
+                return a.time == b.time && a.kind == b.kind && a.values == b.values
+            case (.rule(let a), .rule(let b)):
+                return a.first == b.first && a.kind == b.kind && a.values == b.values && a.every == b.every
+                    && a.until == b.until && a.count == b.count
+            default:
+                return false
+            }
+        }
     }
 
     enum DraftProblem: Error, Equatable {
@@ -216,7 +264,7 @@ extension ScenarioStore {
                 say("Added \(label(for: event, inSlotAt: draft.slotIndex)) on \(DateText.monthYear(event.time)) to \(slot.title)")
             case .rule(let rule):
                 add(rule, toSlotAt: draft.slotIndex)
-                let amount = rule.values["amount"].map(money(inSlotAt: draft.slotIndex).full) ?? ""
+                let amount = rule.values["amount"].map(amountStyle(inSlotAt: draft.slotIndex, kind: rule.kind).full) ?? ""
                 say("Added \(EventDraft.title(forKind: rule.kind).lowercased()) of \(amount) \(Self.describe(rule.every)) from \(DateText.monthYear(rule.first)) to \(slot.title)")
             }
             return true
@@ -238,14 +286,14 @@ extension ScenarioStore {
         previewThrough = through
         requestPreview(ScenarioEngine.PreviewRequest(version: revision, sequence: previewSequence, slot: eventDraft.slotIndex,
                                                      change: .event(built), from: effectStart.addingTimeInterval(-margin),
-                                                     through: through.addingTimeInterval(margin), replacing: editingEvent?.event.id))
+                                                     through: through.addingTimeInterval(margin), replacing: editingEvent?.id))
     }
 
     /// Where the draft starts to make a difference: its date, or the edited event's own date when
     /// that's earlier (moving an event later changes the line from where it was).
     var effectStart: Date {
         guard let editing = editingEvent else { return eventDraft.date }
-        return min(eventDraft.date, editing.event.time)
+        return min(eventDraft.date, editing.time)
     }
 
     /// Asks again when the view has scrolled past what the preview covers.

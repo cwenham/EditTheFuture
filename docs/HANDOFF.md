@@ -149,7 +149,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The date defaults to now, and clicking the graph picks a date.
   - Deposit, withdraw or set a parameter, once or repeating.
   - A live preview of the effect.
-- **Editing events** (UI.md, 5.4): clicking a one-off event's diamond loads it into the Event tab. Save replaces it (one undoable change, with the id reading the file would give it), Cancel leaves it, and Delete… asks first. The preview leaves the old event out. `EventEditing.swift`.
+- **Editing events** (UI.md, 5.4): clicking a one-off event's diamond, or a repeating event's bar or label, loads it into the Event tab. Save replaces it (one undoable change, with the id reading the file would give it), Cancel leaves it, and Delete… asks first. The preview leaves the old event out. A repeating event keeps its end and count. `EventEditing.swift`.
+- **The events strip** (UI.md, 5.4): overlapping repeating events get rows of their own, and labels never overlap: the edited event's first, then one-off, repeating and generated ones. A label without room is left out, and hovering shows it. `EventsStrip.layout` places everything, for drawing and for clicks alike. Event kinds other than money name themselves ("Vaccinate 6,000 every week").
 - **Command bar (⌘K):**
   - Adding: `+500 monthly from 2027-03`, `set rate 4% from 2027-06`.
   - Moving: `goto 2035`, `goto 100°C`, `goto mortgage $0`, `now`.
@@ -189,7 +190,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The headless runtime and remote slot groups. A server for many users is deferred.
 - **From the slot inspector mockup:** Variables, Events and Readings beside the formula, with values at the cursor, and the links view.
 - **Panel features from UI.md:**
-  - Editing recurring events, and dragging events to move them (5.4). One-off events can be edited by clicking them.
+  - Dragging events to move them (5.4). One-off and repeating events can be edited by clicking them.
   - Sketching a whole curve with ⇧-drag for Drag the future (5.2), fitted with the least-squares solver, and levers beyond a parameter or a one-off amount (a recurring deposit for a while, extending a term).
   - Bands for stochastic models, and readings in the lanes. Drift alerts are built (5.6).
   - Mute and solo, and banks ([ and ]).
@@ -266,7 +267,7 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - Undoing a later start date doesn't scroll the view back: it stays where the new start put it.
   - The start date is a date picker in the system's date order, in UTC like the engine. Years past 9999 can be typed in `scenario.md`, not in the picker.
 - `README.md` still describes only the engine package.
-- **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
+- **Editing events:** clicking a diamond and the steady pointing hand over it were checked by hand on macOS 15. Clicking a repeating event's bar or label, and the help over a hidden label, were checked in tests, not by hand. Not checked by hand: Esc reaching the pane's Cancel button in the floating panel, and the pointer on macOS 14, which uses `NSCursor` push and pop instead of `.pointerStyle(.link)`.
 - `goto` with a value, and adding and removing slots, are now in the `Command` vocabulary and the `etf` tool, but not in `etf://` links. Changing a slot's model isn't in either.
 - **The etf tool and Shortcuts:**
   - Checked in tests (the tool's arguments and printing, the wire format, real socket round trips, a refused caller, an Apple-signed `nc` let through by a code-signing requirement, stale sockets, the store's answers and edits on the demo and runaway scenarios) and in the real app with a scratch copy of a scenario: `etf` started the app hidden in about 2.4 seconds, read values and CSV, added a monthly deposit, refused a deposit in the wrong currency, set a rate, found where Savings reaches £1m, and undid back to the file as it was.
