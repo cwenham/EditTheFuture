@@ -28,6 +28,7 @@ let package = Package(
         .library(name: "FutureCommands", targets: ["FutureCommands"]),
         .library(name: "FutureDocument", targets: ["FutureDocument"]),
         .library(name: "FutureFeeds", targets: ["FutureFeeds"]),
+        .library(name: "FutureSimulation", targets: ["FutureSimulation"]),
         .library(name: "FutureUI", targets: ["FutureUI"]),
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
@@ -45,8 +46,16 @@ let package = Package(
         .target(name: "FutureDocument", dependencies: ["FutureEngine"], linkerSettings: [.linkedLibrary("sqlite3")]),
         // Readings fetched from public sources, and the sign-ins they need (docs/DESIGN.md, 15.5).
         .target(name: "FutureFeeds", dependencies: ["FutureEngine", "FutureDocument"]),
+        // What simulations written in Swift are built against (docs/DESIGN.md, 6.5). It, and each module,
+        // sees only the engine: no UI, files or network. The app hands modules the data they need.
+        .target(name: "FutureSimulation", dependencies: ["FutureEngine"]),
+        // Each module has a folder of its own under Sources/Simulations.
+        .target(name: "EpidemicSimulation", dependencies: ["FutureSimulation", "FutureEngine"], path: "Sources/Simulations/Epidemic"),
+        // The modules that come with the app.
+        .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation"],
+                path: "Sources/Simulations/Catalog"),
         .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
-                                                 "FutureFeeds"]),
+                                                 "FutureFeeds", "FutureSimulation", "SimulationCatalog"]),
         // The compiler records the App Intents' constant values, which scripts/build-app.sh turns into
         // the app's Metadata.appintents, as Xcode would, so Shortcuts, Siri and Spotlight find them.
         .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
@@ -60,7 +69,8 @@ let package = Package(
         // Runs a script model without the app: swift run etf-script <file>
         .executableTarget(name: "etf-script", dependencies: ["FutureScript", "FutureEngine"]),
         // Performance benchmarks: swift run -c release etf-bench
-        .executableTarget(name: "etf-bench", dependencies: ["FutureUI", "FutureFormula", "FutureEngine"]),
+        .executableTarget(name: "etf-bench", dependencies: ["FutureUI", "FutureFormula", "FutureEngine", "FutureSimulation",
+                                                             "SimulationCatalog"]),
         .testTarget(name: "FutureEngineTests", dependencies: ["FutureEngine"]),
         .testTarget(name: "FutureFormulaTests", dependencies: ["FutureFormula", "FutureEngine"]),
         .testTarget(name: "FutureScriptTests", dependencies: ["FutureScript", "FutureEngine"]),
@@ -68,7 +78,11 @@ let package = Package(
         .testTarget(name: "FutureDocumentTests", dependencies: ["FutureDocument", "FutureEngine", "FutureFormula"],
                     linkerSettings: [.linkedLibrary("sqlite3")]),
         .testTarget(name: "FutureFeedsTests", dependencies: ["FutureFeeds", "FutureDocument", "FutureEngine"]),
+        .testTarget(name: "FutureSimulationTests", dependencies: ["FutureSimulation", "FutureEngine"]),
+        // A module's tests see only the module, the contract and the engine, as the module does.
+        .testTarget(name: "EpidemicSimulationTests", dependencies: ["EpidemicSimulation", "FutureSimulation", "FutureEngine"],
+                    path: "Tests/Simulations/Epidemic"),
         .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
-                                                          "FutureDocument", "FutureFeeds"]),
+                                                          "FutureDocument", "FutureFeeds", "FutureSimulation"]),
     ] + pythonTargets
 )

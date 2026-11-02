@@ -311,7 +311,7 @@ Built in November 2026 (DESIGN.md, 8.2).
 **The model picker** is a popover. It opens from an empty chip or its menu to add a model, and from a chip's Change model… or the Slot tab's Change… to give a slot a different one.
 - A search field at the top. Categories on the left: Money, Growth, Climate, Health, Physics, Blank and Plug-ins. Plug-ins stays empty until the WebAssembly host arrives (DESIGN.md, 16, M4). Blank has a small formula, a small Lua script and a small Python script to start your own from; adding one opens the Formula tab.
 - Changing a model starts on the slot's current model.
-- Each model shows its kind (Formula, Lua or Python; later Plug-in or Remote) and a one-line description. Python models are listed only when the app includes Python (DESIGN.md, 6.4).
+- Each model shows its kind (Formula, Lua, Python or Swift; later Plug-in or Remote) and a one-line description. Python models are listed only when the app includes Python (DESIGN.md, 6.4). Swift models are simulation modules built into the app (DESIGN.md, 6.5), such as Epidemic under Health.
 - The detail shows a preview of the model's line over 20 years with its defaults, its parameters and starting values, its step, and the events it handles and sends. The preview is computed off the main thread. A model that reads another slot, like Energy bill, has no preview on its own.
 - **Add to slot N** adds the model with its defaults, focuses the slot and opens the Slot tab. ↩ does the same, and Esc closes the picker.
 - **Changing** a slot's model keeps the slot's name, color, events and readings. Parameter and starting values carry over wherever the new model has one of the same name. The picker says when some of the slot's events won't apply ("2 deposit events won't apply to this model"). They're kept, but ignored.
@@ -353,7 +353,7 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 
 **Command bar:** `add savings account` adds a model to the first free slot, `add loan to 7` to slot 7, and `remove climate` asks to remove a slot in the Slot tab. 1–8 focus by position; an empty position says how to fill it.
 
-**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula, or its script (Edit script…). The side pane widens to 480 points while it shows.
+**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula, or its script (Edit script…). The side pane widens to 480 points while it shows. A slot whose model is a module has no text to edit: the tab says the model is built into the app in Swift, that its values are in the Slot tab, and that Change model… offers a blank formula or script for writing one's own. The Slot tab and Predict with don't offer Edit formula… for it.
 - **The editor:** SF Mono with line numbers. Keywords are purple, numbers amber, `[t]` and `[t-1]` green, other slots' values and `event.amount` blue, built-ins cyan, labels green and comments grey.
 - **Completion:** typing a name opens a list under the caret of what fits there.
   - In an expression: this formula's values and parameters, other slots (choosing one goes straight on to its values), functions (the caret lands between the brackets), built-ins and `and`, `or`, `not`.

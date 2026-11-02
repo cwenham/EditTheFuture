@@ -205,9 +205,11 @@ struct PredictMenu: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.proposal)
-            Button("Edit formula…") { store.showFormulaEditor() }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.proposal)
+            if !store.focused.isModule {
+                Button(store.focused.isScript ? "Edit script…" : "Edit formula…") { store.showFormulaEditor() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.proposal)
+            }
         }
         .font(.system(size: 11))
         .padding(.horizontal, 14)

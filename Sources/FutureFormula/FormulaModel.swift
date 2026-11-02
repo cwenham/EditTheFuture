@@ -343,28 +343,28 @@ public struct FormulaModel: AuthoredModel {
     /// other variable still holds the previous step's value while derivatives are evaluated.
     private func integrate(_ evaluator: inout Evaluator, over length: Double) throws {
         let odes = executable.odes
-        var y = odes.map { evaluator.current[$0.index] }
+        let count = odes.count
         let h = length / Double(Self.odeSubsteps)
-        func derivatives(at values: [Double]) throws -> [Double] {
-            for (ode, value) in zip(odes, values) { evaluator.current[ode.index] = value }
-            var result: [Double] = []
-            result.reserveCapacity(odes.count)
-            for ode in odes { result.append(try evaluator.evaluate(ode.expr)) }
-            return result
-        }
-        func offset(_ y: [Double], _ k: [Double], _ factor: Double) -> [Double] {
-            zip(y, k).map { $0 + factor * $1 }
+        // Buffers made once per step, not per stage: allocating at every stage cost more than the maths.
+        var y = odes.map { evaluator.current[$0.index] }
+        var k1 = [Double](repeating: 0, count: count), k2 = k1, k3 = k1, k4 = k1
+        // Sets the ODE variables to y + factor × k and writes their derivatives there into `into`.
+        func derivatives(offset k: [Double]?, by factor: Double, into result: inout [Double]) throws {
+            for i in 0..<count {
+                evaluator.current[odes[i].index] = k.map { y[i] + factor * $0[i] } ?? y[i]
+            }
+            for i in 0..<count { result[i] = try evaluator.evaluate(odes[i].expr) }
         }
         for _ in 0..<Self.odeSubsteps {
-            let k1 = try derivatives(at: y)
-            let k2 = try derivatives(at: offset(y, k1, h / 2))
-            let k3 = try derivatives(at: offset(y, k2, h / 2))
-            let k4 = try derivatives(at: offset(y, k3, h))
-            for i in y.indices {
+            try derivatives(offset: nil, by: 0, into: &k1)
+            try derivatives(offset: k1, by: h / 2, into: &k2)
+            try derivatives(offset: k2, by: h / 2, into: &k3)
+            try derivatives(offset: k3, by: h, into: &k4)
+            for i in 0..<count {
                 y[i] += h / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
             }
         }
-        for (ode, value) in zip(odes, y) { evaluator.current[ode.index] = value }
+        for i in 0..<count { evaluator.current[odes[i].index] = y[i] }
     }
 
     /// Values of the built-ins this formula uses (and only those) at the end of the step, by `Builtin` position.

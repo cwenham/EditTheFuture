@@ -80,6 +80,12 @@ public final class ScenarioStore {
             return false
         }
 
+        /// Whether it's a simulation module built into the app, with no text to edit (docs/DESIGN.md, 6.5).
+        public var isModule: Bool {
+            if case .module = kind { return true }
+            return false
+        }
+
         /// What the slot's text is: "formula" or "script".
         public var noun: String { isScript ? "script" : "formula" }
     }

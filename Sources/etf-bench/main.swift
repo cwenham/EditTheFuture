@@ -3,7 +3,9 @@ import AppKit
 import SwiftUI
 import FutureEngine
 import FutureFormula
+import FutureSimulation
 import FutureUI
+import SimulationCatalog
 
 // Measures the engine, the panel state and real SwiftUI frames while scrolling, zooming
 // and moving the cursor. Run with: swift run -c release etf-bench [section]
@@ -64,6 +66,15 @@ func benchEngine() throws {
         let ms = try time { for id in ids { try scenario.ensure(id, through: horizon) } }
         let steps = years * 12 * ids.count
         report("engine: compute \(years) years, 5 monthly slots", ms, String(format: "%.1f µs/step", ms * 1000 / Double(steps)))
+    }
+
+    // The Epidemic module (docs/DESIGN.md, 6.5): SEIR in Swift, a step a day.
+    for years in [10, 100] {
+        let scenario = Scenario(start: utc(2026))
+        let model = try ModuleCatalog.builtIn.makeModel(ModuleReference(id: "epidemic", version: 1), name: "Outbreak", values: [:])
+        let id = try scenario.addSlot("Outbreak", model: model)
+        let ms = try time { try scenario.ensure(id, through: utc(2026 + years)) }
+        report("engine: epidemic module (daily SEIR), \(years) years", ms, String(format: "%.1f µs/step", ms * 1000 / Double(years * 365)))
     }
 
     // Several independent slots: sequential versus spread across cores.

@@ -62,7 +62,8 @@ extension ScenarioStore {
 
     /// Checks the slot's draft (or formula) now and previews it. Typing does this after a pause.
     public func updateFormulaCheck(forSlotAt index: Int) {
-        guard isSlot(index) else { return }
+        // A module has no text to check (docs/DESIGN.md, 6.5).
+        guard isSlot(index), configs[index].kind.moduleText == nil else { return }
         let id = configs[index].id
         let text = formulaText(forSlotAt: index)
         let check = checkFormula(text, forSlotAt: index)

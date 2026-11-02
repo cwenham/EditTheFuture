@@ -107,6 +107,7 @@ Always simulate at the model's own step. To draw, downsample to the screen: keep
 - **Compiled formulas:** names are resolved to array positions at compile time (`Executable`), so evaluating a step hashes no strings and allocates no dictionaries.
 - **Flat history:** slot history is one array of numbers with a column per readable variable, instead of a dictionary per step.
 - **Event delivery:** generated events are found by binary search, and slot bookkeeping isn't copied each step.
+- **RK4 buffers:** differential equations reuse their stage buffers for the whole step instead of making new arrays at every stage, about a third faster. They still cost 32 evaluations of each derivative a step, so a model with a short step and several equations is better written as difference equations, or as a Swift module (6.5).
 
 **Across cores.** Slots split into groups joined by connections or event routes. Groups never read each other, so `Scenario.ensureAll(through:)` computes them concurrently with `DispatchQueue.concurrentPerform`. Each slot is its own object, so a group only writes to its own slots. Eight independent slots compute about 4× faster on the 8-core Xeon. The engine calls `ensureAll` for every fetch, so zooming out, or edits that recompute a lot, use every core.
 
@@ -254,7 +255,7 @@ The model interface is a small set of messages, not a Swift protocol, so the sam
 
 Hosts:
 
-1. **Built-in Swift models**: conform to `TimelineModel` directly.
+1. **Built-in Swift models**: simulation modules (6.5), each in a folder of its own, built against a small contract and conforming to `TimelineModel` through it.
 2. **Formula models**: typed into the UI (6.2).
 3. **Scripts**: Lua and Python, typed into the UI too (6.4).
 4. **WebAssembly**: the main cross-platform plug-in format. Run in WasmKit, a WebAssembly runtime written in Swift that ships with the Swift 6.2 toolchain. Sandboxed by default (no file or network access unless granted). Plug-ins can be written in Swift, Rust, C or anything else that compiles to WebAssembly. Interpreted, so slower than native. For heavy plug-ins on iOS, a hidden WKWebView offers JIT-compiled WebAssembly.
@@ -262,7 +263,7 @@ Hosts:
 6. **Remote hosts**: a server, or a paired device (section 7), using the same messages over the network.
 7. **FMUs (later, Mac)**: imported through the same interface.
 
-Formulas and scripts both conform to `AuthoredModel` (`TimelineModel` plus what the Slot tab shows), so the app builds, checks and edits them the same way.
+Formulas, scripts and modules all conform to `AuthoredModel` (`TimelineModel` plus what the Slot tab shows), so the app builds and shows them the same way, and edits the text of those that have one.
 
 Plug-ins never talk to each other. The scenario passes every input and event, which keeps them sandboxed and reproducible.
 
@@ -526,6 +527,45 @@ There's no iOS app yet, so packaging Python's standard library into one is still
 #### Remote runtimes (later)
 
 The headless ETF runtime (5.6, 7) will run whole slot groups on the user's Mac or a server, for iOS devices that need a library the app doesn't ship. A server for many users is wanted, but it's deferred until the app's main features are settled.
+
+### 6.5 Simulation modules (Swift)
+
+Begun in November 2026. A simulation too heavy for a formula or script, such as an epidemic spreading between 200 countries, is written in Swift and built into the app as a module.
+
+**Kept apart from everything else.** Each module is a SwiftPM target in a folder of its own under `Sources/Simulations/`, and depends only on `FutureEngine` and the contract, `FutureSimulation`. Its tests depend on the same three targets, and run with no app. SwiftPM alone doesn't stop a target importing another of the package's modules it doesn't depend on, once that module has been built, so two things check it:
+- `ModuleIsolationTests` reads every module's source on each `swift test`: modules may import only Foundation, `FutureEngine`, `FutureSimulation`, Accelerate and simd (the catalog also imports the modules), and may not use files, the network, settings, the environment or other processes (`FileManager`, `URLSession`, `Bundle`, `UserDefaults`, `ProcessInfo` and the like).
+- `swift build --explicit-target-dependency-import-check error` refuses any target importing a package module it doesn't depend on.
+
+**The contract** (`FutureSimulation`):
+
+| Part | What it is |
+|---|---|
+| `SimulationModule` | `id` (written in scenario.md, so it never changes), `version` (goes up when the model's meaning changes), `info` (name, summary, picker category, the slot's name, what the graph shows first), `needs` (data it asks for) and `makeModel(name:values:data:)`, which returns an `AuthoredModel`. |
+| `ModuleReference` | `epidemic@1`: a module and the version a scenario was made with. |
+| `DataNeed`, `DataTable`, `ModuleData` | What a module asks the app for by name ("countries"), and the tables the app hands over: rows with a key each, such as a country code, and columns of numbers. The module never knows where they came from. |
+| `ModuleDataSource` | Where the app gets modules' data: bundled with the app, a feed or a cache. The app supplies one, and tests supply their own. None of the modules so far needs data. |
+| `ModuleCatalog` | The modules an app offers, with its data source. It checks the app has the module, a version at least as new as the scenario's, and the data it needs, then builds the model. Older versions are run by the current one, so a module must keep its meaning for old scenarios or change its id. `SimulationCatalog` (`Sources/Simulations/Catalog`) lists the modules that come with the app. |
+| `NumericSimulation`, `NumericModel` | Most modules keep their state as a row of numbers: parameters, starting values, outputs, then hidden numbers (such as whether an event was emitted). A module declares them in a `SimulationShape` and writes only `start` and `step`. `NumericModel` does the rest, as `ScriptModel` does for scripts: `set` events, readings as corrections (4.6) and what they replaced (8.4), the slot's own values, Refit's copies, checkpoints and saved numbers for the cache. `Numbers` reads and writes by an `Int` enum that follows the shape, and `turnedTrue` emits an event once each time a condition becomes true, like a formula's `when`. |
+
+**In the app:** a module is `ModelKind.module(reference)`, listed in the model picker as Swift under its own category. Its slot has the module's parameters and starting values in the Slot tab, takes its events in the Event tab, and can be predicted with, refitted and overlaid like any slot. The Formula tab says it's built in and has no text to edit. In `scenario.md` the slot's heading names it, and it has no block (15.2):
+
+```markdown
+## 7. Outbreak [Epidemic, module: epidemic@1, shows: infectious]
+
+### Values
+- r0: 3
+```
+
+A slot that names a module the app hasn't got, or a newer version than the app has, is paused with the reason (5.9).
+
+**Epidemic** (`Sources/Simulations/Epidemic`) is the first module: an outbreak in one population (SEIR), from R₀, the incubation, the days a case is infectious and the population, a step a day. Each day 1/days of the incubating and infectious move on, and new cases are those who can still catch it times 1 − e^(−R₀ × infectious ÷ (illness × population)). So each case infects R₀ people, everyone is counted once, and an unchecked outbreak reaches the share the final-size equation gives. `imported` events add cases, `vaccinate` events make people immune, and `set` events change R₀ (a lockdown). It emits Peak and HerdImmunity. It began as a formula; written as a module it runs about 3× faster than a one-line daily formula.
+
+**Next** (each its own branch):
+1. **Fields:** values per region (each country's share infected), declared by a model and worked out at the cursor from the nearest checkpoint, so they're never stored for every step.
+2. **Backdrops** (`FutureVisuals`): visuals drawn faintly behind the focused graph that follow the cursor, starting with a world map. Any slot can drive one: a module's field, or a formula's values.
+3. **World travel:** an epidemic between about 200 countries joined by travel, which shades the world map. Its data comes through `ModuleDataSource`.
+4. **A sky map**, and **computer worms** (scanning worms, then ones that follow networks), which need the engine to stop computing a model once nothing changes.
+5. Moving scripts' own file lookups (the Libraries folder, Python's home) behind the same kind of interface.
 
 ## 7. Capability borrowing (paired devices)
 
@@ -1009,8 +1049,8 @@ select ts as date, temp_c as temp from readings where sensor = 'kitchen'
 | Part | How it's written |
 |---|---|
 | The scenario | The first heading: the scenario's name, then its settings in brackets. `start` is required. `seed` defaults to the engine's own. `currency` (`GBP`, `EUR`) is what its money is in, and defaults to US dollars. `rates` (`ecb`, `openexchangerates` or `none`) is where exchange rates come from, and defaults to `ecb`; `numbers` (`point-comma` and others) is how numbers are written, and defaults to each currency's own (5.11). |
-| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8); later banks aren't built yet. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it; it's left out for a model of the slot's own. Then `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`), `currency` (a currency of the slot's own) and `color` (hex). Without `shows` the graph draws the model's first output, without `as` it uses that variable's own `as`, and without `currency` it uses the scenario's. |
-| The model | The first fenced block in a model's language in the slot's section (not under Readings), exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). A part such as Values ends where the model's block starts. |
+| A slot | A second-level heading: the slot's position, its name, then its settings in brackets. Positions 1–8 are the first bank (5.8); later banks aren't built yet. A missing number is an empty slot. The first setting in the brackets is the model's name, as the library calls it; it's left out for a model of the slot's own. Then `module` (a simulation module built into the app and its version, `epidemic@1`; 6.5), `shows` (the variable the graph draws), `as` (`number`, `percent`, `currency` or `temperature`), `currency` (a currency of the slot's own) and `color` (hex). Without `shows` the graph draws the model's first output, without `as` it uses that variable's own `as`, and without `currency` it uses the scenario's. |
+| The model | The first fenced block in a model's language in the slot's section (not under Readings), exactly as the Formula tab shows it. The block's language gives the kind: `etf` for a formula (6.2), `lua` or `python` for a script (6.4). A part such as Values ends where the model's block starts. A slot with a `module` has no block; one there is kept as written, but not used, and changing a slot to a module takes its block away. |
 | The slot's own values | `### Values`: one `- name: value` line for each parameter or starting value that differs from the model's default (6.2). |
 | Events | `### Events`: one line per event or recurring rule. |
 | Readings | `### Readings`: a `csv` block, a link to a CSV file (15.3), a link to a SQLite database followed by a `sql` block (15.4), or a feed's line (15.8). |
@@ -1051,7 +1091,7 @@ Branches (5.7) aren't in the format yet. One possibility is a section that lists
 - New slots go before the first slot with a later number, else after the last slot. A slot keeps its place when it's renamed or moved, since it's matched by name, then by number.
 
 **Mistakes** are reported with their line, and only affect what they're in. The app shows the first in its footer, with how many more there are:
-- A slot without a model is paused, with the reason, as slots that can't run are paused now (5.9). The other slots run.
+- A slot without a model is paused, with the reason, as slots that can't run are paused now (5.9). So is one whose `module` the app hasn't got, or that's newer than the app's. The other slots run.
 - A slot heading with a number outside 1–8, a name that isn't one word, or a number or name already used, is kept as written but not used.
 - An event or value line that can't be read is skipped and listed, and kept as written.
 - Values and readings for variables the model doesn't have are listed.
@@ -1250,6 +1290,10 @@ Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
+  FutureSimulation/  the contract simulation modules are built against (6.5): SimulationModule, ModuleReference, data needs and tables, ModuleCatalog, NumericSimulation and NumericModel
+  Simulations/       one folder per simulation module, each its own target seeing only FutureEngine and FutureSimulation
+    Epidemic/        the Epidemic module (SEIR)
+    Catalog/         SimulationCatalog: the modules that come with the app
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
   FutureCommands/    Command vocabulary, questions and replies, DeviceFeedback, etf:// URL scheme, the etf tool's arguments and printing, the local socket and its caller check, MIDI decoding, profile and feedback
@@ -1265,6 +1309,8 @@ Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (n
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
+  FutureSimulationTests/ the module contract: NumericModel's events, readings and saved numbers, references, the catalog's checks, tables
+  Simulations/Epidemic/  the Epidemic module against the final-size equation, early growth, R₀ below 1, vaccination, imported cases, events, extremes and conservation
   FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, the etf tool's arguments, amounts and printing, the wire format, the socket (round trips, refused callers, stale sockets), MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results

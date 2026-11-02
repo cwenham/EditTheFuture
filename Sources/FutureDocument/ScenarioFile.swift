@@ -39,6 +39,9 @@ public struct SlotFile: Sendable, Equatable {
     public var language: ModelLanguage
     /// The model's text, exactly as the Formula tab shows it.
     public var source: String
+    /// A simulation module built into the app, with the version the scenario was made with:
+    /// `epidemic@1` (docs/DESIGN.md, 6.5). Such a slot has no block, and `source` is empty.
+    public var module: String?
     /// The variable the graph draws.
     public var shows: String?
     /// `number`, `percent`, `currency` or `temperature`.
@@ -58,7 +61,7 @@ public struct SlotFile: Sendable, Equatable {
     public var problem: String?
 
     public init(position: Int, name: String, model: String = "", language: ModelLanguage = .formula, source: String = "",
-                shows: String? = nil, format: String? = nil, currency: Currency? = nil, color: String? = nil,
+                module: String? = nil, shows: String? = nil, format: String? = nil, currency: Currency? = nil, color: String? = nil,
                 values: [String: Double] = [:],
                 percentNames: Set<String> = [], events: [Event] = [], rules: [RecurringEvent] = [],
                 readings: [ReadingSource] = [], problem: String? = nil) {
@@ -67,6 +70,7 @@ public struct SlotFile: Sendable, Equatable {
         self.model = model
         self.language = language
         self.source = source
+        self.module = module
         self.shows = shows
         self.format = format
         self.currency = currency

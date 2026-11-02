@@ -11,6 +11,14 @@ struct FormulaPane: View {
     @State private var insertCount = 0
 
     var body: some View {
+        if store.focused.isModule {
+            ModuleNote(slot: store.focused)
+        } else {
+            editor
+        }
+    }
+
+    @ViewBuilder private var editor: some View {
         let slot = store.focused
         let index = store.focusedIndex
         let text = store.formulaText(forSlotAt: index)
@@ -383,4 +391,28 @@ struct FlowLayout: Layout {
         }
     }
 }
+/// The Formula tab for a slot whose model is a simulation module built into the app: there's no
+/// text to edit, so it says what the module is and where its values are (docs/UI.md, 5.7).
+struct ModuleNote: View {
+    let slot: ScenarioStore.SlotInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(slot.color).frame(width: 10, height: 10)
+                Text(slot.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                Text(slot.summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+            }
+            Text("\(slot.model) is a simulation built into the app in Swift, so it has no formula to edit.")
+                .font(.system(size: 12))
+            Text("Its values are in the Slot tab, and events change it as they do any slot. "
+                 + "To write a model of your own instead, choose Change model… and a blank formula or script.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 #endif
