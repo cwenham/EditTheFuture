@@ -16,6 +16,7 @@ public struct SnapshotView: View {
                 Text(state.scenarioName).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.secondary)
                 RoundedRectangle(cornerRadius: 3).fill(state.focus.color).frame(width: 10, height: 10)
                 Text(state.focus.name).font(.system(size: 18, weight: .semibold))
+                OverlayLegend(overlays: state.timeline.overlays)
                 Spacer()
                 Text("\(DateText.monthYear(state.frame.start)) – \(DateText.monthYear(state.frame.end))")
                     .font(.system(size: 12))

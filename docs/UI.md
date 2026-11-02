@@ -82,6 +82,8 @@ The default color comes from the slot's position and matches the hardware LED fo
 | Event lines | A dim 1-point line down the focused graph, in the slot color at 22%, at each event a person added (one-off events and where recurring ones start), so the eye can match a diamond to where the line changes. Drawn behind the lines. Not for generated events or readings. Lines closer than 4 points to the last one are skipped. |
 | Drift | Warning pill attached to the now line. The projection from before the latest readings, dotted in `warning`, inside its 10–90% range filled in `warning` at 12% |
 
+**Changes of scale ease.** Each graph fits its values: the focused graph, a slot on its own scale over it (5.12) and every lane. When scrolling, zooming, focusing another slot or overlaying one changes the range, the graph, its axis labels, grid and cursor dots move to the new range over one second rather than jumping. The motion starts fast and slows down, so while scrolling, when the range changes at every step, it follows smoothly. A new range starts from where the graph is drawn now. Focusing a slot with another kind of value (degrees after dollars) changes the scale at once, since there's nothing to ease between. Snapshots show the ranges as they'll end.
+
 ## 3. Mac panel anatomy
 
 **Window:**
@@ -103,11 +105,11 @@ The default color comes from the slot's position and matches the hardware LED fo
   - **Show in Finder** and **Open Other…** (the same chooser as Open Scenario…).
 
   New, Duplicate and Edit open a small form in a popover that hangs from the name, with Cancel (Esc) and Create, Duplicate or Save (↩). It says what's wrong instead of saving: no name, square brackets in it (the heading's settings use them), a name another scenario's folder already has, or a seed that isn't a whole number. New and Duplicate open what they made. Renaming renames the scenario's folder too (DESIGN.md, 15.1).
-- Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol.
+- Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol. ⌘- or ⇧-clicking a chip draws that slot over the focused graph too (5.12); its chip is then outlined in its color.
 - Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider with a Blur checkbox beside it, and Hide.
 
 **Focus area:**
-- Slot name and model summary ("Market model · monthly · median with bands").
+- Slot name, the names of any slots drawn over the graph (5.12), and the model summary ("Market model · monthly · median with bands").
 - Toggles for Bands, Readings and Events.
 - The graph with its y axis.
 - A readout column: cursor date, value, what kind of value it is (Reading, Statement, Projection, Median projection, Before the start), and the 10–90% range when there is one. "Reading" shows while the cursor is within the slot's readings of the value the graph shows. Long values shrink to fit.
@@ -128,7 +130,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - a sparkline on the same time axis as the focused graph
 - the value at the cursor
 
-Clicking a lane's name focuses that slot.
+Clicking a lane's name focuses that slot. ⌘- or ⇧-clicking a lane's name or graph draws its slot over the focused graph instead (5.12), and the lane's name is then picked out, as a selected file is in Finder.
 
 **Cursor:** one vertical line through the graph and every lane, with a date flag on the time axis. Every readout shows values at the cursor.
 
@@ -153,6 +155,8 @@ Clicking a lane's name focuses that slot.
 | [ / ] | Previous or next bank |
 | Click the graph or events strip | Pick that date for the add-event pane and put the keyboard in its amount field |
 | Click a lane's graph | The same, and switch the pane (and focus) to that lane's slot |
+| ⌘-click a lane or a slot chip | Draw that slot over the focused graph, or take it off (5.12) |
+| ⇧-click a lane or a slot chip | Draw every slot from the focused one to that one over the graph (5.12) |
 | Click an event's diamond | Load the event into the add-event pane to change or delete it (5.4) |
 | E | Pick the cursor's date for the add-event pane |
 | Drag the projection | Drag the future (5.2) |
@@ -163,7 +167,7 @@ Clicking a lane's name focuses that slot.
 | ⌥⌘I | The side pane's Formula tab for the focused slot |
 | ⌘↩ | In the Formula tab: apply the formula |
 | ⌘L | Links view (planned) |
-| Right-click a slot chip | The chip's menu (5.7) |
+| Right-click or ⌃-click a slot chip | The chip's menu (5.7). ⌃-click is always a right-click: on a lane it does nothing |
 | Esc | Cancel the current gesture, then leave the field being edited, then hide the panel |
 
 **Where the wheel works:** the wheel and trackpad swipes move time only while the pointer is over the graphs and lanes. Anywhere else they scroll what's under the pointer, such as the formula editor, the insert palette or the Slot tab. Pinching zooms time anywhere in the panel.
@@ -454,6 +458,25 @@ This is how the app chooses and fits the model behind a slot's projection (DESIG
 
 **Command bar:** `refit` opens Refit for the focused slot, and `refit debt` for a slot by name or number. `predict` opens Predict with for the focused slot, and `predict data` for another. `predict data with trend line` opens it with that model selected, and `predict data with best` selects the best once the scores are in; ↩ then chooses it. Planned: sent from outside the app (`etf://`, the CLI), these will ask for confirmation, as other edits do.
 
+### 5.12 Overlaying slots
+
+Other slots can be drawn over the focused graph, each in its own color, to compare them on one plot. The clicks follow Finder's:
+
+- **⌘-click** a chip, or a lane's name or graph: draw that slot over the graph, or take it off. The chip's menu has the same choice: Overlay on the Graph or Take Off the Graph. ⌃-click stays a right-click, as on any Mac.
+- **⇧-click:** draw every slot from the focused one to the clicked one, by position, keeping any already shown.
+- **A plain click** focuses that slot alone and takes the others off. The chip menu's Show Only This Slot does the same.
+- **⌘-click on the focused slot** passes the focus to the slot added last, which takes over the axis, the events strip and the side pane. When it's the only line, nothing happens.
+- **Focusing a slot that's on the graph** another way (1–8, `focus`, clicking a lane's graph to add an event) swaps it with the focused one, so the same lines stay and only the axis changes. Focusing one that isn't shown keeps the others.
+
+**How they're drawn:**
+- Under the focused line, a little thinner (1.75 points) and at 90%, so the focused slot stays on top. While a target is being dragged (5.2), they fade like the focused line.
+- **The axis:** a slot with the same kind of value as the focused one (money in the same currency, temperatures, percents or plain numbers) shares its axis, and the axis widens to fit it. Any other slot is scaled to fit the graph on its own, says "own scale" after its name, and its help gives the scale: "Climate is a different kind of value, so it has its own scale: 0 °C at the bottom to 3 °C at the top".
+- **The legend:** after the focused slot's name, a short line in each overlaid slot's color and its name. The model summary gives way when they need the room.
+- **The cursor** puts a dot on each line in its color. Values are read from the lanes, which stay in place; an overlaid slot's lane name is picked out.
+- Events, readings, previews and drift belong to the focused slot only.
+- Snapshots (5.9) show the overlays and the legend.
+- The overlays aren't saved with the scenario. A slot that's removed is taken off.
+
 ## 6. Menu bar item
 
 - **Values:** the current scenario's values now and at a pinned date.
@@ -546,6 +569,9 @@ Sections:
   - Never assign an `@Observable` property its current value. Even setting `nil` to `nil` redraws every view that reads it.
   - **The pointer and the cursor** (5.1): the timeline's hover handler passes the pointer to `ScenarioStore.pointerHovered(at:fraction:)`, which decides whether the cursor follows. `show`, `jumpToNow` and `moveCursor` set `pointerHold` to wait: the next hover report says where the pointer rests, and reports from there are ignored until the pointer moves. The pointer's place is `NSEvent.mouseLocation` on screen, not the hover's own location, which also changes when the timeline shifts under a still pointer (the side pane is wider on some tabs).
   - The store never computes. It asks `ScenarioEngine` (an actor on its own thread) for the visible range and draws the latest results it has. Past the end of those results, lines stop and readouts show "…" until the rest arrives (DESIGN.md, 4.8).
+- **Easing scales** (2.4): `TimelineRows` keeps a `ScaleEasing`, which holds a motion for each graph's range (`ScaleKey`: the graph and the kind of value). Its body sets the targets from the timeline state. While any range is moving, a `TimelineView` behind the rows advances `ScaleEasing.time` once a frame, and a task stops it when the last motion ends. `time` is the easing's only observed property, and only the views that draw a range read it: those inside `Eased` (the y axis, the focused graph, the target's overlays, the cursor) and `LanePlot`. So, as with the cursor, only they redraw each frame. The store isn't involved: it still says only where each range is going.
+  - **Cost:** an eased frame took 3.7 ms of main-thread time in a release build on the 2017 iMac Pro, offscreen, with seven lanes: about a fifth of a core for the second a change lasts, and nothing at rest. Rebuilding every row each frame, as a first version did, took 9.4 ms.
+- **Overlays** (5.12): the store keeps `overlaidIDs`, slot ids in the order they were added, never the focused one. `select(index:click:)` takes a `SlotClick` (`.only`, `.toggle`, `.range`), which views read from the keys held (`SlotClick.current`, from `NSEvent.modifierFlags`). `timelineState()` gives each an `OverlayState` with the range it's drawn over (`ValueStyle.sharesAxis`), and `PlotSeries.domain` lets a line use its own range. `cursorState()` gives their values at the cursor in `overlayValues`, for the dots.
 - **Slots** (5.7):
   - The store keeps each slot as a plain record: its position, name, model source, its own values, display settings, events and rules. Every change to slots replaces the whole list, so undo puts the old list back.
   - Before anything reaches the engine, the store compiles each model and checks how the slots read each other (`Wiring.check`, DESIGN.md 5.9). Slots that can't run are paused, not dropped.
@@ -625,7 +651,7 @@ Sections:
 - A light theme. The translucent dark panel suits most use, but some people work in bright apps all day.
 - Comparing branches: ghost lines plus a difference lane? Needs its own artboard.
 - Showing more than one bank at once, perhaps a compact overview strip.
-- Axis units and mixed units when lanes are overlaid instead of stacked.
+- Overlaid slots on their own scale (5.12) have no axis labels; their values are read from their lanes. Would a second axis on the right, for one such slot, be worth the room?
 - Before the start, the lanes are empty until readings in the lanes are built (section 3). Should a lane show its slot's reading at the cursor there, rather than "—"?
 - The widest view is 80 years, so a feed going back to 1850 can't be seen all at once. Should the widest view reach to the earliest reading?
 - The pairing flow and "Lend to Mac" screens on iPhone.

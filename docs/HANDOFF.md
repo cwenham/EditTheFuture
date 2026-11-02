@@ -51,6 +51,7 @@ On the Mac it lives in a floating, translucent panel summoned with a hot-key. Sn
 | `97c1249` | Readings import: Import CSV… and Paste in the Slot tab, with an import sheet that guesses columns and previews; single readings from the command bar, `etf reading` and Shortcuts' Add Reading (DESIGN.md 14, UI.md 5.10). Merged from `feature/readings-import` with drift alerts. |
 | `ec1fe46` | Merged readings import beside drift alerts. |
 | "Add Drag the future" | Drag the future: a grab handle on the line after now, a target dragged to a round value, and ranked fixes in "Ways to get there", added as an undoable event (DESIGN.md 8.1, UI.md 5.2). From `feature/drag-the-future`. |
+| "Overlay slots on the focused graph" | ⌘-click and ⇧-click on chips and lanes draw other slots over the focused graph in their own colors, as Finder selects files; same-unit slots share the axis, others get their own scale. Changes of scale ease over a second (UI.md 2.4, 5.12). From `feature/overlay-slots`. |
 
 Milestones M0 and M1 from DESIGN.md section 16 are done. Of M2, App Intents and the command-line tool are done; the CoreMIDI adapter waits for the hardware. M3 is done, apart from sketching a whole curve for Drag the future, which waits for Apple Pencil (M5).
 
@@ -119,6 +120,8 @@ The Mac app, with scenarios saved as plain text (DESIGN.md, 15). The first launc
   - The wheel and swipes move time only over the graphs and lanes (`ScenarioStore.timelineFrame`). Elsewhere they scroll what's under the pointer, like the formula editor.
 - **Keys:** ← → (⇧ moves a year), T for now, E to add an event at the cursor, 1–8 to focus the slot at that position, ⌘I for the Slot tab, ⌥⌘I for the Formula tab, + − to zoom.
 - **Header:** slot chips, a Now button, Copy, opacity, and Hide.
+- **Changes of scale ease** over a second (UI.md, 2.4, `ScaleEasing`), for the focused graph, slots on their own scale over it, and the lanes.
+- **Overlaying slots** (UI.md, 5.12): ⌘-click and ⇧-click on chips and lanes draw other slots over the focused graph in their own colors, as Finder selects files. Same-unit slots share the axis; others get their own scale, marked in the legend. Checked in tests (`OverlayTests`) and an offscreen render. Not checked by hand in the app: the modifier keys come from `NSEvent.modifierFlags`, which synthetic test events don't set. ⌘-click was confirmed by the user. ⌃-click is left to the right-click (`SlotClick` is nil with ⌃).
 - **Slots and models** (UI.md, 5.7):
   - A library of 13 formula models in five categories (`ModelLibrary`). The demo scenario is built from it.
   - Click an empty chip to open the model picker: search, categories, a preview of each model's line, its parameters. Adds with defaults.

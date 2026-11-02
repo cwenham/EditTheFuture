@@ -7,6 +7,9 @@ struct PlotSeries {
     var color: Color
     var lineWidth: CGFloat
     var dash: [CGFloat] = []
+    /// The range this line is drawn over, when it isn't the plot's: a slot on its own scale over
+    /// the focused graph (docs/UI.md, 5.12).
+    var domain: ClosedRange<Double>? = nil
 }
 
 /// A vertical line at a date (now, the cursor, a new event's date).
@@ -83,13 +86,8 @@ struct PlotCanvas: View {
 
     var body: some View {
         Canvas { context, size in
-            let span = domain.upperBound - domain.lowerBound
             let x = { (date: Date) in frame.x(date, width: size.width) }
-            // Clamped so a value far outside the range still gives a point CoreGraphics can draw.
-            let y = { (value: Double) -> CGFloat in
-                let y = size.height * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span)))
-                return min(max(y, -size.height * 100), size.height * 101)
-            }
+            let y = Self.y(domain: domain, height: size.height)
             context.clip(to: Path(CGRect(origin: .zero, size: size)))
 
             if now < frame.end {
@@ -121,7 +119,8 @@ struct PlotCanvas: View {
                 context.fill(Self.path(for: band.points, x: x, y: y), with: .color(band.color))
             }
             for line in series {
-                let path = Self.path(for: line.samples, frame: frame, size: size, x: x, y: y)
+                let path = Self.path(for: line.samples, frame: frame, size: size, x: x,
+                                     y: line.domain.map { Self.y(domain: $0, height: size.height) } ?? y)
                 context.stroke(path, with: .color(line.color),
                                style: StrokeStyle(lineWidth: line.lineWidth, lineCap: .round, lineJoin: .round, dash: line.dash))
             }
@@ -160,6 +159,16 @@ struct PlotCanvas: View {
                 let d = marker.diameter
                 context.fill(Path(ellipseIn: CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)), with: .color(marker.color))
             }
+        }
+    }
+
+    /// Where a value goes down a plot `height` points tall showing `domain`. Clamped so a value far
+    /// outside the range still gives a point CoreGraphics can draw.
+    nonisolated static func y(domain: ClosedRange<Double>, height: CGFloat) -> (Double) -> CGFloat {
+        let span = domain.upperBound - domain.lowerBound
+        return { value in
+            let y = height * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span)))
+            return min(max(y, -height * 100), height * 101)
         }
     }
 

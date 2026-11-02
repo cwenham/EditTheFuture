@@ -3,7 +3,8 @@ import FutureEngine
 
 /// Click handlers for the timeline. Fractions are 0...1 across the plot width.
 struct TimelineInteractions {
-    var focusLane: (Int) -> Void
+    /// A click on a lane's name, or a ⌘- or ⇧-click on its graph (docs/UI.md, 5.12).
+    var selectSlot: (Int, SlotClick) -> Void
     /// A click on the focused graph or events strip picks the add-event pane's date.
     var pickDate: (Double) -> Void
     /// A click on a lane picks the date and switches the pane to that lane's slot.
@@ -34,10 +35,51 @@ enum CursorSource {
     }
 }
 
-/// The focused graph, time axis, events strip and lanes, laid out in aligned columns, with the
-/// cursor drawn on top by its own small views.
+/// The focused graph, time axis, events strip and lanes, with each graph's value range eased to
+/// a new one over a second rather than jumping (docs/UI.md, 2.4).
+///
+/// While a range eases, a clock ticks once a frame (`ScaleEasing.time`), and only the views that
+/// draw a range read it. A new view starts at its targets, so a snapshot is never caught part-way.
 struct TimelineRows: View {
     let timeline: TimelineState
+    let cursor: CursorSource
+    let plotWidth: CGFloat
+    var focusHeight: CGFloat = TimelineLayout.focusHeight
+    var interactions: TimelineInteractions?
+    @State private var easing = ScaleEasing()
+    /// Bumped when the last range arrives, so the clock stops.
+    @State private var settled = 0
+
+    var body: some View {
+        let _ = settled
+        let now = Date()
+        let _ = easing.retarget(timeline.scaleTargets, at: now)
+        let end = easing.end(after: now)
+        TimelineRowsContent(timeline: timeline, scales: easing, cursor: cursor, plotWidth: plotWidth,
+                            focusHeight: focusHeight, interactions: interactions)
+            .background {
+                if end != nil {
+                    TimelineView(.animation) { context in
+                        Color.clear.onChange(of: context.date, initial: true) { _, date in easing.advance(to: date) }
+                    }
+                }
+            }
+            .task(id: end) {
+                guard let end else { return }
+                try? await Task.sleep(for: .seconds(max(0, end.timeIntervalSinceNow)) + .milliseconds(20))
+                guard !Task.isCancelled else { return }
+                easing.advance(to: Date())  // the last frame, at the targets
+                settled += 1
+            }
+    }
+}
+
+/// The focused graph, time axis, events strip and lanes, laid out in aligned columns, with the
+/// cursor drawn on top by its own small views.
+struct TimelineRowsContent: View {
+    let timeline: TimelineState
+    /// Where each graph's range is part-way through a change of scale; read only inside `Eased`.
+    var scales: ScaleEasing?
     let cursor: CursorSource
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
@@ -46,18 +88,26 @@ struct TimelineRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: TimelineLayout.gap) {
-                YAxisLabels(ticks: timeline.focus.yTicks, domain: timeline.focus.yDomain, style: timeline.focus.style)
-                    .frame(width: TimelineLayout.labelWidth, height: focusHeight)
-                FocusChart(timeline: timeline)
+                Eased(timeline: timeline, scales: scales) { shown in
+                    YAxisLabels(ticks: shown.focus.yTicks, domain: shown.focus.yDomain, style: shown.focus.style)
+                }
+                .frame(width: TimelineLayout.labelWidth, height: focusHeight)
+                Eased(timeline: timeline, scales: scales) { FocusChart(timeline: $0) }
                     .frame(width: plotWidth, height: focusHeight)
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
                     .overlay {
-                        if let goal = timeline.focus.goal {
-                            GoalOverlay(goal: goal, frame: timeline.frame, domain: timeline.focus.yDomain, color: timeline.focus.color)
+                        if timeline.focus.goal != nil {
+                            Eased(timeline: timeline, scales: scales) { shown in
+                                if let goal = shown.focus.goal {
+                                    GoalOverlay(goal: goal, frame: shown.frame, domain: shown.focus.yDomain, color: shown.focus.color)
+                                }
+                            }
                         }
                     }
                     .overlay {
-                        if let interactions { GoalHandle(cursor: cursor, timeline: timeline, interactions: interactions) }
+                        if let interactions {
+                            Eased(timeline: timeline, scales: scales) { GoalHandle(cursor: cursor, timeline: $0, interactions: interactions) }
+                        }
                     }
                     .overlay(alignment: .topLeading) {
                         if let drift = timeline.focus.drift {
@@ -131,15 +181,17 @@ struct TimelineRows: View {
 
             VStack(spacing: TimelineLayout.laneSpacing) {
                 ForEach(timeline.lanes) { lane in
-                    LaneRow(lane: lane, timeline: timeline, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
+                    LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
                 }
             }
             .padding(.top, 8)
         }
         .overlay(alignment: .topLeading) {
-            CursorOverlay(cursor: cursor, frame: timeline.frame, plotWidth: plotWidth, focusHeight: focusHeight,
-                          focusDomain: timeline.focus.yDomain, focusColor: timeline.focus.color)
-                .allowsHitTesting(false)
+            Eased(timeline: timeline, scales: scales) { shown in
+                CursorOverlay(cursor: cursor, frame: shown.frame, plotWidth: plotWidth, focusHeight: focusHeight,
+                              focusDomain: shown.focus.yDomain, focusColor: shown.focus.color, overlays: shown.overlays)
+            }
+            .allowsHitTesting(false)
         }
     }
 }
@@ -152,7 +204,9 @@ struct YAxisLabels: View {
     var body: some View {
         Canvas { context, size in
             let span = domain.upperBound - domain.lowerBound
-            for tick in ticks {
+            // While the range eases to a new one, ticks for the new range can be outside it.
+            let slack = span * 0.01
+            for tick in ticks where tick >= domain.lowerBound - slack && tick <= domain.upperBound + slack {
                 let y = size.height * (1 - (tick - domain.lowerBound) / (span == 0 ? 1 : span))
                 let label = context.resolve(Text(style.axis(tick)).font(.system(size: 11)).monospacedDigit()
                     .foregroundStyle(Theme.secondary))
@@ -177,8 +231,13 @@ struct FocusChart: View {
 
     var body: some View {
         let focus = timeline.focus
+        // Other slots drawn over the graph go underneath, a little thinner (docs/UI.md, 5.12).
+        var series = timeline.overlays.map { overlay in
+            PlotSeries(samples: overlay.samples, color: overlay.color.opacity(focus.goal == nil ? 0.9 : 0.35), lineWidth: 1.75,
+                       domain: overlay.ownScale ? overlay.yDomain : nil)
+        }
         // While a target is set, the line as it is fades, so the proposed path stands out.
-        var series = [PlotSeries(samples: focus.samples, color: focus.color.opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2)]
+        series.append(PlotSeries(samples: focus.samples, color: focus.color.opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2))
         if !focus.preview.isEmpty {
             series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
         }
@@ -206,8 +265,17 @@ struct FocusChart: View {
                           readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
                           modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(focus.name) from \(DateText.monthYear(timeline.frame.start)) to \(DateText.monthYear(timeline.frame.end))")
+            .accessibilityLabel(Self.accessibilityName(timeline)
+                                + " from \(DateText.monthYear(timeline.frame.start)) to \(DateText.monthYear(timeline.frame.end))")
             .accessibilityHint("Click to pick this date for a new event")
+    }
+
+    /// "Savings", or "Savings, with Index fund and Climate".
+    static func accessibilityName(_ timeline: TimelineState) -> String {
+        let others = timeline.overlays.map(\.name)
+        guard !others.isEmpty else { return timeline.focus.name }
+        let list = others.count == 1 ? others[0] : others.dropLast().joined(separator: ", ") + " and " + others.last!
+        return timeline.focus.name + ", with " + list
     }
 }
 
@@ -222,6 +290,7 @@ struct CursorOverlay: View {
     let focusHeight: CGFloat
     let focusDomain: ClosedRange<Double>
     let focusColor: Color
+    var overlays: [OverlayState] = []
 
     var body: some View {
         let state = cursor.state
@@ -232,7 +301,15 @@ struct CursorOverlay: View {
                     .fill(Theme.cursorLine)
                     .frame(width: 1, height: geometry.size.height)
                     .offset(x: x - 0.5)
-                if let value = state.focusValue, let y = dotY(value) {
+                ForEach(overlays) { overlay in
+                    if let value = state.overlayValues[overlay.id], let y = dotY(value, domain: overlay.yDomain) {
+                        Circle()
+                            .fill(overlay.color)
+                            .frame(width: 7, height: 7)
+                            .offset(x: x - 3.5, y: y - 3.5)
+                    }
+                }
+                if let value = state.focusValue, let y = dotY(value, domain: focusDomain) {
                     Circle()
                         .fill(focusColor)
                         .frame(width: 8, height: 8)
@@ -250,9 +327,9 @@ struct CursorOverlay: View {
         }
     }
 
-    private func dotY(_ value: Double) -> CGFloat? {
-        let span = focusDomain.upperBound - focusDomain.lowerBound
-        let y = focusHeight * (1 - CGFloat((value - focusDomain.lowerBound) / (span == 0 ? 1 : span)))
+    private func dotY(_ value: Double, domain: ClosedRange<Double>) -> CGFloat? {
+        let span = domain.upperBound - domain.lowerBound
+        let y = focusHeight * (1 - CGFloat((value - domain.lowerBound) / (span == 0 ? 1 : span)))
         return y >= 0 && y <= focusHeight ? y : nil
     }
 }
@@ -524,6 +601,7 @@ extension View {
 struct LaneRow: View {
     let lane: LaneState
     let timeline: TimelineState
+    var scales: ScaleEasing?
     let cursor: CursorSource
     let plotWidth: CGFloat
     var interactions: TimelineInteractions?
@@ -531,7 +609,7 @@ struct LaneRow: View {
     var body: some View {
         HStack(spacing: TimelineLayout.gap) {
             Button {
-                interactions?.focusLane(lane.id)
+                if let click = SlotClick.current { interactions?.selectSlot(lane.id, click) }
             } label: {
                 HStack(spacing: 8) {
                     Text("\(lane.key)")
@@ -558,14 +636,23 @@ struct LaneRow: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
+                // Picked out while the slot is drawn over the graph, as a selected file is in Finder.
+                .background {
+                    if lane.overlaid {
+                        RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)).padding(-4)
+                    }
+                }
             }
             .buttonStyle(.plain)
             .frame(width: TimelineLayout.labelWidth)
+            .help("Focus \(lane.name). ⌘-click to \(lane.overlaid ? "take it off" : "draw it over") the graph, ⇧-click for a range.")
             .accessibilityLabel("Focus \(lane.name)")
+            .accessibilityAddTraits(lane.overlaid ? .isSelected : [])
+            .accessibilityAction(named: lane.overlaid ? "Take off the graph" : "Overlay on the graph") {
+                interactions?.selectSlot(lane.id, .toggle)
+            }
 
-            PlotCanvas(frame: timeline.frame, domain: lane.yDomain, now: timeline.now,
-                       series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
-                       rules: [PlotRule(date: timeline.now, color: Theme.nowLine)], modelStart: timeline.start)
+            LanePlot(lane: lane, timeline: timeline, scales: scales)
                 .frame(width: plotWidth, height: 36)
                 .overlay(alignment: .leading) {
                     if let reason = lane.pausedReason { PausedNote(reason: reason, large: false) }
@@ -575,7 +662,12 @@ struct LaneRow: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                    interactions?.pickDateOnLane(lane.id, Double(location.x / plotWidth))
+                    // ⌘ and ⇧ choose what the graph shows, as on the lane's name. ⌃ is a right-click.
+                    switch SlotClick.current {
+                    case .only: interactions?.pickDateOnLane(lane.id, Double(location.x / plotWidth))
+                    case let click?: interactions?.selectSlot(lane.id, click)
+                    case nil: break
+                    }
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(lane.name)
@@ -585,6 +677,20 @@ struct LaneRow: View {
                 .frame(width: TimelineLayout.valueWidth, alignment: .trailing)
         }
         .frame(height: TimelineLayout.laneRowHeight)
+    }
+}
+
+/// A lane's sparkline, on its range part-way through any change of scale. On its own so only it
+/// redraws on each frame of a change.
+struct LanePlot: View {
+    let lane: LaneState
+    let timeline: TimelineState
+    let scales: ScaleEasing?
+
+    var body: some View {
+        PlotCanvas(frame: timeline.frame, domain: lane.easedDomain(by: scales), now: timeline.now,
+                   series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
+                   rules: [PlotRule(date: timeline.now, color: Theme.nowLine)], modelStart: timeline.start)
     }
 }
 
