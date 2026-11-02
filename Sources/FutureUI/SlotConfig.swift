@@ -3,6 +3,8 @@ import FutureDocument
 import FutureEngine
 import FutureFormula
 import FutureScript
+import FutureSimulation
+import SimulationCatalog
 
 /// One slot as the store keeps it: everything needed to build it again. Changes to slots replace
 /// the whole list, so undo just puts the old list back.
@@ -41,6 +43,7 @@ struct SlotConfig: Sendable, Equatable {
         var key = formula + "\u{1}" + values
         // Reloading libraries makes scripts load again.
         if case .script(let language) = kind { key += "\u{1}\(language.rawValue)\u{1}\(ScriptPrograms.generation)" }
+        if case .module(let reference) = kind { key += "\u{1}module \(reference)" }
         return key
     }
 
@@ -58,6 +61,7 @@ struct SlotConfig: Sendable, Equatable {
         switch kind {
         case .formula: return try FormulaModel(source, name: name, values: values)
         case .script(let language): return try ScriptModel(source, language: language, name: name, values: values)
+        case .module(let reference): return try ModuleCatalog.builtIn.makeModel(reference, name: name, values: values)
         case .plugin, .remote: throw ScriptError("\(kind.title) models can't run yet.")
         }
     }

@@ -54,7 +54,7 @@ public enum ScenarioFormat {
 
     static func slotLines(_ slot: SlotFile) -> [String] {
         var out = [slotHeading(slot, extras: [])]
-        if !slot.source.isEmpty || slot.problem == nil {
+        if slot.module == nil, !slot.source.isEmpty || slot.problem == nil {
             out.append("")
             out += modelLines(slot)
         }
@@ -83,6 +83,7 @@ public enum ScenarioFormat {
     static func slotHeading(_ slot: SlotFile, extras: [Setting]) -> String {
         var settings: [Setting] = []
         if !slot.model.isEmpty { settings.append(Setting(key: slot.model, value: nil)) }
+        if let module = slot.module { settings.append(Setting(key: "module", value: module)) }
         if let shows = slot.shows { settings.append(Setting(key: "shows", value: shows)) }
         if let format = slot.format { settings.append(Setting(key: "as", value: format)) }
         if let currency = slot.currency { settings.append(Setting(key: "currency", value: currency.code)) }
@@ -440,6 +441,8 @@ private struct Reader {
             switch (setting.key.lowercased(), setting.value) {
             case (_, nil) where index == 0:
                 slot.model = setting.key
+            case ("module", let value?):
+                slot.module = value
             case ("shows", let value?):
                 slot.shows = value
             case ("as", let value?):
@@ -476,10 +479,12 @@ private struct Reader {
         }
         func headingEnd(_ offset: Int) -> Int { offset + 1 < partStarts.count ? partStarts[offset + 1].0 : range.upperBound }
 
-        // The model is the first block in a model's language, anywhere but under Readings.
+        // The model is the first block in a model's language, anywhere but under Readings. A module's
+        // slot has none: a block there is kept as written, but not used.
         let readingsParts = partStarts.enumerated().filter { $0.element.1 == .readings }.map { $0.element.0..<headingEnd($0.offset) }
         var otherBlock = false
-        for index in (range.lowerBound + 1)..<range.upperBound where !readingsParts.contains(where: { $0.contains(index) }) {
+        for index in (range.lowerBound + 1)..<range.upperBound where slot.module == nil
+            && !readingsParts.contains(where: { $0.contains(index) }) {
             guard case .fenceOpen(let language, let end) = kinds[index] else { continue }
             guard let modelLanguage = ModelLanguage(fence: language) else { otherBlock = true; continue }
             slot.language = modelLanguage
@@ -493,7 +498,7 @@ private struct Reader {
             if let model = layout.model, model.lowerBound > partStarts[offset].0, model.lowerBound < end { return model.lowerBound }
             return end
         }
-        if layout.model == nil {
+        if layout.model == nil && slot.module == nil {
             let message = otherBlock
                 ? "The model's block needs a language: ```etf for a formula, ```lua or ```python for a script."
                 : "This slot has no model. Add a ```etf, ```lua or ```python block under its heading."
@@ -725,21 +730,30 @@ private struct Writer {
     /// One slot's section, keeping each part that still says the same thing.
     func slot(_ new: SlotFile, over layout: SlotLayout, was old: SlotFile) -> [String] {
         var out: [String] = []
-        let headingSame = new.position == old.position && new.name == old.name && new.model == old.model
+        let headingSame = new.position == old.position && new.name == old.name && new.model == old.model && new.module == old.module
             && new.shows == old.shows && new.format == old.format && new.currency == old.currency && new.color == old.color
         out.append(headingSame ? lines[layout.lines.lowerBound] : ScenarioFormat.slotHeading(new, extras: layout.extras))
-        let modelSame = new.language == old.language && new.source == old.source
+        let modelSame = new.language == old.language && new.source == old.source && new.module == old.module
         let partStarts = Dictionary(uniqueKeysWithValues: layout.parts.map { ($0.value.lines.lowerBound, $0.key) })
 
         var index = layout.lines.lowerBound + 1
-        if layout.model == nil && !new.source.isEmpty {
+        if layout.model == nil && !new.source.isEmpty && new.module == nil {
             out.append("")
             out += ScenarioFormat.modelLines(new)
             if index < layout.lines.upperBound, !lines[index].trimmingCharacters(in: .whitespaces).isEmpty { out.append("") }
         }
         while index < layout.lines.upperBound {
             if let model = layout.model, index == model.lowerBound {
-                out += modelSame ? Array(lines[model]) : ScenarioFormat.modelLines(new)
+                // A slot changed to a module loses its block, and the blank line after it.
+                if modelSame {
+                    out += Array(lines[model])
+                } else if new.module == nil {
+                    out += ScenarioFormat.modelLines(new)
+                } else if model.upperBound < layout.lines.upperBound,
+                          lines[model.upperBound].trimmingCharacters(in: .whitespaces).isEmpty {
+                    index = model.upperBound + 1
+                    continue
+                }
                 index = model.upperBound
                 continue
             }

@@ -407,4 +407,67 @@ struct ScenarioFormatTests {
         #expect(Setting.split("Thing [open")?.label == "Thing [open")
         #expect(Setting.split("Plain")?.settings == [])
     }
+
+    // MARK: Simulation modules (DESIGN.md, 6.5)
+
+    static let moduleExample = """
+        # Outbreaks [start: 2026-01-01]
+
+        ## 1. Outbreak [Epidemic, module: epidemic@1, shows: infectious]
+
+        ### Values
+        - r0: 3
+
+        ### Events
+        - 2026-03-01 vaccinate [amount: 5000]
+
+        ## 2. Savings [Savings account, shows: balance]
+
+        ```etf
+        step 1 month
+        init balance = 100
+        balance[t] = balance[t-1]
+        ```
+
+        """
+
+    @Test("A module's slot names it in its heading, has no block, and reads and writes back as it was")
+    func moduleSlot() throws {
+        let parsed = try ScenarioFormat.parse(Self.moduleExample)
+        #expect(parsed.problems.isEmpty)
+        let slot = parsed.file.slots[0]
+        #expect(slot.module == "epidemic@1")
+        #expect(slot.model == "Epidemic")
+        #expect(slot.source.isEmpty)
+        #expect(slot.problem == nil)
+        #expect(slot.values == ["r0": 3])
+        #expect(slot.events.count == 1)
+        #expect(ScenarioFormat.text(for: parsed.file, over: parsed) == Self.moduleExample)
+
+        let fresh = ScenarioFormat.text(for: parsed.file)
+        #expect(fresh.contains("## 1. Outbreak [Epidemic, module: epidemic@1, shows: infectious]\n\n### Values"))
+        #expect(try ScenarioFormat.parse(fresh).file.slots[0].module == "epidemic@1")
+    }
+
+    @Test("Changing a slot to a module takes its block away, and back to a formula puts one in")
+    func moduleChange() throws {
+        let parsed = try ScenarioFormat.parse(Self.moduleExample)
+        var file = parsed.file
+        file.slots[1].module = "epidemic@1"
+        file.slots[1].model = "Epidemic"
+        file.slots[1].source = ""
+        let text = ScenarioFormat.text(for: file, over: parsed)
+        #expect(text.contains("## 2. Savings [Epidemic, module: epidemic@1, shows: balance]\n"))
+        #expect(!text.contains("```"))
+        #expect(try ScenarioFormat.parse(text).file.slots[1].problem == nil)
+
+        let changed = try ScenarioFormat.parse(text)
+        var back = changed.file
+        back.slots[0].module = nil
+        back.slots[0].model = ""
+        back.slots[0].source = "step 1 day\ninit x = 1\nx[t] = x[t-1]"
+        let again = ScenarioFormat.text(for: back, over: changed)
+        #expect(again.contains("## 1. Outbreak [shows: infectious]\n\n```etf\nstep 1 day"))
+        #expect(try ScenarioFormat.parse(again).file.slots[0].source == back.slots[0].source)
+    }
 }

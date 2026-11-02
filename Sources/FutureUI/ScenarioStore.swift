@@ -80,6 +80,12 @@ public final class ScenarioStore {
             return false
         }
 
+        /// Whether it's a simulation module built into the app, with no text to edit (docs/DESIGN.md, 6.5).
+        public var isModule: Bool {
+            if case .module = kind { return true }
+            return false
+        }
+
         /// What the slot's text is: "formula" or "script".
         public var noun: String { isScript ? "script" : "formula" }
     }
@@ -316,6 +322,10 @@ public final class ScenarioStore {
 
     /// The latest results from the engine. Everything on screen is drawn from these.
     var computed: ScenarioEngine.FetchResult?
+    /// Outputs each slot's results should bring besides the one its graph draws, by slot id
+    /// (docs/DESIGN.md, 4.9). Nothing asks for any yet; views that draw more than one value will.
+    /// A removed slot's are kept, so undo brings them back with it.
+    @ObservationIgnored private(set) var wantedOutputs: [UUID: Set<String>] = [:]
     /// Errors slots raised while computing, such as a script's, by slot.
     var slotFailures: [UUID: ScenarioEngine.SlotFailure] = [:]
     /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
@@ -542,7 +552,8 @@ public final class ScenarioStore {
             }
             self.computed = ScenarioEngine.FetchResult(
                 version: computed.version, generation: computed.generation, from: computed.from, through: computed.through,
-                series: pick(computed.series, empty: []), generated: pick(computed.generated, empty: []),
+                series: pick(computed.series, empty: []), outputs: pick(computed.outputs, empty: [:]),
+                generated: pick(computed.generated, empty: []),
                 computedThrough: computed.computedThrough, parameters: pick(computed.parameters, empty: [:]),
                 parameterDate: computed.parameterDate, failures: pick(computed.failures, empty: nil))
         }
@@ -1117,7 +1128,34 @@ public final class ScenarioStore {
         engine.latestGeneration.advance(to: fetchGeneration)
         requested = (revision, from, through)
         enqueue(.fetch(ScenarioEngine.FetchRequest(version: revision, generation: fetchGeneration, from: from,
-                                                   through: through, parameterDate: eventDraft.date)))
+                                                   through: through, parameterDate: eventDraft.date,
+                                                   outputs: slots.map { (wantedOutputs[$0.id] ?? []).sorted() })))
+    }
+
+    // MARK: Outputs (docs/DESIGN.md, 4.9)
+
+    /// Asks for these outputs of a slot with every fetch from now on, besides the one its graph
+    /// draws: both foxes and rabbits, say, or the infectious, recovered and vaccinated. Replaces
+    /// what was asked for before; an empty set asks for none. Names the model hasn't got are ignored.
+    public func want(outputs names: Set<String>, ofSlot id: UUID) {
+        let old = wantedOutputs[id] ?? []
+        guard names != old else { return }
+        wantedOutputs[id] = names.isEmpty ? nil : names
+        // Fetch again at once only for outputs the results don't have yet.
+        if !names.isSubset(of: old) { requestData(force: true) }
+    }
+
+    /// A slot's output over the range the latest results cover: the one its graph draws, or one asked
+    /// for with `want(outputs:ofSlot:)`. Nil until results bring it, or when the model hasn't got it.
+    public func outputSeries(_ name: String, ofSlotAt index: Int) -> [Sample]? {
+        guard slots.indices.contains(index), let computed else { return nil }
+        if name == slots[index].variable { return computed.series.indices.contains(index) ? computed.series[index] : nil }
+        return computed.outputs.indices.contains(index) ? computed.outputs[index][name] : nil
+    }
+
+    /// A slot's output at a date, from the latest results: its last point at or before it.
+    public func outputValue(_ name: String, ofSlotAt index: Int, at date: Date) -> Double? {
+        outputSeries(name, ofSlotAt: index).flatMap { Self.held($0, at: date) }
     }
 
     private func receive(_ result: ScenarioEngine.FetchResult) {

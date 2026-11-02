@@ -1,12 +1,16 @@
 import Foundation
 import FutureEngine
 import FutureScript
+import FutureSimulation
+import SimulationCatalog
 
-/// Where a model comes from (docs/DESIGN.md, 6.1). Formulas and scripts run so far.
+/// Where a model comes from (docs/DESIGN.md, 6.1). Formulas, scripts and modules run so far.
 public enum ModelKind: Hashable, Sendable {
     case formula
     /// A Lua or Python script (docs/DESIGN.md, 6.4).
     case script(ScriptLanguage)
+    /// A simulation written in Swift and built into the app (docs/DESIGN.md, 6.5).
+    case module(ModuleReference)
     /// A WebAssembly or native plug-in. Planned.
     case plugin
     /// A model on a server or a paired device. Planned.
@@ -16,6 +20,7 @@ public enum ModelKind: Hashable, Sendable {
         switch self {
         case .formula: return "Formula"
         case .script(let language): return language.title
+        case .module: return "Swift"
         case .plugin: return "Plug-in"
         case .remote: return "Remote"
         }
@@ -76,6 +81,16 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
                  position: position, values: values)
     }
 
+    /// A module as the picker lists it. Its format is that of the value it shows first.
+    init(module: any SimulationModule) {
+        let info = module.info
+        let quantity = (try? module.makeModel(name: info.slotName, values: [:], data: .none))?
+            .descriptor.variable(named: info.shows)?.quantity
+        self.init(id: module.id, name: info.name, category: Category(rawValue: info.category) ?? .growth,
+                  kind: .module(module.reference), summary: info.summary, slotName: info.slotName, formula: "",
+                  variable: info.shows, format: ValueFormat(quantity))
+    }
+
     /// What a slot's model is called when it starts from this template: blank ones are the slot's own.
     var slotModelName: String {
         guard category == .blank else { return name }
@@ -96,7 +111,13 @@ public enum ModelLibrary {
         radioactiveDecay, batteryCapacity,
         predatorPrey,
         blankFormula, blankLua,
-    ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : []) + ForecastModels.library
+    ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : []) + ForecastModels.library + modules
+
+    /// The simulation modules built into the app (docs/DESIGN.md, 6.5), as the picker lists them.
+    public static let modules: [ModelTemplate] = ModuleCatalog.builtIn.modules.map(ModelTemplate.init(module:))
+
+    /// The Epidemic module.
+    public static var epidemic: ModelTemplate { modules.first { $0.id == "epidemic" }! }
 
     public static func template(id: String) -> ModelTemplate? {
         all.first { $0.id == id }

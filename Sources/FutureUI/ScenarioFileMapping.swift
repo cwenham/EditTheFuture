@@ -2,6 +2,7 @@ import Foundation
 import FutureDocument
 import FutureEngine
 import FutureScript
+import FutureSimulation
 
 // The store's scenario as `scenario.md` says it, and back (docs/DESIGN.md, 15.2).
 
@@ -23,22 +24,28 @@ extension ScenarioDefinition {
 
 extension SlotSpec {
     init(file slot: SlotFile, readings: SlotReadings) {
-        let kind = ModelKind(slot.language)
+        var kind = ModelKind(slot.language)
+        var problem = slot.problem
+        if let text = slot.module {
+            if let reference = ModuleReference(text: text) {
+                kind = .module(reference)
+            } else {
+                problem = problem ?? "“\(text)” isn't a module. Write its name and version, like epidemic@1."
+            }
+        }
         // What the graph shows, and how: as the file says, else from the model.
         var variable = slot.shows ?? ""
         var format = slot.format.flatMap(ValueFormat.init(rawValue:))
-        if slot.problem == nil, variable.isEmpty || format == nil,
+        if problem == nil, variable.isEmpty || format == nil,
            let model = try? SlotConfig.model(kind: kind, source: slot.source, name: slot.name, values: slot.values) {
             let descriptor = model.descriptor
-            if variable.isEmpty {
-                variable = descriptor.variables.first { $0.causality == .output }?.name ?? descriptor.readable.first?.name ?? ""
-            }
+            if variable.isEmpty { variable = kind.usualVariable(of: descriptor) }
             if format == nil { format = ValueFormat(descriptor.variable(named: variable)?.quantity) }
         }
         self.init(name: slot.name, model: slot.model.isEmpty ? kind.customModelName : slot.model, kind: kind,
                   formula: slot.source, variable: variable, color: slot.color.map { "#" + $0 }, format: format ?? .number,
                   currency: slot.currency, position: slot.position, values: slot.values, events: slot.events, rules: slot.rules,
-                  readings: readings, problem: slot.problem)
+                  readings: readings, problem: problem)
         showsInFile = slot.shows != nil
         formatInFile = slot.format != nil
     }
@@ -65,8 +72,25 @@ extension ModelKind {
     var customModelName: String {
         switch self {
         case .script(let language): return "Custom \(language.title) script"
+        case .module(let reference): return ModuleCatalog.builtIn.module(id: reference.id)?.info.name ?? reference.id
         default: return "Custom formula"
         }
+    }
+
+    /// What the graph shows when scenario.md doesn't say: the value a module names, else the model's
+    /// first output.
+    func usualVariable(of descriptor: ModelDescriptor) -> String {
+        if case .module(let reference) = self, let shows = ModuleCatalog.builtIn.module(id: reference.id)?.info.shows,
+           descriptor.variable(named: shows) != nil {
+            return shows
+        }
+        return descriptor.variables.first { $0.causality == .output }?.name ?? descriptor.readable.first?.name ?? ""
+    }
+
+    /// The module a slot names in scenario.md (`module: epidemic@1`), or nil for formulas and scripts.
+    var moduleText: String? {
+        if case .module(let reference) = self { return reference.description }
+        return nil
     }
 }
 
@@ -93,16 +117,15 @@ extension ScenarioStore {
             let descriptor = descriptors.indices.contains(index) ? descriptors[index] : nil
             let percents = Set((descriptor?.variables ?? []).filter { $0.quantity == .percent }.map(\.name))
             // The model's own choices are left out unless the file wrote them.
-            let usualVariable = descriptor.map {
-                $0.variables.first { $0.causality == .output }?.name ?? $0.readable.first?.name ?? ""
-            }
+            let usualVariable = descriptor.map(config.kind.usualVariable(of:))
             let usualFormat = ValueFormat(descriptor?.variable(named: config.variable)?.quantity)
             let writeShows = !config.variable.isEmpty && (config.showsInFile || config.variable != usualVariable)
             let writeFormat = config.formatInFile || (descriptor != nil && config.format != usualFormat)
             let color = config.color.map { ($0.hasPrefix("#") ? String($0.dropFirst()) : $0).uppercased() }
             return SlotFile(position: config.position, name: config.name,
-                            model: config.model == config.kind.customModelName ? "" : config.model,
-                            language: config.kind.language, source: config.formula,
+                            // A module's name is always written, so the heading reads naturally.
+                            model: config.model == config.kind.customModelName && config.kind.moduleText == nil ? "" : config.model,
+                            language: config.kind.language, source: config.formula, module: config.kind.moduleText,
                             shows: writeShows ? config.variable : nil,
                             format: writeFormat ? config.format.rawValue : nil, currency: config.currency, color: color,
                             values: config.values, percentNames: percents, events: config.events, rules: config.rules,
@@ -204,6 +227,7 @@ extension ScenarioStore {
             hash.add(config.name)
             hash.add(config.kind.language.rawValue)
             hash.add(config.formula)
+            if let module = config.kind.moduleText { hash.add("module " + module) }
             if case .script(let language) = config.kind { hash.add(libraries[language] ?? "") }
             for (name, value) in config.values.sorted(by: { $0.key < $1.key }) {
                 hash.add(name)
