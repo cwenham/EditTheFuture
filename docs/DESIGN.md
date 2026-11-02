@@ -129,6 +129,15 @@ Always simulate at the model's own step. To draw, downsample to the screen: keep
 - **Pipelining inside a group:** an upstream slot works ahead while downstream slots catch up.
 - **Remote and WebAssembly models** run off the main actor, with the coordinator batching steps to them (5.6).
 
+### 4.9 Several outputs per slot
+
+Added in November 2026. A model can work out any number of values each step, and all of them are kept:
+
+- **Declaring them:** in a formula, every value it defines (`rabbits[t] = …`, `dfoxes/dt = …`); in a script, each `init` and `output`; in a module (6.5), its `state` and `outputs`. Foxes and rabbits, or the infectious, recovered and vaccinated, are outputs of one slot.
+- **In the engine:** a slot's history has a column for each parameter and output (4.3), so every output can be read at any point: `Scenario.value` and `Scenario.series` by name, other slots' formulas (`Rabbits.foxes`), readings and Refit.
+- **From outside:** the `etf` tool (`etf value foxes rabbits`, `etf data foxes rabbits`) and Shortcuts read any output by name, straight from the engine.
+- **In the panel's results:** each fetch brings the value a slot's graph draws, plus the outputs asked for with `ScenarioStore.want(outputs:ofSlot:)`, by slot id. `outputSeries(_:ofSlotAt:)` and `outputValue(_:ofSlotAt:at:)` read them from the latest results, which keep them with their slot when slots move. Only what's asked for is fetched, since every output of every slot would multiply each fetch's work. Names a model hasn't got are left out. Nothing in the panel asks for any yet: graphs of several outputs, and backdrops (6.5), will.
+
 ## 5. Multiple models (co-simulation)
 
 ### 5.1 The spreadsheet analogy

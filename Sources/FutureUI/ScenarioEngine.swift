@@ -60,6 +60,9 @@ actor ScenarioEngine {
         let through: Date
         /// When to read parameter values (the add-event pane's date).
         let parameterDate: Date
+        /// Other outputs to bring for each slot, by slot index, besides the one its graph draws
+        /// (docs/DESIGN.md, 4.9). Names a slot's model doesn't have are skipped.
+        var outputs: [[String]] = []
     }
 
     /// An error a slot's model raised while computing, such as a script's, and how far it got.
@@ -81,6 +84,8 @@ actor ScenarioEngine {
         let through: Date
         /// Each slot's drawn variable, by slot index.
         let series: [[Sample]]
+        /// The other outputs asked for, by slot index, then by name.
+        var outputs: [[String: [Sample]]] = []
         /// Each slot's generated events from `from` through `through`.
         let generated: [[Event]]
         let computedThrough: Date?
@@ -322,11 +327,13 @@ actor ScenarioEngine {
         let through = max(reached, request.from)
 
         var series: [[Sample]] = []
+        var outputs: [[String: [Sample]]] = []
         var generated: [[Event]] = []
         var parameters: [[String: Double]] = []
         for (index, id) in ids.enumerated() {
             guard let id, let setup = setups[index] else {
                 series.append([])
+                outputs.append([:])
                 generated.append([])
                 parameters.append([:])
                 continue
@@ -334,6 +341,15 @@ actor ScenarioEngine {
             // A slot that failed partway shows what it computed before the error.
             let reach = failures[setup.name] == nil ? through : min(through, scenario.computedThrough(id) ?? scenario.start)
             series.append((try? scenario.series(setup.variable, of: id, from: request.from, through: reach)) ?? [])
+            var extra: [String: [Sample]] = [:]
+            let wanted = request.outputs.indices.contains(index) ? request.outputs[index] : []
+            if !wanted.isEmpty {
+                let readable = Set(scenario.descriptor(of: id).readable.map(\.name))
+                for name in wanted where readable.contains(name) && extra[name] == nil {
+                    extra[name] = (try? scenario.series(name, of: id, from: request.from, through: reach)) ?? []
+                }
+            }
+            outputs.append(extra)
             let events = (try? scenario.generatedEvents(in: id, through: reach)) ?? []
             generated.append(events.filter { $0.time >= request.from })
             var values: [String: Double] = [:]
@@ -343,7 +359,7 @@ actor ScenarioEngine {
             parameters.append(values)
         }
         return FetchResult(version: request.version, generation: request.generation, from: request.from, through: through,
-                           series: series, generated: generated,
+                           series: series, outputs: outputs, generated: generated,
                            computedThrough: running.compactMap { scenario.computedThrough($0) }.min(),
                            parameters: parameters, parameterDate: request.parameterDate,
                            failures: setups.map { $0.flatMap { failures[$0.name] } })
