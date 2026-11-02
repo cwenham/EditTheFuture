@@ -54,7 +54,7 @@ public struct FocusedSlotState: Sendable {
     public let cutoff: Date?
     /// Where the draft event would go.
     public let draftDate: Date?
-    public let yDomain: ClosedRange<Double>
+    public var yDomain: ClosedRange<Double>
     public let yTicks: [Double]
     public let events: [EventMarker]
     /// The one-off event the add-event pane is editing, drawn picked out (docs/UI.md, 5.4).
@@ -87,7 +87,7 @@ public struct LaneState: Identifiable, Sendable {
     public let name: String
     public let color: Color
     public let samples: [Sample]
-    public let yDomain: ClosedRange<Double>
+    public var yDomain: ClosedRange<Double>
     /// What the slot reads from other slots, e.g. "← Climate.temp".
     public let reads: String?
     /// Why the slot can't run, shown in place of its sparkline.
@@ -96,6 +96,26 @@ public struct LaneState: Identifiable, Sendable {
     public let stoppedReason: String?
     /// What the slot's drift alert says, while it's drifting.
     public var drift: String? = nil
+    /// Whether the slot is drawn over the focused graph too (docs/UI.md, 5.12).
+    public var overlaid = false
+    /// How its values are written; a change of kind changes its scale at once rather than easing.
+    public var style = ValueStyle.number
+}
+
+/// Another slot drawn over the focused graph in its own colour (docs/UI.md, 5.12).
+public struct OverlayState: Identifiable, Sendable {
+    /// The slot's index.
+    public let id: Int
+    public let key: Int
+    public let name: String
+    public let color: Color
+    public let style: ValueStyle
+    public let samples: [Sample]
+    /// The range the line is drawn over: the focused graph's when they share an axis, else its own.
+    public var yDomain: ClosedRange<Double>
+    /// Whether its values are a different kind from the focused slot's (or money in another
+    /// currency), so it's drawn on its own scale, not against the axis.
+    public let ownScale: Bool
 }
 
 public struct YearTick: Identifiable, Hashable, Sendable {
@@ -113,9 +133,11 @@ public struct TimelineState: Sendable {
     /// The scenario's start, where the models' lines begin. Before it the graph shows only
     /// readings, shaded, with a dashed line at the start (docs/UI.md, 2.4).
     public let start: Date
-    public let focus: FocusedSlotState
-    public let lanes: [LaneState]
+    public var focus: FocusedSlotState
+    public var lanes: [LaneState]
     public let yearTicks: [YearTick]
+    /// Other slots drawn over the focused graph, in the order they were added.
+    public var overlays: [OverlayState] = []
 
     public var nowText: String { "Now · " + DateText.monthYear(now) }
     public var startText: String { "Start · " + DateText.monthYear(start) }
@@ -133,6 +155,8 @@ public struct CursorState: Sendable, Equatable {
     public let focusValue: Double?
     /// Each lane's value at the cursor, by slot index.
     public let laneValues: [Int: String]
+    /// Each overlaid slot's value at the cursor, by slot index, for the dots on their lines.
+    public var overlayValues: [Int: Double] = [:]
 }
 
 /// A complete picture of the panel, used for clipboard snapshots and tests.

@@ -174,6 +174,9 @@ public final class ScenarioStore {
     public private(set) var linkCount: Int
 
     public private(set) var focusedIndex = 0
+    /// Other slots drawn over the focused graph in their own colours, in the order they were added
+    /// (docs/UI.md, 5.12). Never holds the focused slot.
+    public internal(set) var overlaidIDs: [UUID] = []
     public private(set) var cursor: Date
     /// Whether the cursor follows the pointer, or waits for it to move after a command placed the
     /// cursor (`pointerHovered(at:fraction:)`).
@@ -552,6 +555,7 @@ public final class ScenarioStore {
         if linkCount != assembly.linkCount { linkCount = assembly.linkCount }
         let index = slots.firstIndex { $0.id == wanted } ?? min(focusedIndex, slots.count - 1)
         if focusedIndex != index { focusedIndex = index }
+        pruneOverlays()
         if let pendingRemoval, !slots.contains(where: { $0.id == pendingRemoval }) { self.pendingRemoval = nil }
         if case .change(let id) = picker, !slots.contains(where: { $0.id == id }) { picker = nil }
         retargetDraft(force: true)
@@ -585,6 +589,13 @@ public final class ScenarioStore {
         if let predict, predict.slot != slots[index].id { closePredict() }
         if let readingImport, readingImport.slot != slots[index].id { cancelReadingImport() }
         if let goal, goal.slot != slots[index].id { cancelGoal() }
+        // Focusing a slot that's drawn over the graph swaps it with the focused one, so the set of
+        // lines stays the same and only the axis changes.
+        if let at = overlaidIDs.firstIndex(of: slots[index].id) {
+            var list = overlaidIDs
+            if slots.indices.contains(focusedIndex) { list[at] = focused.id } else { list.remove(at: at) }
+            setOverlays(list)
+        }
         focusedIndex = index
         retargetDraft()
     }
@@ -1447,10 +1458,20 @@ public final class ScenarioStore {
         let lineRange = range(focusSamples), previewRange = range(preview), readingRange = range(readings)
         let heldRange = range(held?.line ?? [])
         let bandRange = range((driftMark?.band ?? []).flatMap { [Sample(time: $0.time, value: $0.low), Sample(time: $0.time, value: $0.high)] })
-        let lows: [Double] = [lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity,
+        // Slots drawn over the graph (docs/UI.md, 5.12). Those with the same kind of value share
+        // the axis, so it widens to fit them; the rest get a scale of their own.
+        let overlaid = overlaidIDs
+        let overlayLines = overlaid.compactMap { id in slots.firstIndex { $0.id == id } }.filter { $0 != focusedIndex }.map { index in
+            let list = samples(index)
+            return (index: index, samples: list, range: range(list), shares: slots[index].style.sharesAxis(with: focusSlot.style))
+        }
+        let shared = overlayLines.filter(\.shares).compactMap(\.range)
+        var lows: [Double] = [lineRange?.low ?? readingRange?.low ?? 0, previewRange?.low ?? .infinity,
                               readingRange?.low ?? .infinity, heldRange?.low ?? .infinity, bandRange?.low ?? .infinity]
-        let highs: [Double] = [lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity,
+        var highs: [Double] = [lineRange?.high ?? readingRange?.high ?? 1, previewRange?.high ?? -.infinity,
                                readingRange?.high ?? -.infinity, heldRange?.high ?? -.infinity, bandRange?.high ?? -.infinity]
+        lows += shared.map(\.low)
+        highs += shared.map(\.high)
         var low = lows.min()!, high = highs.max()!
         if let goalMark {
             low = min(low, goalMark.target)
@@ -1472,17 +1493,25 @@ public final class ScenarioStore {
             pausedReason: focusSlot.pausedReason, stoppedReason: slotFailures[focusSlot.id]?.text, drift: driftMark,
             goal: goalMark)
 
+        let overlays = overlayLines.map { line -> OverlayState in
+            let slot = slots[line.index]
+            let own = line.shares ? nil
+                : niceTicks(low: line.range?.low ?? 0, high: line.range?.high ?? 1, includeZero: slot.format == .currency).domain
+            return OverlayState(id: line.index, key: slot.key, name: slot.title, color: slot.color, style: slot.style,
+                                samples: line.samples, yDomain: own ?? domain, ownScale: !line.shares)
+        }
+
         let lanes = slots.enumerated().filter { $0.offset != focusedIndex }.map { index, slot -> LaneState in
             let list = samples(index)
             let bounds = range(list) ?? (0, 1)
             return LaneState(id: index, key: slot.key, name: slot.title, color: slot.color, samples: list,
                              yDomain: Self.laneDomain(low: bounds.low, high: bounds.high), reads: slot.reads,
                              pausedReason: slot.pausedReason, stoppedReason: slotFailures[slot.id]?.text,
-                             drift: drifts[slot.id]?.detail)
+                             drift: drifts[slot.id]?.detail, overlaid: overlaid.contains(slot.id), style: slot.style)
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, start: start, focus: focus, lanes: lanes,
-                             yearTicks: TimelineState.yearTicks(for: frame))
+                             yearTicks: TimelineState.yearTicks(for: frame), overlays: overlays)
     }
 
     /// The readout and lane values at the cursor, from the latest results. Shows "…" while the
@@ -1498,26 +1527,30 @@ public final class ScenarioStore {
         }
         let focusSlot = focused
         let focusValue = value(focusedIndex)
+        var overlayValues: [Int: Double] = [:]
+        for index in overlaidIndices {
+            if let value = value(index) { overlayValues[index] = value }
+        }
         var laneValues: [Int: String] = [:]
         for (index, slot) in slots.enumerated() where index != focusedIndex {
             laneValues[index] = slot.isPaused ? "Paused" : beforeStart ? "—" : ready ? (value(index).map(slot.style.full) ?? "—") : "…"
         }
         if focusSlot.isPaused {
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
-                               readoutNote: "Paused", focusValue: nil, laneValues: laneValues)
+                               readoutNote: "Paused", focusValue: nil, laneValues: laneValues, overlayValues: overlayValues)
         }
         if beforeStart {
             let reading = reading(ofSlotAt: focusedIndex, at: cursor)
             return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
                                readoutValue: reading.map(focusSlot.style.full) ?? "—",
                                readoutNote: reading == nil ? "Before the start" : "Reading",
-                               focusValue: reading, laneValues: laneValues)
+                               focusValue: reading, laneValues: laneValues, overlayValues: overlayValues)
         }
         let observed = readingSpan(ofSlotAt: focusedIndex).map { cursor >= $0.first && cursor <= $0.last } ?? false
         return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
                            readoutValue: ready ? (focusValue.map(focusSlot.style.full) ?? "—") : "…",
                            readoutNote: !ready ? "Computing" : observed ? "Reading" : cursor > now ? "Projection" : "Model",
-                           focusValue: focusValue, laneValues: laneValues)
+                           focusValue: focusValue, laneValues: laneValues, overlayValues: overlayValues)
     }
 
     /// "Computed through Dec 2045 · 5 of 8 slots · 1 link".

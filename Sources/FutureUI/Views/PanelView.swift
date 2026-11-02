@@ -101,13 +101,13 @@ struct TimelineArea: View {
     var body: some View {
         let timeline = store.timelineState()
         VStack(alignment: .leading, spacing: 8) {
-            FocusTitle(focus: timeline.focus)
+            FocusTitle(focus: timeline.focus, overlays: timeline.overlays)
             GeometryReader { geometry in
                 let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
                 let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height, laneCount: timeline.lanes.count)
                 TimelineRows(timeline: timeline, cursor: .live(store), plotWidth: plotWidth, focusHeight: focusHeight,
                              interactions: TimelineInteractions(
-                                focusLane: { store.focus(index: $0) },
+                                selectSlot: { store.select(index: $0, click: $1) },
                                 pickDate: { store.beginEvent(at: timeline.frame.date(atFraction: $0)) },
                                 pickDateOnLane: { index, fraction in
                                     store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
@@ -152,7 +152,8 @@ struct PanelHeader: View {
             HStack(spacing: 6) {
                 ForEach(0..<ScenarioStore.bankSize, id: \.self) { position in
                     if let index = store.slotIndex(atPosition: position) {
-                        SlotChip(store: store, slot: store.slots[index], selected: index == store.focusedIndex)
+                        SlotChip(store: store, slot: store.slots[index], selected: index == store.focusedIndex,
+                                 overlaid: store.isOverlaid(store.slots[index].id))
                     } else {
                         EmptySlotChip(store: store, position: position)
                     }
@@ -209,8 +210,8 @@ struct WindowDragArea: NSViewRepresentable {
 }
 #endif
 
-/// A slot's chip in the header: click to focus, right-click for its menu, drag onto another
-/// number to move it (docs/UI.md, 5.7).
+/// A slot's chip in the header: click to focus, ⌘- or ⇧-click to draw it over the graph too
+/// (docs/UI.md, 5.12), right-click for its menu, drag onto another number to move it (docs/UI.md, 5.7).
 ///
 /// It keeps the slot itself, not its index in `store.slots`: after a slot is removed, SwiftUI can
 /// draw a chip once more with what it was given before, and an old index can be past the end.
@@ -218,10 +219,12 @@ struct SlotChip: View {
     let store: ScenarioStore
     let slot: ScenarioStore.SlotInfo
     let selected: Bool
+    /// Drawn over the focused graph in its own colour.
+    var overlaid = false
 
     var body: some View {
         Button {
-            if let index = store.slotIndex(id: slot.id) { store.focus(index: index) }
+            if let index = store.slotIndex(id: slot.id), let click = SlotClick.current { store.select(index: index, click: click) }
         } label: {
             HStack(spacing: 7) {
                 Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
@@ -237,13 +240,19 @@ struct SlotChip: View {
             .padding(.leading, 8)
             .padding(.trailing, 10)
             .frame(height: 30)
-            .background(selected ? Color.white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? Color.white.opacity(0.22) : Theme.hairline))
+            .background(selected ? Color.white.opacity(0.10) : overlaid ? Color.white.opacity(0.06) : .clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(selected ? Color.white.opacity(0.22) : overlaid ? slot.color.opacity(0.6) : Theme.hairline))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .help(slot.pausedReason.map { "\(slot.title) is paused: \($0)" } ?? "Focus \(slot.title)  \(slot.key)")
+        .accessibilityAddTraits(selected || overlaid ? .isSelected : [])
+        .accessibilityAction(named: overlaid ? "Take off the graph" : "Overlay on the graph") {
+            if let index = store.slotIndex(id: slot.id) { store.select(index: index, click: .toggle) }
+        }
+        .help(slot.pausedReason.map { "\(slot.title) is paused: \($0)" }
+              ?? "Focus \(slot.title)  \(slot.key). ⌘-click to \(overlaid ? "take it off" : "draw it over") the graph, ⇧-click for a range.")
         .contextMenu { SlotMenu(store: store, slot: slot) }
         .draggable(slot.id.uuidString) {
             Text(slot.title).font(.system(size: 13, weight: .medium)).padding(6)
@@ -260,6 +269,15 @@ struct SlotMenu: View {
     let slot: ScenarioStore.SlotInfo
 
     var body: some View {
+        // What ⌘-click does, for those who'd rather use the menu (docs/UI.md, 5.12).
+        if store.focused.id != slot.id {
+            Button(store.isOverlaid(slot.id) ? "Take Off the Graph" : "Overlay on the Graph") {
+                act { store.select(index: $0, click: .toggle) }
+            }
+        } else if !store.overlaidIDs.isEmpty {
+            Button("Show Only This Slot") { act { store.select(index: $0, click: .only) } }
+        }
+        Divider()
         Button("Slot settings") { act { store.showSlotSettings(forSlotAt: $0) } }
         Button("Change model…") { store.openPicker(.change(slot: slot.id)) }
         Button("Duplicate") { act { store.duplicateSlot(at: $0) } }
@@ -369,15 +387,50 @@ struct IconButton: View {
 
 struct FocusTitle: View {
     let focus: FocusedSlotState
+    var overlays: [OverlayState] = []
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             RoundedRectangle(cornerRadius: 3).fill(focus.color).frame(width: 10, height: 10)
             Text(focus.name).font(.system(size: 18, weight: .semibold))
+            OverlayLegend(overlays: overlays)
+            // The summary gives way first when the slots drawn over the graph need the room.
             Text(focus.summary).font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1)
+                .layoutPriority(-1)
             Spacer(minLength: 0)
         }
         .frame(height: 32)
+    }
+}
+
+/// The slots drawn over the focused graph, each in its colour, after the focused slot's name
+/// (docs/UI.md, 5.12). A slot on its own scale says so, and its help gives the scale.
+struct OverlayLegend: View {
+    let overlays: [OverlayState]
+
+    var body: some View {
+        if !overlays.isEmpty {
+            HStack(spacing: 10) {
+                ForEach(overlays) { overlay in
+                    HStack(spacing: 5) {
+                        Capsule().fill(overlay.color).frame(width: 12, height: 3)
+                        Text(overlay.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        if overlay.ownScale {
+                            Text("own scale").font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                        }
+                    }
+                    .fixedSize()
+                    .help(Self.help(overlay))
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
+    static func help(_ overlay: OverlayState) -> String {
+        guard overlay.ownScale else { return "\(overlay.name), on the same axis" }
+        return "\(overlay.name) is a different kind of value, so it has its own scale: "
+            + "\(overlay.style.axis(overlay.yDomain.lowerBound)) at the bottom to \(overlay.style.axis(overlay.yDomain.upperBound)) at the top"
     }
 }
 
