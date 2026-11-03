@@ -542,7 +542,8 @@ public final class ScenarioStore {
                         summary: summary.joined(separator: " · "),
                         reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
                         eventKinds: model?.handledEventKinds ?? [], parameters: model?.parameterNames ?? [],
-                        parameterValues: parameters.map(value), startingValues: starting.map(value),
+                        parameterValues: SlotValue.markingPlaces(parameters.map(value)),
+                        startingValues: SlotValue.markingPlaces(starting.map(value)),
                         outputs: outputs, emits: descriptor?.emits ?? [], pausedReason: paused, backdrop: config.backdrop)
     }
 

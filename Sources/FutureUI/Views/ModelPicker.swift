@@ -361,8 +361,8 @@ struct TemplateFacts {
         return TemplateFacts(
             line: parts.joined(separator: " · "),
             reads: reads.isEmpty ? nil : reads.joined(separator: ", "),
-            parameters: descriptor.variables.filter { $0.causality == .parameter }.map(value),
-            starting: model.startingValueNames.compactMap { descriptor.variable(named: $0) }.map(value),
+            parameters: SlotValue.markingPlaces(descriptor.variables.filter { $0.causality == .parameter }.map(value)),
+            starting: SlotValue.markingPlaces(model.startingValueNames.compactMap { descriptor.variable(named: $0) }.map(value)),
             error: nil)
     }
 }
