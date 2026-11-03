@@ -22,6 +22,11 @@ public struct PanelView: View {
     @AppStorage("eventPaneSide") private var paneSideName = PaneSide.right.rawValue
     @State private var paneOffset = CGSize.zero
     @State private var paneDragLocation: CGPoint?
+    /// The widths the side pane was dragged to (SidePane.width(for:) until it is).
+    @AppStorage("sidePaneWidth") private var slotPaneWidth = Double(SidePane.width)
+    @AppStorage("formulaPaneWidth") private var formulaPaneWidth = Double(SidePane.formulaWidth)
+    /// While its edge is dragged: the width it had when the drag began.
+    @State private var resizeStart: CGFloat?
 
     /// Coordinate space of the area under the header, used to drag the add-event pane.
     static let bodySpace = "panelBody"
@@ -50,7 +55,7 @@ public struct PanelView: View {
                 .overlay {
                     if let location = paneDragLocation {
                         DockZones(highlighted: location.x < area.size.width / 2 ? .left : .right,
-                                  width: SidePane.width(for: store.sidePane))
+                                  width: paneWidth(areaWidth: area.size.width))
                     }
                 }
             }
@@ -66,6 +71,28 @@ public struct PanelView: View {
         .coordinateSpace(name: Self.panelSpace)
         .environment(\.colorScheme, .dark)
         .onChange(of: store.commandBarFocusRequest) { commandFocused = true }
+    }
+
+    /// The side pane's width for the tab it shows, kept within what fits.
+    private func paneWidth(areaWidth: CGFloat) -> CGFloat {
+        let stored = store.sidePane == .formula ? formulaPaneWidth : slotPaneWidth
+        return SidePane.clamped(CGFloat(stored), for: store.sidePane, area: areaWidth)
+    }
+
+    /// Dragging the pane's inner edge: toward the timeline widens it.
+    private func resize(side: PaneSide, areaWidth: CGFloat, by moved: CGFloat?) {
+        guard let moved else {
+            resizeStart = nil
+            return
+        }
+        let start = resizeStart ?? paneWidth(areaWidth: areaWidth)
+        if resizeStart == nil { resizeStart = start }
+        let width = Double(SidePane.clamped(start + (side == .right ? -moved : moved), for: store.sidePane, area: areaWidth).rounded())
+        if store.sidePane == .formula {
+            if formulaPaneWidth != width { formulaPaneWidth = width }
+        } else if slotPaneWidth != width {
+            slotPaneWidth = width
+        }
     }
 
     private func pane(side: PaneSide, areaWidth: CGFloat) -> some View {
@@ -86,6 +113,14 @@ public struct PanelView: View {
                     paneOffset = .zero
                 }
                 paneDragLocation = nil
+            },
+            width: paneWidth(areaWidth: areaWidth),
+            onResize: { resize(side: side, areaWidth: areaWidth, by: $0) },
+            onResetWidth: {
+                withAnimation(.snappy) {
+                    if store.sidePane == .formula { formulaPaneWidth = Double(SidePane.formulaWidth) }
+                    else { slotPaneWidth = Double(SidePane.width) }
+                }
             })
             .offset(paneOffset)
             .shadow(color: .black.opacity(paneDragLocation == nil ? 0 : 0.5), radius: 24, y: 12)

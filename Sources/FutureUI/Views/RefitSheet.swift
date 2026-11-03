@@ -19,7 +19,7 @@ struct RefitSheet: View {
                     Toggle(isOn: Binding(get: { choice.ticked },
                                          set: { store.setRefitChoice(choice.name, ticked: $0) })) {
                         HStack(spacing: 6) {
-                            Text(choice.label).font(.system(size: 13)).lineLimit(1).help(choice.name)
+                            Text(choice.label).font(.system(size: 13)).lineLimit(1).help(choice.help)
                             Spacer(minLength: 4)
                             Text(choice.current).font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.secondary)
                         }

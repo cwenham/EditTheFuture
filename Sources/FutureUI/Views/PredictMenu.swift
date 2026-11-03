@@ -146,7 +146,7 @@ struct PredictMenu: View {
                             Text("Fitted to every reading").font(.system(size: 11)).foregroundStyle(Theme.secondary)
                             ForEach(score.fitted) { value in
                                 HStack {
-                                    Text(value.label).font(.system(size: 12)).lineLimit(1)
+                                    Text(value.label).font(.system(size: 12)).lineLimit(1).help(value.help)
                                     Spacer(minLength: 6)
                                     Text(value.text).font(.system(size: 12, weight: .medium)).monospacedDigit()
                                 }

@@ -146,6 +146,16 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
     public let defaultValue: Double?
     /// Whether the slot has its own value in place of the default.
     public let isChanged: Bool
+    /// What it means, when the model says.
+    public var about: String? = nil
+
+    /// The hover text: its name in the formula, its whole label (which may be cut short beside the
+    /// field), and what it means: "scanRate: Scans a second per infected host" then a sentence.
+    public var help: String {
+        let title = label == name ? name : "\(name): \(label)"
+        guard let about, !about.isEmpty else { return title }
+        return title + "\n" + about
+    }
 
     /// The slider's range, when the model gives a usable one.
     public var sliderRange: ClosedRange<Double>? {

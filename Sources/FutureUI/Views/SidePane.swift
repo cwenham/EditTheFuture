@@ -8,13 +8,36 @@ struct SidePane: View {
     var onMoveToOtherSide: () -> Void
     var onDragChanged: (DragGesture.Value) -> Void
     var onDragEnded: (DragGesture.Value) -> Void
+    /// How wide it is: the Event and Slot tabs share one width, and the Formula tab has its own.
+    var width: CGFloat = SidePane.width
+    /// Dragging the edge that faces the timeline: how far the pointer has moved across, then nil when it's let go.
+    var onResize: (CGFloat?) -> Void = { _ in }
+    /// Double-clicking that edge.
+    var onResetWidth: () -> Void = {}
 
+    /// The widths it starts at. The Formula tab is wider, so lines of formula fit.
     static let width: CGFloat = 300
-    /// The Formula tab is wider, so lines of formula fit.
     static let formulaWidth: CGFloat = 480
+    /// The narrowest each can be dragged to.
+    static let minimumWidth: CGFloat = 260
+    static let minimumFormulaWidth: CGFloat = 360
+    /// How much room the timeline keeps beside it, however wide it's dragged.
+    static let timelineRoom: CGFloat = 420
 
     static func width(for tab: ScenarioStore.SidePaneTab) -> CGFloat {
         tab == .formula ? formulaWidth : width
+    }
+
+    static func minimumWidth(for tab: ScenarioStore.SidePaneTab) -> CGFloat {
+        tab == .formula ? minimumFormulaWidth : minimumWidth
+    }
+
+    /// A width kept between the tab's minimum and what leaves the timeline room in `area`.
+    static func clamped(_ width: CGFloat, for tab: ScenarioStore.SidePaneTab, area: CGFloat) -> CGFloat {
+        let low = minimumWidth(for: tab)
+        let high = max(low, area - PanelView.paneGap - timelineRoom)
+        guard width.isFinite else { return min(max(Self.width(for: tab), low), high) }
+        return min(max(width, low), high)
     }
 
     var body: some View {
@@ -36,10 +59,28 @@ struct SidePane: View {
             }
         }
         .padding(16)
-        .frame(width: Self.width(for: store.sidePane))
+        .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline))
+        .overlay(alignment: side == .right ? .leading : .trailing) { resizeEdge }
+    }
+
+    /// A strip along the edge that faces the timeline, half in the gap beside it: dragging it
+    /// changes the pane's width, and double-clicking puts the width back.
+    private var resizeEdge: some View {
+        Color.clear
+            .frame(width: 10)
+            .contentShape(Rectangle())
+            .offset(x: side == .right ? -5 : 5)
+            .resizePointer()
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(PanelView.panelSpace))
+                    .onChanged { onResize($0.translation.width) }
+                    .onEnded { _ in onResize(nil) })
+            .simultaneousGesture(TapGesture(count: 2).onEnded(onResetWidth))
+            .help("Drag to change the pane's width. Double-click to put it back.")
+            .accessibilityHidden(true)
     }
 
     /// The pane's title bar: the tabs, and a drag handle for docking it on the other side.
@@ -106,5 +147,22 @@ struct SidePane: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+extension View {
+    /// The left-right resize pointer, over an edge that can be dragged.
+    @ViewBuilder func resizePointer() -> some View {
+        #if os(macOS)
+        if #available(macOS 15, *) {
+            pointerStyle(.columnResize)
+        } else {
+            onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+        }
+        #else
+        self
+        #endif
     }
 }
