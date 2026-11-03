@@ -136,7 +136,16 @@ Added in November 2026. A model can work out any number of values each step, and
 - **Declaring them:** in a formula, every value it defines (`rabbits[t] = …`, `dfoxes/dt = …`); in a script, each `init` and `output`; in a module (6.5), its `state` and `outputs`. Foxes and rabbits, or the infectious, recovered and vaccinated, are outputs of one slot.
 - **In the engine:** a slot's history has a column for each parameter and output (4.3), so every output can be read at any point: `Scenario.value` and `Scenario.series` by name, other slots' formulas (`Rabbits.foxes`), readings and Refit.
 - **From outside:** the `etf` tool (`etf value foxes rabbits`, `etf data foxes rabbits`) and Shortcuts read any output by name, straight from the engine.
-- **In the panel's results:** each fetch brings the value a slot's graph draws, plus the outputs asked for with `ScenarioStore.want(outputs:ofSlot:)`, by slot id. `outputSeries(_:ofSlotAt:)` and `outputValue(_:ofSlotAt:at:)` read them from the latest results, which keep them with their slot when slots move. Only what's asked for is fetched, since every output of every slot would multiply each fetch's work. Names a model hasn't got are left out. Nothing in the panel asks for any yet: graphs of several outputs, and backdrops (6.5), will.
+- **In the panel's results:** each fetch brings the value a slot's graph draws, plus the outputs asked for with `ScenarioStore.want(outputs:ofSlot:)`, by slot id. `outputSeries(_:ofSlotAt:)` and `outputValue(_:ofSlotAt:at:)` read them from the latest results, which keep them with their slot when slots move. Only what's asked for is fetched, since every output of every slot would multiply each fetch's work. Names a model hasn't got are left out. Nothing in the panel asks for any yet: graphs of several outputs, and backdrops (6.5), will. For values per key that are too many to fetch for every step, see fields (4.10).
+
+### 4.10 Fields: values per key, at any point
+
+Added in November 2026. Some models have values for each of many things: each country's share infected, each star's brightness. Storing them for every step would cost too much (200 countries a day for a century is about 58 MB), so they're fields: a model works one out from its state when asked.
+
+- **Declaring them:** `ModelDescriptor.fields` lists `FieldDescriptor`s: a name, a label, the keys in order, a quantity, and a `geometry` saying what the keys are, so a visual knows how to draw them (`world/countries` for ISO 3166 alpha-3 codes, `groups` for named parts of a whole). `TimelineModel.field(_:of:)` works one out from a state: one value for each key. Models without fields return nil, which is the default. Modules declare them in their shape and implement `NumericSimulation.field(_:of:)` (6.5); formulas and scripts have none yet.
+- **Working one out:** `Scenario.field(_:of:at:)` gives the field at the slot's last point at or before a date, computing as needed. At the last computed point it uses the current state. Elsewhere it copies the newest checkpoint at or before the point and steps it forward, at most a checkpoint's interval (32 steps), with the same contexts the steps had: the same events, readings, inputs from other slots and random seeds. Models are deterministic (4.4), so it's the state the run had there. Computing a step and working out a field build their contexts with the same function (`stepContext(for:index:)`), so they can't drift apart. A field with the wrong number of values is the model's error.
+- **In the panel:** `ScenarioStore.watch(fields:ofSlot:)` names the fields to work out at the cursor, by slot id. The store asks the engine for them whenever the cursor moves or new results arrive (which covers edits), and a request still waiting is replaced by the newer one, so a sweeping cursor never queues up work. The engine keeps the fields it worked out by slot, name and point until the next edit, so a cursor resting within one step costs nothing. `fieldsAtCursor` holds the results, and `field(_:ofSlotAt:)` reads one; only views that draw fields read them, so nothing else redraws. Nothing in the panel watches one yet: backdrops (6.5) will.
+- **Epidemic** has one: `groups`, where everyone is, the share of the population in each group (susceptible, exposed, infectious, recovered, vaccinated), which adds up to 1.
 
 ## 5. Multiple models (co-simulation)
 
@@ -570,7 +579,7 @@ A slot that names a module the app hasn't got, or a newer version than the app h
 **Epidemic** (`Sources/Simulations/Epidemic`) is the first module: an outbreak in one population (SEIR), from R₀, the incubation, the days a case is infectious and the population, a step a day. Each day 1/days of the incubating and infectious move on, and new cases are those who can still catch it times 1 − e^(−R₀ × infectious ÷ (illness × population)). So each case infects R₀ people, everyone is counted once, and an unchecked outbreak reaches the share the final-size equation gives. `imported` events add cases, `vaccinate` events make people immune, and `set` events change R₀ (a lockdown). It emits Peak and HerdImmunity. It began as a formula; written as a module it runs about 3× faster than a one-line daily formula.
 
 **Next** (each its own branch):
-1. **Fields:** values per region (each country's share infected), declared by a model and worked out at the cursor from the nearest checkpoint, so they're never stored for every step.
+1. **Fields** are done (4.10): values per key, worked out at the cursor from the nearest checkpoint.
 2. **Backdrops** (`FutureVisuals`): visuals drawn faintly behind the focused graph that follow the cursor, starting with a world map. Any slot can drive one: a module's field, or a formula's values.
 3. **World travel:** an epidemic between about 200 countries joined by travel, which shades the world map. Its data comes through `ModuleDataSource`.
 4. **A sky map**, and **computer worms** (scanning worms, then ones that follow networks), which need the engine to stop computing a model once nothing changes.
@@ -1296,7 +1305,7 @@ docs/
   HANDOFF.md         where the work stands, for the next session
 Package.swift
 Sources/
-  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
+  FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, fields, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
   FutureSimulation/  the contract simulation modules are built against (6.5): SimulationModule, ModuleReference, data needs and tables, ModuleCatalog, NumericSimulation and NumericModel
@@ -1316,7 +1325,7 @@ Sources/
   etf-feed/          fetches a feed without the app and prints CSV
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
-  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares
+  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares, fields from checkpoints
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
   FutureSimulationTests/ the module contract: NumericModel's events, readings and saved numbers, references, the catalog's checks, tables
   Simulations/Epidemic/  the Epidemic module against the final-size equation, early growth, R₀ below 1, vaccination, imported cases, events, extremes and conservation

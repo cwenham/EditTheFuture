@@ -56,7 +56,12 @@ struct Epidemic: NumericSimulation {
         ],
         hidden: ["peaked", "immune"],
         handles: ["imported", "vaccinate"],
-        emits: ["Peak", "HerdImmunity"])
+        emits: ["Peak", "HerdImmunity"],
+        fields: [FieldDescriptor(name: "groups", label: "Where everyone is", geometry: "groups", keys: Epidemic.groups,
+                                 quantity: .percent)])
+
+    /// The groups everyone is in, in order through the outbreak.
+    static let groups = ["susceptible", "exposed", "infectious", "recovered", "vaccinated"]
 
     func start(_ s: inout Numbers, _ t: StepTime) {
         settle(&s)
@@ -89,6 +94,14 @@ struct Epidemic: NumericSimulation {
         if s.turnedTrue(s[N.infectious] < infectious, flag: N.peaked) { emitted.append(GeneratedEvent(kind: "Peak")) }
         if s.turnedTrue(s[N.r0] > 1 && s[N.rt] < 1, flag: N.immune) { emitted.append(GeneratedEvent(kind: "HerdImmunity")) }
         return emitted
+    }
+
+    /// The share of the population in each group, which adds up to 1.
+    func field(_ name: String, of s: Numbers) -> [Double]? {
+        guard name == "groups" else { return nil }
+        let population = s[N.population]
+        let counts = [s[N.susceptible], s[N.exposed], s[N.infectious], s[N.recovered], s[N.vaccinated]]
+        return counts.map { population > 0 ? $0 / population : 0 }
     }
 
     /// The values worked out from the groups: who can still catch it, everyone ever infected, and R now.

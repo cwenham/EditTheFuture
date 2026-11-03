@@ -183,7 +183,9 @@ public final class ScenarioStore {
     /// Other slots drawn over the focused graph in their own colours, in the order they were added
     /// (docs/UI.md, 5.12). Never holds the focused slot.
     public internal(set) var overlaidIDs: [UUID] = []
-    public private(set) var cursor: Date
+    public private(set) var cursor: Date {
+        didSet { if cursor != oldValue { requestFields() } }
+    }
     /// Whether the cursor follows the pointer, or waits for it to move after a command placed the
     /// cursor (`pointerHovered(at:fraction:)`).
     @ObservationIgnored private(set) var pointerHold = PointerHold.following
@@ -326,6 +328,10 @@ public final class ScenarioStore {
     /// (docs/DESIGN.md, 4.9). Nothing asks for any yet; views that draw more than one value will.
     /// A removed slot's are kept, so undo brings them back with it.
     @ObservationIgnored private(set) var wantedOutputs: [UUID: Set<String>] = [:]
+    /// Fields to work out at the cursor, by slot id (docs/DESIGN.md, 4.10). Kept for removed slots too.
+    @ObservationIgnored private(set) var watchedFields: [UUID: Set<String>] = [:]
+    /// The watched fields at the cursor, by slot id, then name. Only views that draw them read it.
+    public private(set) var fieldsAtCursor: [UUID: [String: FieldSample]] = [:]
     /// Errors slots raised while computing, such as a script's, by slot.
     var slotFailures: [UUID: ScenarioEngine.SlotFailure] = [:]
     /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
@@ -1053,8 +1059,10 @@ public final class ScenarioStore {
         case copyForFitting(slot: Int, reply: CheckedContinuation<ScenarioEngine.FittingCopy, Never>)
         case read(ScenarioEngine.ReadRequest, reply: CheckedContinuation<ScenarioEngine.ReadResult, Never>)
         case goal(ScenarioEngine.GoalRequest)
+        case fields(ScenarioEngine.FieldRequest)
 
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
+        var isFields: Bool { if case .fields = self { return true } else { return false } }
         var isGoal: Bool { if case .goal = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
         var previewOfModel: Bool? {
@@ -1081,6 +1089,7 @@ public final class ScenarioStore {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
         case .goal: engineQueue.removeAll(where: \.isGoal)
+        case .fields: engineQueue.removeAll(where: \.isFields)
         case .mutate, .find, .export, .copyForFitting, .read: break
         }
         engineQueue.append(operation)
@@ -1102,6 +1111,7 @@ public final class ScenarioStore {
             case .copyForFitting(let slot, let reply): reply.resume(returning: await engine.copyForFitting(slot: slot))
             case .read(let request, let reply): reply.resume(returning: await engine.read(request))
             case .goal(let request): receiveGoal(await engine.solveGoal(request))
+            case .fields(let request): receive(await engine.fields(request))
             }
         }
         isDraining = false
@@ -1158,12 +1168,59 @@ public final class ScenarioStore {
         outputSeries(name, ofSlotAt: index).flatMap { Self.held($0, at: date) }
     }
 
+    // MARK: Fields (docs/DESIGN.md, 4.10)
+
+    /// Works out these fields of a slot at the cursor from now on, again whenever the cursor moves
+    /// or results change: each country's share infected, say. Replaces what was watched before; an
+    /// empty set watches none. Names the model hasn't got are ignored.
+    public func watch(fields names: Set<String>, ofSlot id: UUID) {
+        guard names != watchedFields[id] ?? [] else { return }
+        watchedFields[id] = names.isEmpty ? nil : names
+        requestFields()
+    }
+
+    /// A watched field of a slot at the cursor, once the engine has worked it out: its values and
+    /// the point they're from, the slot's last at or before the cursor.
+    public func field(_ name: String, ofSlotAt index: Int) -> FieldSample? {
+        guard slots.indices.contains(index) else { return nil }
+        return fieldsAtCursor[slots[index].id]?[name]
+    }
+
+    /// Asks the engine for the watched fields at the cursor. A request still waiting is replaced.
+    func requestFields() {
+        var wanted: [Int: [String]] = [:]
+        for (index, slot) in slots.enumerated() {
+            if let names = watchedFields[slot.id], !slot.isPaused { wanted[index] = names.sorted() }
+        }
+        guard !wanted.isEmpty else {
+            if !fieldsAtCursor.isEmpty { fieldsAtCursor = [:] }
+            return
+        }
+        enqueue(.fields(ScenarioEngine.FieldRequest(version: revision, at: cursor, wanted: wanted)))
+    }
+
+    private func receive(_ result: ScenarioEngine.FieldResult) {
+        // An edit or a newer cursor came after this was asked for.
+        guard result.version == revision, result.at == cursor else { return }
+        var fields: [UUID: [String: FieldSample]] = [:]
+        for (index, named) in result.fields where slots.indices.contains(index) {
+            let id = slots[index].id
+            // Only what's still watched.
+            let watched = watchedFields[id] ?? []
+            let kept = named.filter { watched.contains($0.key) }
+            if !kept.isEmpty { fields[id] = kept }
+        }
+        if fields != fieldsAtCursor { fieldsAtCursor = fields }
+    }
+
     private func receive(_ result: ScenarioEngine.FetchResult) {
         guard result.version == revision else { return }  // an edit came after this was asked for
         if let computed, computed.version == revision, computed.generation > result.generation { return }
         computed = result
         noteFailures(result.failures)
         requestData()  // the view may have moved on, or this fetch was cut short
+        // Results changed, perhaps after an edit, so the fields at the cursor may have too.
+        if !watchedFields.isEmpty { requestFields() }
     }
 
     /// Keeps the errors slots raised while computing, and says so when one first appears.

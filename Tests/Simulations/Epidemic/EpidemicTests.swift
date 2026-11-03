@@ -130,4 +130,19 @@ struct EpidemicTests {
         #expect(shape.names == Epidemic.N.allCases.map { String(describing: $0) })
         #expect(EpidemicModule().reference.description == "epidemic@1")
     }
+
+    @Test("Where everyone is: each group's share, adding up to 1, at any date")
+    func groups() throws {
+        let (scenario, slot) = try outbreak()
+        scenario.add(Event(time: Self.date(2026, 2, 1), kind: "vaccinate", values: ["amount": 100_000]), to: slot)
+        for date in [Self.start, Self.date(2026, 4, 20), Self.date(2026, 7, 3), Self.date(2028, 1, 1)] {
+            let field = try #require(try scenario.field("groups", of: slot, at: date))
+            #expect(field.keys == ["susceptible", "exposed", "infectious", "recovered", "vaccinated"])
+            #expect(abs(field.values.reduce(0, +) - 1) < 1e-9)
+            for key in field.keys {
+                #expect(abs(field[key]! - (try scenario.value(key, of: slot, at: date)) / 1_000_000) < 1e-12, "\(key)")
+            }
+        }
+        #expect(try scenario.field("groups", of: slot, at: Self.date(2028, 1, 1))?["vaccinated"] == 0.1)
+    }
 }

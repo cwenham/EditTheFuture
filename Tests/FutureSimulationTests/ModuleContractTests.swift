@@ -17,7 +17,12 @@ private struct Grower: NumericSimulation {
         parameters: [.parameter("rate", 10, range: 0...100, label: "Growth a month")],
         state: [.value("level", 100, label: "Level")],
         outputs: [.value("double", label: "Twice the level")],
-        hidden: ["big"], handles: ["bump"], emits: ["Big"])
+        hidden: ["big"], handles: ["bump"], emits: ["Big"],
+        fields: [FieldDescriptor(name: "parts", geometry: "groups", keys: ["level", "double"])])
+
+    func field(_ name: String, of s: Numbers) -> [Double]? {
+        name == "parts" ? [s[N.level], s[N.double]] : nil
+    }
 
     func start(_ s: inout Numbers, _ t: StepTime) {
         s[N.double] = 2 * s[N.level]
@@ -159,5 +164,16 @@ struct ModuleContractTests {
         #expect(table.column("people") == [67e6, 68e6])
         #expect(table.column("short") == nil)
         #expect(table.column("missing") == nil)
+    }
+
+    @Test("Fields a module declares reach the engine, worked out from its numbers")
+    func fields() throws {
+        let model = NumericModel(Grower(), source: "grower@2", name: "Plant")
+        #expect(model.descriptor.fields.map(\.name) == ["parts"])
+        let scenario = Scenario(start: start)
+        let slot = try scenario.addSlot("Plant", model: model)
+        let field = try #require(try scenario.field("parts", of: slot, at: utc(2028, 7)))
+        #expect(field.values == [400, 800])
+        #expect(try scenario.field("other", of: slot, at: utc(2028, 7)) == nil)
     }
 }

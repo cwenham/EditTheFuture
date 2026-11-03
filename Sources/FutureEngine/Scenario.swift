@@ -45,6 +45,26 @@ public struct EventRoute: Hashable, Sendable, Codable {
 }
 
 /// One value at one communication point.
+/// A field's values at one point (docs/DESIGN.md, 4.10): one for each key, in order.
+public struct FieldSample: Hashable, Sendable {
+    public let name: String
+    public let time: Date
+    public let keys: [String]
+    public let values: [Double]
+
+    public init(name: String, time: Date, keys: [String], values: [Double]) {
+        self.name = name
+        self.time = time
+        self.keys = keys
+        self.values = values
+    }
+
+    /// The value for a key, or nil when the field hasn't got it.
+    public subscript(key: String) -> Double? {
+        keys.firstIndex(of: key).map { values[$0] }
+    }
+}
+
 public struct Sample: Hashable, Sendable {
     public let time: Date
     public let value: Double
@@ -432,6 +452,41 @@ public final class Scenario {
         return samples
     }
 
+    /// A field at the slot's last point at or before `date` (docs/DESIGN.md, 4.10), computing as
+    /// needed. Worked out from the nearest checkpoint, at most a checkpoint's interval of steps
+    /// away, so fields aren't stored for every step. nil when the model has no such field.
+    public func field(_ name: String, of slot: SlotID, at date: Date) throws -> FieldSample? {
+        guard date >= start else { throw EngineError.dateBeforeStart }
+        try ensure(slot, through: date)
+        let runner = slots[slot.rawValue].runner
+        guard let descriptor = runner.descriptor.field(named: name),
+              let index = runner.lastComputedIndex(atOrBefore: date) else { return nil }
+        let values: [Double]?
+        do {
+            values = try runner.field(name, at: index) { try stepContext(for: slot, index: $0) }
+        } catch let error as EngineError {
+            throw error
+        } catch let error as ModelFailure {
+            throw error
+        } catch {
+            throw EngineError.modelFailed(slot: self.name(of: slot), message: String(describing: error))
+        }
+        guard let values else { return nil }
+        guard values.count == descriptor.keys.count else {
+            throw EngineError.modelFailed(slot: self.name(of: slot),
+                                          message: "its field \(name) has \(values.count) values for \(descriptor.keys.count) keys")
+        }
+        return FieldSample(name: name, time: runner.times[index], keys: descriptor.keys, values: values)
+    }
+
+    /// The time of the slot's last point at or before `date`, computing as needed.
+    public func pointTime(of slot: SlotID, atOrBefore date: Date) throws -> Date? {
+        guard date >= start else { throw EngineError.dateBeforeStart }
+        try ensure(slot, through: date)
+        let runner = slots[slot.rawValue].runner
+        return runner.lastComputedIndex(atOrBefore: date).map { runner.times[$0] }
+    }
+
     /// Time of the last point computed so far, or nil if nothing is computed.
     public func computedThrough(_ slot: SlotID) -> Date? {
         slots[slot.rawValue].runner.times.last
@@ -663,6 +718,47 @@ public final class Scenario {
 
         let runner = slots[id.rawValue].runner
         let index = runner.computedCount
+        let context = try stepContext(for: id, index: index)
+        let window = context.window, readings = context.readings, slotSeed = context.seed
+        let began = DispatchTime.now().uptimeNanoseconds
+        defer {
+            slot.stepSeconds += Double(DispatchTime.now().uptimeNanoseconds &- began) / 1e9
+            slot.timedSteps += 1
+        }
+        do {
+            if index == 0 {
+                try runner.computeStart(context)
+            } else {
+                var replaced: [Prediction] = []
+                let generated = try runner.computeStep(context, replaced: &replaced)
+                if recordsMisses {
+                    for prediction in replaced {
+                        // The latest reading in the step is the one that replaced it.
+                        guard let reading = readings.last(where: { $0.variable == prediction.variable }) else { continue }
+                        slots[id.rawValue].misses.append(Miss(time: window.upper, variable: prediction.variable,
+                                                              reading: reading.value, predicted: prediction.value))
+                    }
+                }
+                let stamped = generated.enumerated().map { offset, event in
+                    Event(id: UUID.deterministic(slotSeed ^ UInt64(index), UInt64(offset)), time: window.upper,
+                          kind: event.kind, values: event.values, source: .generated(slot: slotName))
+                }
+                slots[id.rawValue].generated.append(contentsOf: stamped)
+            }
+        } catch let error as EngineError {
+            throw error
+        } catch let error as ModelFailure {
+            throw error
+        } catch {
+            throw EngineError.modelFailed(slot: slotName, message: String(describing: error))
+        }
+    }
+
+    /// What a slot's step at `index` receives: inputs from the slots it reads, its events and readings.
+    /// Computing a step and working out a field from a checkpoint both use it, so they agree.
+    private func stepContext(for id: SlotID, index: Int) throws -> StepContext {
+        let runner = slots[id.rawValue].runner
+        let slotName = slots[id.rawValue].name
         let window = StepWindow.forStep(index, on: runner.grid)
 
         var inputs: [String: Double] = [:]
@@ -718,42 +814,9 @@ public final class Scenario {
             readings.reverse()
         }
 
-        let slotSeed = seed(for: id)
-        let context = StepContext(index: index, window: window, stepRate: runner.descriptor.stepRate,
-                                  scenarioStart: origin, inputs: inputs, events: events, readings: readings,
-                                  seed: slotSeed, calendar: calendar)
-        let began = DispatchTime.now().uptimeNanoseconds
-        defer {
-            slot.stepSeconds += Double(DispatchTime.now().uptimeNanoseconds &- began) / 1e9
-            slot.timedSteps += 1
-        }
-        do {
-            if index == 0 {
-                try runner.computeStart(context)
-            } else {
-                var replaced: [Prediction] = []
-                let generated = try runner.computeStep(context, replaced: &replaced)
-                if recordsMisses {
-                    for prediction in replaced {
-                        // The latest reading in the step is the one that replaced it.
-                        guard let reading = readings.last(where: { $0.variable == prediction.variable }) else { continue }
-                        slots[id.rawValue].misses.append(Miss(time: window.upper, variable: prediction.variable,
-                                                              reading: reading.value, predicted: prediction.value))
-                    }
-                }
-                let stamped = generated.enumerated().map { offset, event in
-                    Event(id: UUID.deterministic(slotSeed ^ UInt64(index), UInt64(offset)), time: window.upper,
-                          kind: event.kind, values: event.values, source: .generated(slot: slotName))
-                }
-                slots[id.rawValue].generated.append(contentsOf: stamped)
-            }
-        } catch let error as EngineError {
-            throw error
-        } catch let error as ModelFailure {
-            throw error
-        } catch {
-            throw EngineError.modelFailed(slot: slotName, message: String(describing: error))
-        }
+        return StepContext(index: index, window: window, stepRate: runner.descriptor.stepRate,
+                           scenarioStart: origin, inputs: inputs, events: events, readings: readings,
+                           seed: seed(for: id), calendar: calendar)
     }
 
     private func inputValue(_ connection: Connection, index: Int, grid: TimeGrid) throws -> Double {
