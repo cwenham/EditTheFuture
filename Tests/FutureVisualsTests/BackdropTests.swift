@@ -151,4 +151,56 @@ struct BackdropTests {
         }
         _ = render(PartsBackdrop(), BackdropInput(color: .orange), size: CGSize(width: 900, height: 400))
     }
+
+    @Test("The star table reads whole: the bright stars, brightest first, on the sky")
+    func stars() {
+        let stars = BrightStars.all
+        #expect(stars.count == 2887)
+        #expect(stars.first?.number == 2491)
+        #expect(stars.first.map { abs($0.magnitude + 1.46) < 0.01 } == true)
+        #expect(Set(stars.map(\.number)).count == stars.count)
+        #expect(stars.allSatisfy { $0.rightAscension >= 0 && $0.rightAscension < 360 && abs($0.declination) <= 90 && $0.magnitude <= 5.5 })
+        #expect(zip(stars, stars.dropFirst()).allSatisfy { $0.magnitude <= $1.magnitude })
+        let polaris = stars.first { $0.number == 424 }
+        #expect(polaris.map { $0.declination > 89 } == true)
+        #expect(polaris?.key == "HR 424")
+    }
+
+    @Test("The Hammer projection: an oval twice as wide as high, 0h in the middle, east to the left, north up")
+    func hammer() {
+        let middle = Hammer.unit(rightAscension: 0, declination: 0)
+        #expect(abs(middle.x - 1) < 1e-9 && abs(middle.y - 0.5) < 1e-9)
+        #expect(Hammer.unit(rightAscension: 90, declination: 0).x < 1)
+        #expect(Hammer.unit(rightAscension: 270, declination: 0).x > 1)
+        #expect(abs(Hammer.unit(rightAscension: 123, declination: 90).y) < 1e-9)
+        for ra in stride(from: 0.0, through: 360, by: 15) {
+            for dec in stride(from: -90.0, through: 90, by: 15) {
+                let p = Hammer.unit(rightAscension: ra, declination: dec)
+                #expect(p.x >= -1e-9 && p.x <= 2 + 1e-9 && p.y >= -1e-9 && p.y <= 1 + 1e-9)
+            }
+        }
+        #expect(SkyMapBackdrop.radius(magnitude: -1.46) > SkyMapBackdrop.radius(magnitude: 5.5))
+        #expect(SkyMapBackdrop.tint(colorIndex: -0.2).blue > SkyMapBackdrop.tint(colorIndex: 1.6).blue)
+        #expect(BackdropCatalog.builtIn.drawing(geometry: "sky/stars").map(\.id) == ["sky-map"])
+        #expect(SkyMapBackdrop().pointNames.map(\.1) == ["rightAscension", "ra"])
+    }
+
+    @Test("The sky map draws its stars at any size, and a point where it should be")
+    @MainActor
+    func skyMapDraws() throws {
+        let size = CGSize(width: 820, height: 400)
+        let input = BackdropInput(point: GeoPoint(latitude: 20, longitude: 300), color: .white)
+        let rect = SkyMapBackdrop.mapRect(in: size)
+        let unit = Hammer.unit(rightAscension: 300, declination: 20)
+        let x = Int(rect.minX + unit.x * rect.height), y = Int(rect.minY + unit.y * rect.height)
+        let lit = try #require(render(SkyMapBackdrop(), input, size: size))
+        let dark = try #require(render(SkyMapBackdrop(), BackdropInput(color: .white), size: size))
+        func red(_ image: (bytes: [UInt8], width: Int)) -> Int { Int(image.bytes[(y * image.width + x) * 4]) }
+        #expect(red(lit) > red(dark) + 100)
+        for tiny in [CGSize(width: 0, height: 0), CGSize(width: 3, height: 1)] { _ = render(SkyMapBackdrop(), input, size: tiny) }
+        // Sirius shows, brighter than empty sky.
+        let sirius = Hammer.unit(rightAscension: 101.287, declination: -16.716)
+        let sx = Int(rect.minX + sirius.x * rect.height), sy = Int(rect.minY + sirius.y * rect.height)
+        #expect(Int(dark.bytes[(sy * dark.width + sx) * 4]) > 40)
+    }
 }

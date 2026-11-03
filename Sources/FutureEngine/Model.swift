@@ -121,6 +121,9 @@ public enum Capability: String, Hashable, Sendable, Codable {
     case closedForm
     case stochastic
     case assimilatesReadings
+    /// It can settle (`TimelineModel.isSettled`, docs/DESIGN.md 4.11), so the engine asks after each
+    /// step. Models without it are never asked.
+    case settles
 }
 
 /// How a field's values are best shaded: a hint from the model to visuals (docs/DESIGN.md, 4.10).
@@ -313,6 +316,13 @@ public protocol TimelineModel: Sendable {
     /// A field from `descriptor.fields`, worked out from the state: one value for each of its keys,
     /// in order (docs/DESIGN.md, 4.10). nil when the model has no such field, which is the default.
     func field(_ name: String, of state: State) -> [Double]?
+
+    /// Whether the model has settled (docs/DESIGN.md, 4.11): from this state, a step with no events,
+    /// readings or inputs changes nothing, emits nothing, and leaves every value as it is. The engine
+    /// then skips steps until one has something in it, so a model with a short step can run over a
+    /// long timeline. Only asked of models whose descriptor has the `settles` capability. The default
+    /// is never.
+    func isSettled(_ state: State) -> Bool
 }
 
 extension TimelineModel {
@@ -330,6 +340,8 @@ extension TimelineModel {
     public func restoredState(from numbers: [Double]) -> State? { nil }
 
     public func field(_ name: String, of state: State) -> [Double]? { nil }
+
+    public func isSettled(_ state: State) -> Bool { false }
 }
 
 /// A small, fast random generator (SplitMix64) seeded per slot and step.

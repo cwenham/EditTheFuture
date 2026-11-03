@@ -13,6 +13,9 @@ public protocol Backdrop: Sendable {
     var geometries: Set<String> { get }
     /// Whether it can place a point from a latitude and a longitude, such as a ship's position.
     var drawsPoints: Bool { get }
+    /// The names of the two values it places a point from, as a slot might call them: latitude and
+    /// longitude on Earth, declination and right ascension on the sky (both in degrees).
+    var pointNames: [(String, String)] { get }
 
     /// Draws what follows the cursor into a context the size of the focused graph. The layer is
     /// drawn under the graph's lines and grid, so it should be faint.
@@ -26,6 +29,8 @@ public protocol Backdrop: Sendable {
 
 extension Backdrop {
     public var drawsPoints: Bool { false }
+
+    public var pointNames: [(String, String)] { drawsPoints ? [("latitude", "longitude"), ("lat", "lon")] : [] }
 
     public func drawBase(color: Color, in context: inout GraphicsContext, size: CGSize) {}
 
@@ -112,7 +117,7 @@ public struct BackdropCatalog: Sendable {
         self.backdrops = backdrops
     }
 
-    public static let builtIn = BackdropCatalog([WorldMapBackdrop(), PartsBackdrop()])
+    public static let builtIn = BackdropCatalog([WorldMapBackdrop(), SkyMapBackdrop(), PartsBackdrop()])
 
     public func backdrop(id: String) -> (any Backdrop)? {
         backdrops.first { $0.id == id }

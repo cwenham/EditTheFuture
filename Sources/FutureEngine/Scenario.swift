@@ -380,8 +380,8 @@ public final class Scenario {
     public func restore(_ history: SlotHistory, to slot: SlotID) -> Bool {
         try? prepareIfNeeded()
         let record = slots[slot.rawValue]
-        guard history.count > record.runner.computedCount, record.runner.restore(history) else { return false }
-        let last = record.runner.times.last ?? start
+        guard let next = record.runner.nextIndex, history.count > next, record.runner.restore(history) else { return false }
+        let last = record.runner.lastTime ?? start
         record.generated = history.generated.filter { $0.time <= last }
         record.stepSeconds = history.secondsPerStep * Double(history.count)
         record.timedSteps = history.secondsPerStep > 0 ? history.count : 0
@@ -395,7 +395,7 @@ public final class Scenario {
 
     /// Roughly how long the slot's results so far took to compute.
     public func computeCost(of slot: SlotID) -> Double {
-        (slots[slot.rawValue].secondsPerStep ?? 0) * Double(slots[slot.rawValue].runner.computedCount)
+        (slots[slot.rawValue].secondsPerStep ?? 0) * Double(slots[slot.rawValue].runner.storedCount)
     }
 
     /// The slot's misses up to `date`, computing as needed. Empty unless `recordsMisses` was on
@@ -431,25 +431,18 @@ public final class Scenario {
         try ensure(slot, through: date)
         let runner = slots[slot.rawValue].runner
         let index = runner.lastComputedIndex(atOrBefore: date)!
-        guard let column = runner.column(of: variable) else { return Sample(time: runner.times[index], value: .nan) }
-        return Sample(time: runner.times[index], value: runner.value(at: index, column: column))
+        guard let column = runner.column(of: variable) else { return Sample(time: runner.time(at: index), value: .nan) }
+        return Sample(time: runner.time(at: index), value: runner.value(at: index, column: column))
     }
 
-    /// The variable at every communication point from `from` through `through`.
+    /// The variable at every communication point from `from` through `through`. While a settled slot
+    /// holds (4.11), only the first and last points of each held stretch come.
     public func series(_ variable: String, of slot: SlotID, from: Date, through: Date) throws -> [Sample] {
         try checkReadable(variable, of: slot)
         try ensure(slot, through: through)
         let runner = slots[slot.rawValue].runner
-        guard let high = runner.lastComputedIndex(atOrBefore: through) else { return [] }
-        var low = runner.lastComputedIndex(atOrBefore: from) ?? 0
-        if runner.times[low] < from { low += 1 }
-        guard low <= high, let column = runner.column(of: variable) else { return [] }
-        var samples: [Sample] = []
-        samples.reserveCapacity(high - low + 1)
-        for index in low...high {
-            samples.append(Sample(time: runner.times[index], value: runner.value(at: index, column: column)))
-        }
-        return samples
+        guard let column = runner.column(of: variable) else { return [] }
+        return runner.samples(column: column, from: from, through: through)
     }
 
     /// A field at the slot's last point at or before `date` (docs/DESIGN.md, 4.10), computing as
@@ -476,7 +469,7 @@ public final class Scenario {
             throw EngineError.modelFailed(slot: self.name(of: slot),
                                           message: "its field \(name) has \(values.count) values for \(descriptor.keys.count) keys")
         }
-        return FieldSample(name: name, time: runner.times[index], keys: descriptor.keys, values: values)
+        return FieldSample(name: name, time: runner.time(at: index), keys: descriptor.keys, values: values)
     }
 
     /// The time of the slot's last point at or before `date`, computing as needed.
@@ -484,12 +477,18 @@ public final class Scenario {
         guard date >= start else { throw EngineError.dateBeforeStart }
         try ensure(slot, through: date)
         let runner = slots[slot.rawValue].runner
-        return runner.lastComputedIndex(atOrBefore: date).map { runner.times[$0] }
+        return runner.lastComputedIndex(atOrBefore: date).map(runner.time(at:))
     }
 
-    /// Time of the last point computed so far, or nil if nothing is computed.
+    /// How many of the slot's points were computed and stored; held points aren't (4.11).
+    func storedCount(of slot: SlotID) -> Int {
+        slots[slot.rawValue].runner.storedCount
+    }
+
+    /// Time of the last point computed so far, or nil if nothing is computed. `Date.distantFuture`
+    /// when a settled slot holds for ever (4.11).
     public func computedThrough(_ slot: SlotID) -> Date? {
-        slots[slot.rawValue].runner.times.last
+        slots[slot.rawValue].runner.lastTime
     }
 
     // MARK: Invalidation
@@ -653,7 +652,7 @@ public final class Scenario {
         let pending = groups.filter { group in
             group.contains { id in
                 let runner = slots[id.rawValue].runner
-                return runner.grid.point(runner.computedCount) <= date
+                return runner.nextIndex.map { runner.grid.point($0) <= date } ?? false
             }
         }
         if pending.count <= 1 {
@@ -702,9 +701,46 @@ public final class Scenario {
     private func advance(_ slot: SlotID, through date: Date) throws {
         guard date >= start else { return }
         let runner = slots[slot.rawValue].runner
-        while runner.grid.point(runner.computedCount) <= date {
+        while let next = runner.nextIndex, runner.grid.point(next) <= date {
+            // A settled model skips to the next step with something in it, or holds for ever (4.11).
+            if next > 0, runner.isSettled, canSettle(slot) {
+                let eventful = nextEventfulIndex(slot, from: next)
+                if eventful.map({ $0 > next }) ?? true {
+                    runner.hold(until: eventful)
+                    continue
+                }
+            }
             try computeNext(slot)
         }
+    }
+
+    /// Whether a slot may skip steps while its model is settled: only when nothing outside it changes
+    /// what a step gets, so not when it reads other slots or receives their events.
+    private func canSettle(_ slot: SlotID) -> Bool {
+        !connections.contains { $0.to == slot } && !eventRoutes.contains { $0.to == slot }
+            && slots[slot.rawValue].runner.descriptor.inputs.isEmpty
+    }
+
+    /// The first step at or after `next` with one of the slot's own events, repeating events or
+    /// readings in it, or nil when there are none.
+    private func nextEventfulIndex(_ slot: SlotID, from next: Int) -> Int? {
+        let record = slots[slot.rawValue]
+        let grid = record.runner.grid
+        let after = grid.point(next - 1)
+        // The first step's window includes the start for events, not for readings.
+        let firstStep = next == 1
+        var earliest: Date?
+        func consider(_ time: Date) {
+            if earliest.map({ time < $0 }) ?? true { earliest = time }
+        }
+        for event in record.authored where event.time > after || (firstStep && event.time == after) { consider(event.time) }
+        for rule in record.recurring {
+            if let time = rule.firstOccurrence(after: after, including: firstStep, calendar: calendar) { consider(time) }
+        }
+        let readings = record.readings
+        let reading = Self.firstIndex(in: readings, after: after)
+        if reading < readings.count { consider(readings[reading].time) }
+        return earliest.map { max(next, grid.firstIndex(atOrAfter: $0)) }
     }
 
     private func computeNext(_ id: SlotID) throws {
@@ -717,7 +753,7 @@ public final class Scenario {
         defer { slot.isStepping = false }
 
         let runner = slots[id.rawValue].runner
-        let index = runner.computedCount
+        guard let index = runner.nextIndex else { return }
         let context = try stepContext(for: id, index: index)
         let window = context.window, readings = context.readings, slotSeed = context.seed
         let began = DispatchTime.now().uptimeNanoseconds

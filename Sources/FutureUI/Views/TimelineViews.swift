@@ -507,13 +507,13 @@ struct TimeAxis: View {
 
     var body: some View {
         Canvas { context, size in
-            for tick in timeline.yearTicks {
+            for tick in timeline.timeTicks {
                 let label = context.resolve(Text(tick.label).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary))
                 context.draw(label, at: CGPoint(x: timeline.frame.x(tick.date, width: size.width), y: size.height / 2))
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Years " + timeline.yearTicks.map(\.label).joined(separator: ", "))
+        .accessibilityLabel("Time axis: " + timeline.timeTicks.map(\.label).joined(separator: ", "))
     }
 }
 

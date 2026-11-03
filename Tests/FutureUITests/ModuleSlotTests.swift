@@ -26,7 +26,7 @@ struct ModuleSlotTests {
         #expect(epidemic.variable == "infectious")
         #expect(epidemic.format == .number)
         #expect(ModelLibrary.named("epidemic")?.id == "epidemic")
-        #expect(ModelLibrary.search("swift").map(\.id) == ["epidemic", "world-epidemic"])
+        #expect(ModelLibrary.search("swift").map(\.id) == ["epidemic", "world-epidemic", "worm"])
         #expect(ModelLibrary.search("infection").map(\.id) == ["epidemic", "world-epidemic"])
     }
 
@@ -61,8 +61,12 @@ struct ModuleSlotTests {
         #expect(saved.model == "Epidemic")
         #expect(saved.source.isEmpty)
 
+        // It begins at the cursor with its trigger, with nobody incubating before it (5.7).
+        let begins = try #require(store.configs[store.focusedIndex].events.first { $0.kind == "imported" }).time
         let text = ScenarioFormat.text(for: file)
-        #expect(text.contains("## 7. Outbreak [Epidemic, module: epidemic@1, shows: infectious]\n\n### Events\n- 2026-03-01 vaccinate [amount: 5000]"))
+        #expect(text.contains("## 7. Outbreak [Epidemic, module: epidemic@1, shows: infectious]\n\n### Values\n- exposed: 0\n\n"
+                              + "### Events\n- 2026-03-01 vaccinate [amount: 5000]\n- \(FileDate.text(begins)) imported [amount: 10]"),
+                "\(text)")
         let reread = ScenarioDefinition(file: try ScenarioFormat.parse(text).file)
         let spec = try #require(reread.slots.first { $0.name == "Outbreak" })
         #expect(spec.kind == .module(ModuleReference(id: "epidemic", version: 1)))

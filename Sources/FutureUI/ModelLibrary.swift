@@ -64,6 +64,8 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
     public let format: ValueFormat
     /// What a new slot draws behind its graph (docs/DESIGN.md, 9.6).
     public var backdrop: BackdropBinding?
+    /// The event that sets a module off, which a new slot places at the cursor (docs/DESIGN.md, 6.5).
+    public var trigger: ModuleTrigger?
 
     public init(id: String, name: String, category: Category, kind: ModelKind = .formula, summary: String,
                 slotName: String, formula: String, variable: String, format: ValueFormat) {
@@ -96,6 +98,7 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
                   kind: .module(module.reference), summary: info.summary, slotName: info.slotName, formula: "",
                   variable: info.shows, format: ValueFormat(quantity))
         backdrop = info.backdrop.flatMap(BackdropBinding.init(text:))
+        trigger = info.trigger
     }
 
     /// What a slot's model is called when it starts from this template: blank ones are the slot's own.

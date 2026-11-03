@@ -40,14 +40,37 @@ public struct ModuleInfo: Sendable, Equatable {
     /// What a new slot draws behind its graph, as scenario.md writes it (`world-map of infectious`),
     /// or nil for nothing (docs/DESIGN.md, 9.6).
     public var backdrop: String?
+    /// The event that sets it off, such as the first cases of an outbreak, which a new slot places
+    /// at the cursor; nil for a module that starts at the scenario's start.
+    public var trigger: ModuleTrigger?
 
-    public init(name: String, summary: String, category: String, slotName: String, shows: String, backdrop: String? = nil) {
+    public init(name: String, summary: String, category: String, slotName: String, shows: String, backdrop: String? = nil,
+                trigger: ModuleTrigger? = nil) {
         self.name = name
         self.summary = summary
         self.category = category
         self.slotName = slotName
         self.shows = shows
         self.backdrop = backdrop
+        self.trigger = trigger
+    }
+}
+
+/// The event that sets a module off (docs/DESIGN.md, 6.5). A new slot begins where the person is
+/// looking: it gets this event at the cursor, and the starting values in `emptied`, so nothing
+/// happens before it. The event is the slot's own from then on, to move or change.
+public struct ModuleTrigger: Sendable, Hashable {
+    /// An event kind the model handles, such as `infect`.
+    public var kind: String
+    /// The event's values, such as `amount: 10`.
+    public var values: [String: Double]
+    /// Starting values a new slot sets so nothing happens before the event, such as `infected: 0`.
+    public var emptied: [String: Double]
+
+    public init(kind: String, values: [String: Double], emptied: [String: Double]) {
+        self.kind = kind
+        self.values = values
+        self.emptied = emptied
     }
 }
 

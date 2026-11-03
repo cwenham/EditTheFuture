@@ -9,7 +9,8 @@ public struct EpidemicModule: SimulationModule {
     public let id = "epidemic"
     public let version = 1
     public let info = ModuleInfo(name: "Epidemic", summary: "An infection spreading through a population, from R₀ and incubation (SEIR)",
-                                 category: "health", slotName: "Outbreak", shows: "infectious")
+                                 category: "health", slotName: "Outbreak", shows: "infectious",
+                                 trigger: ModuleTrigger(kind: "imported", values: ["amount": 10], emptied: ["exposed": 0]))
 
     public init() {}
 

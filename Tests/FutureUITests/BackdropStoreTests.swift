@@ -98,8 +98,20 @@ struct BackdropStoreTests {
         store.setBackdrop(BackdropBinding(id: "parts", field: "nothing"), inSlotAt: index)
         await store.waitUntilIdle()
         #expect(store.backdropState()?.input.field == nil)
-        store.setBackdrop(BackdropBinding(id: "sky-map"), inSlotAt: index)
+        store.setBackdrop(BackdropBinding(id: "moon-map"), inSlotAt: index)
         await store.waitUntilIdle()
         #expect(store.backdropState() == nil)
+    }
+
+    @Test("A slot with a declination and right ascension puts a point on the sky")
+    func sky() async throws {
+        let comet = SlotSpec(name: "Comet", formula: "step 1 day\ndec[t] = 10 + day\nra[t] = 200 + 2 * day", variable: "dec", format: .number)
+        let store = try ScenarioStore(definition: ScenarioDefinition(name: "Sky", start: utc(2026, 1, 1), slots: [comet]), now: now)
+        await store.waitUntilIdle()
+        #expect(store.backdropChoices(forSlotAt: 0).map(\.title) == ["Sky map: Position"])
+        store.setBackdrop(BackdropBinding(id: "sky-map", latitude: "dec", longitude: "ra"), inSlotAt: 0)
+        store.setCursor(utc(2026, 1, 5))
+        await store.waitUntilIdle()
+        #expect(store.backdropState()?.input.point == GeoPoint(latitude: 15, longitude: -150))
     }
 }

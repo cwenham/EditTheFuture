@@ -10,7 +10,8 @@ public struct WorldEpidemicModule: SimulationModule {
     public let id = "world-epidemic"
     public let version = 1
     public let info = ModuleInfo(name: "World epidemic", summary: "An infection spreading between countries by travel (SEIR)",
-                                 category: "health", slotName: "Pandemic", shows: "infectious", backdrop: "world-map of infectious")
+                                 category: "health", slotName: "Pandemic", shows: "infectious", backdrop: "world-map of infectious",
+                                 trigger: ModuleTrigger(kind: "imported", values: ["amount": 10], emptied: ["firstCases": 0]))
 
     /// Each country's ISO 3166 alpha-3 code as its key, with columns `population`, `latitude` and
     /// `longitude` (degrees, where its label goes).
@@ -134,7 +135,7 @@ struct WorldEpidemic: NumericSimulation {
                 .parameter("travel", 0.001, range: 0...0.05, by: 0.0001, label: "Contacts abroad", as: .percent),
                 .parameter("originLatitude", 51.5, range: -90...90, by: 0.1, label: "Where it starts: latitude"),
                 .parameter("originLongitude", -0.1, range: -180...180, by: 0.1, label: "Where it starts: longitude"),
-                .parameter("firstCases", 10, range: 1...1_000_000, by: 1, label: "First cases"),
+                .parameter("firstCases", 10, range: 0...1_000_000, by: 1, label: "First cases"),
             ],
             state: [],
             outputs: [

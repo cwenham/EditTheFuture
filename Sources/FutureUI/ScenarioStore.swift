@@ -145,7 +145,8 @@ public final class ScenarioStore {
         return lower < upper ? lower...upper : (low - 1)...(low + 1)
     }
 
-    public static let minimumSpan: TimeInterval = 2 * 365.2425 * 86_400
+    /// An hour: close enough to watch a worm that spreads in minutes (docs/UI.md, 2.5).
+    public static let minimumSpan: TimeInterval = 3_600
     public static let maximumSpan: TimeInterval = 80 * 365.2425 * 86_400
     /// Slot positions in a bank, as on the chips and hardware.
     public static let bankSize = Scenario.bankSize
@@ -194,6 +195,11 @@ public final class ScenarioStore {
     /// Whether the cursor follows the pointer, or waits for it to move after a command placed the
     /// cursor (`pointerHovered(at:fraction:)`).
     @ObservationIgnored private(set) var pointerHold = PointerHold.following
+    /// A curve search on its way for a slot just given a model, and the view it was asked from.
+    @ObservationIgnored private var curveWait: CurveWait?
+    /// The view easing to a new place, and how long that takes; tests set 0 to jump.
+    @ObservationIgnored private var glideTask: Task<Void, Never>?
+    @ObservationIgnored var glideDuration: TimeInterval = 1
     public private(set) var frame: TimeFrame
     /// Bumped whenever the scenario's data changes, so views refresh.
     public private(set) var revision = 0
@@ -714,6 +720,7 @@ public final class ScenarioStore {
 
     /// Scrolls by a fraction of the visible span (positive = later).
     public func pan(by fraction: Double) {
+        stopGlide()
         let shift = frame.span * fraction
         let newStart = max(earliest, frame.start.addingTimeInterval(shift))
         let newFrame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
@@ -728,6 +735,7 @@ public final class ScenarioStore {
 
     /// Zooms around `anchor` (the cursor by default). Factor < 1 zooms in.
     public func zoom(by factor: Double, around anchor: Date? = nil) {
+        stopGlide()
         let span = min(max(frame.span * factor, Self.minimumSpan), Self.maximumSpan)
         let anchor = anchor ?? (frame.contains(cursor) ? cursor : frame.date(atFraction: 0.5))
         let proportion = anchor.timeIntervalSince(frame.start) / frame.span
@@ -737,10 +745,101 @@ public final class ScenarioStore {
     }
 
     private func reveal(_ date: Date) {
+        stopGlide()
         guard !frame.contains(date) else { return }
         let newStart = max(earliest, date.addingTimeInterval(-frame.span / 2))
         frame = TimeFrame(start: newStart, end: newStart.addingTimeInterval(frame.span))
         frameChanged()
+    }
+
+    // MARK: Showing a new slot's curve (docs/UI.md, 5.7)
+
+    /// After a slot gets a model that begins at an event: asks the engine where its line does its
+    /// changing, then eases the view there. Moving the view before the answer comes keeps it where
+    /// it was put.
+    func showCurve(ofSlot id: UUID, from date: Date) {
+        guard let index = slotIndex(id: id) else { return }
+        curveWait = CurveWait(slot: id, frame: frame)
+        enqueue(.curve(ScenarioEngine.CurveRequest(slot: index, from: date)))
+    }
+
+    private func receive(_ result: ScenarioEngine.CurveResult) {
+        guard let wait = curveWait, frame == wait.frame, slots.indices.contains(result.request.slot),
+              slots[result.request.slot].id == wait.slot else { return }
+        curveWait = nil
+        let from = result.request.from
+        // The trigger near the left, and the line's changes filling most of the width.
+        let length = max(0, result.end?.timeIntervalSince(from) ?? 0)
+        let span = result.end == nil ? frame.span : min(max(length * 1.25, Self.minimumSpan), Self.maximumSpan)
+        let start = max(earliest, from.addingTimeInterval(-0.1 * span))
+        pointerHold = .waiting
+        setCursor(from)
+        glide(to: TimeFrame(start: start, end: start.addingTimeInterval(span)))
+    }
+
+    /// The slot and view a curve search was asked for from.
+    struct CurveWait: Equatable {
+        let slot: UUID
+        let frame: TimeFrame
+    }
+
+    /// Eases the view to `target` over `glideDuration`, zooming around the moment that's in the same
+    /// place in both, as a pinch does. Scrolling or zooming stops it where it is.
+    func glide(to target: TimeFrame) {
+        stopGlide()
+        guard target != frame else { return }
+        guard glideDuration > 0 else {
+            frame = target
+            frameChanged()
+            return
+        }
+        let origin = frame, began = Date(), duration = glideDuration
+        glideTask = Task { [weak self] in
+            while !Task.isCancelled, let self {
+                let t = min(1, Date().timeIntervalSince(began) / duration)
+                // Fast at first, then slowing down (docs/UI.md, 2.4).
+                let eased = 1 - (1 - t) * (1 - t) * (1 - t)
+                let next = t >= 1 ? target : ScenarioStore.frame(between: origin, and: target, at: eased, earliest: self.earliest)
+                if next != self.frame {
+                    self.frame = next
+                    self.frameChanged()
+                }
+                if t >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    func stopGlide() {
+        guard let glideTask else { return }
+        glideTask.cancel()
+        self.glideTask = nil
+    }
+
+    /// Waits for the view to finish easing. For tests.
+    func waitForGlide() async {
+        await glideTask?.value
+    }
+
+    /// A view `t` (0...1) of the way from `a` to `b`. The span changes by the same factor at every
+    /// moment, around the moment that's the same share of the way across both; when the spans are
+    /// the same, it slides.
+    nonisolated static func frame(between a: TimeFrame, and b: TimeFrame, at t: Double, earliest: Date) -> TimeFrame {
+        let t = min(max(t, 0), 1)
+        let spanA = a.span, spanB = b.span
+        guard spanA > 0, spanB > 0 else { return t < 1 ? a : b }
+        let shift = b.start.timeIntervalSince(a.start)
+        let span = spanA * pow(spanB / spanA, t)
+        let offset: TimeInterval
+        if abs(spanB - spanA) <= 1e-9 * spanA {
+            offset = shift * t
+        } else {
+            // The fixed moment is this share of the way across both: start = a + share × (spanA − span).
+            let share = -shift / (spanB - spanA)
+            offset = share * (spanA - span)
+        }
+        let start = max(earliest, a.start.addingTimeInterval(offset))
+        return TimeFrame(start: start, end: start.addingTimeInterval(span))
     }
 
     /// The scenario's start, or the first reading of the value a slot's graph shows when that's earlier.
@@ -1061,6 +1160,7 @@ public final class ScenarioStore {
         case fetch(ScenarioEngine.FetchRequest)
         case preview(ScenarioEngine.PreviewRequest)
         case find(ScenarioEngine.FindRequest)
+        case curve(ScenarioEngine.CurveRequest)
         case export(minimumSeconds: Double, reply: CheckedContinuation<[Int: SlotHistory], Never>)
         case copyForFitting(slot: Int, reply: CheckedContinuation<ScenarioEngine.FittingCopy, Never>)
         case read(ScenarioEngine.ReadRequest, reply: CheckedContinuation<ScenarioEngine.ReadResult, Never>)
@@ -1070,6 +1170,7 @@ public final class ScenarioStore {
         var isFetch: Bool { if case .fetch = self { return true } else { return false } }
         var isFields: Bool { if case .fields = self { return true } else { return false } }
         var isGoal: Bool { if case .goal = self { return true } else { return false } }
+        var isCurve: Bool { if case .curve = self { return true } else { return false } }
         /// Draft-event previews and slider previews replace only their own kind.
         var previewOfModel: Bool? {
             guard case .preview(let request) = self else { return nil }
@@ -1095,6 +1196,7 @@ public final class ScenarioStore {
         case .fetch: engineQueue.removeAll(where: \.isFetch)
         case .preview: engineQueue.removeAll { $0.previewOfModel == operation.previewOfModel }
         case .goal: engineQueue.removeAll(where: \.isGoal)
+        case .curve: engineQueue.removeAll(where: \.isCurve)
         case .fields: engineQueue.removeAll(where: \.isFields)
         case .mutate, .find, .export, .copyForFitting, .read: break
         }
@@ -1113,6 +1215,7 @@ public final class ScenarioStore {
                 let result = await engine.preview(request)
                 if case .model = request.change { receiveParameterPreview(result) } else { receive(result) }
             case .find(let request): receive(await engine.find(request))
+            case .curve(let request): receive(await engine.curve(request))
             case .export(let minimum, let reply): reply.resume(returning: await engine.resultsToSave(minimumSeconds: minimum))
             case .copyForFitting(let slot, let reply): reply.resume(returning: await engine.copyForFitting(slot: slot))
             case .read(let request, let reply): reply.resume(returning: await engine.read(request))
@@ -1556,8 +1659,13 @@ public final class ScenarioStore {
             guard let all = computed?.series, all.indices.contains(index), !slots[index].isPaused else { return [] }
             let series = all[index]
             guard !series.isEmpty else { return [] }
-            let low = Self.firstIndex(in: series, atOrAfter: from)
-            let high = Self.firstIndex(in: series, after: through)
+            var low = Self.firstIndex(in: series, atOrAfter: from)
+            var high = Self.firstIndex(in: series, after: through)
+            // When the samples kept don't reach an edge of the view, the one just past it too, so the
+            // line does: the next point can be far away, as it is while a settled slot holds
+            // (docs/DESIGN.md, 4.11).
+            if low > 0, low >= high || series[low].time > frame.start { low -= 1 }
+            if high < series.count, high <= low || series[high - 1].time < frame.end { high += 1 }
             return low < high ? Array(series[low..<high]) : []
         }
         /// The visible values' range. Values that overflowed (infinite or NaN) can't be placed on an
@@ -1647,7 +1755,7 @@ public final class ScenarioStore {
         }
 
         return TimelineState(scenarioName: name, frame: frame, now: now, start: start, focus: focus, lanes: lanes,
-                             yearTicks: TimelineState.yearTicks(for: frame), overlays: overlays)
+                             timeTicks: TimelineState.timeTicks(for: frame), overlays: overlays)
     }
 
     /// The readout and lane values at the cursor, from the latest results. Shows "…" while the
@@ -1672,18 +1780,18 @@ public final class ScenarioStore {
             laneValues[index] = slot.isPaused ? "Paused" : beforeStart ? "—" : ready ? (value(index).map(slot.style.full) ?? "—") : "…"
         }
         if focusSlot.isPaused {
-            return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor), readoutValue: "—",
+            return CursorState(date: cursor, readoutDate: DateText.precise(cursor, span: frame.span), readoutValue: "—",
                                readoutNote: "Paused", focusValue: nil, laneValues: laneValues, overlayValues: overlayValues)
         }
         if beforeStart {
             let reading = reading(ofSlotAt: focusedIndex, at: cursor)
-            return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
+            return CursorState(date: cursor, readoutDate: DateText.precise(cursor, span: frame.span),
                                readoutValue: reading.map(focusSlot.style.full) ?? "—",
                                readoutNote: reading == nil ? "Before the start" : "Reading",
                                focusValue: reading, laneValues: laneValues, overlayValues: overlayValues)
         }
         let observed = readingSpan(ofSlotAt: focusedIndex).map { cursor >= $0.first && cursor <= $0.last } ?? false
-        return CursorState(date: cursor, readoutDate: DateText.monthYear(cursor),
+        return CursorState(date: cursor, readoutDate: DateText.precise(cursor, span: frame.span),
                            readoutValue: ready ? (focusValue.map(focusSlot.style.full) ?? "—") : "…",
                            readoutNote: !ready ? "Computing" : observed ? "Reading" : cursor > now ? "Projection" : "Model",
                            focusValue: focusValue, laneValues: laneValues, overlayValues: overlayValues)
@@ -1693,7 +1801,8 @@ public final class ScenarioStore {
     public func statusText() -> String {
         let paused = slots.filter(\.isPaused).count
         return [
-            computed?.computedThrough.map { "Computed through " + DateText.monthYear($0) }
+            // Slots that settled for ever don't hold the others back, and when every slot has, say so.
+            computed?.computedThrough.map { $0 >= .distantFuture ? "Every slot has settled" : "Computed through " + DateText.monthYear($0) }
                 ?? (paused == slots.count ? "Nothing to compute" : "Computing…"),
             "\(slots.count) of \(Scenario.bankSize) slots",
             "\(linkCount) link\(linkCount == 1 ? "" : "s")",

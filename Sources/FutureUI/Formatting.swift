@@ -184,6 +184,27 @@ enum DateText {
         return "\(civil.day) " + monthNames[civil.month - 1] + " " + String(civil.year)
     }
 
+    /// "09:30" in UTC.
+    static func time(_ date: Date) -> String {
+        let minutes = Int((CivilDate(date).secondsIntoDay / 60).rounded(.down))
+        let hours = minutes / 60, rest = minutes % 60
+        return (hours < 10 ? "0" : "") + String(hours) + ":" + (rest < 10 ? "0" : "") + String(rest)
+    }
+
+    /// "15 Mar" in UTC.
+    static func dayMonth(_ date: Date) -> String {
+        let civil = CivilDate(date)
+        return "\(civil.day) " + monthNames[civil.month - 1]
+    }
+
+    /// A date as precise as a view `span` long needs: "Mar 2031" over years, "15 Mar 2031" over
+    /// weeks, and "15 Mar 2031, 09:30" over a few days or less (docs/UI.md, 2.5).
+    static func precise(_ date: Date, span: TimeInterval) -> String {
+        if span >= 400 * 86_400 { return monthYear(date) }
+        if span >= 4 * 86_400 { return dayMonthYear(date) }
+        return dayMonthYear(date) + ", " + time(date)
+    }
+
     /// "2031-03-15" in UTC.
     static func iso(_ date: Date) -> String {
         let civil = CivilDate(date)

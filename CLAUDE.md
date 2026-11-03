@@ -2,7 +2,7 @@
 
 A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable graph of values over time, driven by up to 8 linked models.
 
-**Start with [docs/HANDOFF.md](docs/HANDOFF.md)**: where the work stands, what's next, and how to check your work. The design is in [docs/DESIGN.md](docs/DESIGN.md) and the UI spec in [docs/UI.md](docs/UI.md).
+**Start with [docs/HANDOFF.md](docs/HANDOFF.md)**: where the work stands, what's next, and how to check your work. The design is in [docs/DESIGN.md](docs/DESIGN.md), the UI spec in [docs/UI.md](docs/UI.md), and problems known to be in the app now in [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md).
 
 ## Commands
 
