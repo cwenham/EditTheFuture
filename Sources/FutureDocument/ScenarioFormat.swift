@@ -88,6 +88,7 @@ public enum ScenarioFormat {
         if let format = slot.format { settings.append(Setting(key: "as", value: format)) }
         if let currency = slot.currency { settings.append(Setting(key: "currency", value: currency.code)) }
         if let color = slot.color { settings.append(Setting(key: "color", value: color)) }
+        if let backdrop = slot.backdrop { settings.append(Setting(key: "backdrop", value: backdrop.text)) }
         settings += extras
         let base = "## \(slot.position + 1). \(slot.name)"
         return settings.isEmpty ? base : base + " [" + settings.map(\.text).joined(separator: ", ") + "]"
@@ -443,6 +444,12 @@ private struct Reader {
                 slot.model = setting.key
             case ("module", let value?):
                 slot.module = value
+            case ("backdrop", let value?):
+                if let backdrop = BackdropSetting(text: value) { slot.backdrop = backdrop } else {
+                    extras.append(setting)
+                    problems.append(FileProblem(line: line, message: "“\(value)” isn't a backdrop. Write one like world-map, "
+                                                + "world-map of infected or world-map at lat lon. It's kept as written.", slot: name))
+                }
             case ("shows", let value?):
                 slot.shows = value
             case ("as", let value?):
@@ -732,6 +739,7 @@ private struct Writer {
         var out: [String] = []
         let headingSame = new.position == old.position && new.name == old.name && new.model == old.model && new.module == old.module
             && new.shows == old.shows && new.format == old.format && new.currency == old.currency && new.color == old.color
+            && new.backdrop == old.backdrop
         out.append(headingSame ? lines[layout.lines.lowerBound] : ScenarioFormat.slotHeading(new, extras: layout.extras))
         let modelSame = new.language == old.language && new.source == old.source && new.module == old.module
         let partStarts = Dictionary(uniqueKeysWithValues: layout.parts.map { ($0.value.lines.lowerBound, $0.key) })

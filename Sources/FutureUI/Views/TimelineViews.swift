@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureVisuals
 import CoreText
 import FutureEngine
 
@@ -37,6 +38,49 @@ enum CursorSource {
     }
 }
 
+/// Where the backdrop behind the focused graph gets what it draws (docs/DESIGN.md, 9.6): the live
+/// store, so only the backdrop redraws when its field changes, or a fixed snapshot.
+enum BackdropSource {
+    case live(ScenarioStore)
+    case fixed(BackdropState?)
+
+    @MainActor var state: BackdropState? {
+        switch self {
+        case .live(let store): return store.backdropState()
+        case .fixed(let state): return state
+        }
+    }
+}
+
+/// The focused slot's backdrop, drawn under its graph: its base, which only redraws when the
+/// backdrop, colour or size changes, and over it what follows the cursor.
+struct BackdropLayer: View {
+    let source: BackdropSource
+
+    var body: some View {
+        if let state = source.state, let backdrop = BackdropCatalog.builtIn.backdrop(id: state.id) {
+            ZStack {
+                BackdropBase(id: state.id, color: state.input.color).equatable()
+                Canvas { context, size in backdrop.draw(state.input, in: &context, size: size) }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// What doesn't follow the cursor, such as a map's outlines. Equal inputs skip drawing it again.
+struct BackdropBase: View, Equatable {
+    let id: String
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            BackdropCatalog.builtIn.backdrop(id: id)?.drawBase(color: color, in: &context, size: size)
+        }
+    }
+}
+
 /// The focused graph, time axis, events strip and lanes, with each graph's value range eased to
 /// a new one over a second rather than jumping (docs/UI.md, 2.4).
 ///
@@ -45,6 +89,7 @@ enum CursorSource {
 struct TimelineRows: View {
     let timeline: TimelineState
     let cursor: CursorSource
+    var backdrop: BackdropSource = .fixed(nil)
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
@@ -57,7 +102,7 @@ struct TimelineRows: View {
         let now = Date()
         let _ = easing.retarget(timeline.scaleTargets, at: now)
         let end = easing.end(after: now)
-        TimelineRowsContent(timeline: timeline, scales: easing, cursor: cursor, plotWidth: plotWidth,
+        TimelineRowsContent(timeline: timeline, scales: easing, cursor: cursor, backdrop: backdrop, plotWidth: plotWidth,
                             focusHeight: focusHeight, interactions: interactions)
             .background {
                 if end != nil {
@@ -83,6 +128,7 @@ struct TimelineRowsContent: View {
     /// Where each graph's range is part-way through a change of scale; read only inside `Eased`.
     var scales: ScaleEasing?
     let cursor: CursorSource
+    var backdrop: BackdropSource = .fixed(nil)
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
@@ -96,6 +142,7 @@ struct TimelineRowsContent: View {
                 .frame(width: TimelineLayout.labelWidth, height: focusHeight)
                 Eased(timeline: timeline, scales: scales) { FocusChart(timeline: $0) }
                     .frame(width: plotWidth, height: focusHeight)
+                    .background { BackdropLayer(source: backdrop) }
                     .overlay(alignment: .topLeading) { NowLabel(timeline: timeline, width: plotWidth) }
                     .overlay {
                         if timeline.focus.goal != nil {

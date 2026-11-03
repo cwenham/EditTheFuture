@@ -48,6 +48,7 @@ extension SlotSpec {
                   readings: readings, problem: problem)
         showsInFile = slot.shows != nil
         formatInFile = slot.format != nil
+        backdrop = slot.backdrop
     }
 }
 
@@ -128,6 +129,7 @@ extension ScenarioStore {
                             language: config.kind.language, source: config.formula, module: config.kind.moduleText,
                             shows: writeShows ? config.variable : nil,
                             format: writeFormat ? config.format.rawValue : nil, currency: config.currency, color: color,
+                            backdrop: config.backdrop,
                             values: config.values, percentNames: percents, events: config.events, rules: config.rules,
                             readings: config.readings.sources, problem: config.problem)
         }

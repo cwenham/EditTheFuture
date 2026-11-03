@@ -580,7 +580,7 @@ A slot that names a module the app hasn't got, or a newer version than the app h
 
 **Next** (each its own branch):
 1. **Fields** are done (4.10): values per key, worked out at the cursor from the nearest checkpoint.
-2. **Backdrops** (`FutureVisuals`): visuals drawn faintly behind the focused graph that follow the cursor, starting with a world map. Any slot can drive one: a module's field, or a formula's values.
+2. **Backdrops** are begun (9.6): a world map and parts of a whole behind the focused graph, driven by a module's field or a formula's position.
 3. **World travel:** an epidemic between about 200 countries joined by travel, which shades the world map. Its data comes through `ModuleDataSource`.
 4. **A sky map**, and **computer worms** (scanning worms, then ones that follow networks), which need the engine to stop computing a model once nothing changes.
 5. Moving scripts' own file lookups (the Libraries folder, Python's home) behind the same kind of interface.
@@ -793,6 +793,30 @@ iOS apps can't float over other apps. Equivalents:
 - Siri and Shortcuts answers with a chart snippet (App Intents)
 - Live Activities for something being actively tracked
 - On iPad: multitasking windows, and Apple Pencil for sketching curves (8.1)
+
+### 9.6 Backdrops
+
+Begun in November 2026. A backdrop is an infographic drawn faintly behind the focused graph, showing the slot's state at the cursor: a world map shaded by each country's share infected, where everyone is in an outbreak, a ship's position. As the cursor moves through time, the backdrop follows it.
+
+**Backdrops only draw.** They live in `FutureVisuals`, which knows nothing of slots, the store or files. The app works out what a backdrop shows and hands it over in a `BackdropInput`: a field at the cursor (4.10) with its label, quantity and names for its keys, or a point (`GeoPoint`), in the slot's colour.
+
+| Part | What it is |
+|---|---|
+| `Backdrop` | `id` (written in scenario.md), `name` (the Slot tab's menu), the field `geometries` it draws (`world/countries`, `groups`), whether it `drawsPoints`, `drawBase(color:in:size:)` for what doesn't follow the cursor, and `draw(_:in:size:)` for what does. |
+| `BackdropCatalog` | The backdrops the app offers, found by id or by the geometry they draw. A new one is a type and a line in `BackdropCatalog.builtIn`. |
+| `BackdropInput.intensities()` | Each key's value as 0–1 for shading: as it is for shares, else against the largest. |
+
+**Built in:**
+- **World map** (`world-map`): Natural Earth's 1:110m countries (public domain) on the Equal Earth projection, which keeps countries at their true relative sizes. It shades countries by a `world/countries` field, keyed by ISO 3166 alpha-3 codes, and draws a point. `scripts/make-world-countries.py` turns Natural Earth's GeoJSON into `WorldCountriesData.swift`, a compact table (81 KB) of each country's code, name, label position, population and outlines in hundredths of a degree. Nothing is downloaded at build or run time; the script is run by hand to update the map. `WorldCountries` reads the table; modules that need countries' data can get it from there through the app (6.5).
+- **Parts of a whole** (`parts`): a ring split by a `groups` field, with each part's name and share beside it, left-aligned. Epidemic's "Where everyone is" draws with it.
+
+**Choosing one:** a slot's heading in scenario.md says `backdrop: world-map` (the first field the backdrop can draw), `backdrop: world-map of infected` (that field) or `backdrop: world-map at lat lon` (a point from two of the slot's values, latitude then longitude). The Slot tab's Backdrop menu offers each backdrop with each field it draws, and the world map's position when the slot has values called `latitude` and `longitude` (or `lat` and `lon`), so a formula or script can drive one too. One that can't be read is kept as written and reported. A backdrop the app hasn't got draws nothing.
+
+**Drawing:** only the focused slot's backdrop is drawn, under the graph's tints, grid and lines. The store asks for its field at the cursor as it does for watched fields (4.10), and for a point's two values with every fetch (4.9). Only the backdrop's views read `backdropState()`, so nothing else redraws as it changes. The base layer is a view of its own whose inputs are the backdrop and colour, so it's drawn again only when those or the size change; the world map's outlines are one path, filled and stroked once. Snapshots include the backdrop as it is at the cursor.
+
+**Speed:** `etf-bench cursor-loop parts` and `cursor-loop map` sweep the cursor over a panel with each. On a busy iMac Pro, drawing every country's outline in each frame added about 9 ms a frame; with the base layer apart and the outlines as one path, the map adds about 2 ms and the ring about 1.6 ms, against about 15 ms for the panel.
+
+**Later:** a sky map, a globe, a network of links (for worms between networks), easing between shadings, and showing the backdrop of an overlaid slot.
 
 ## 10. Commands and integrations
 
@@ -1308,6 +1332,7 @@ Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, fields, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
+  FutureVisuals/     backdrops (9.6): the Backdrop contract and catalog, the world map (Equal Earth, Natural Earth's countries in WorldCountriesData.swift) and parts of a whole
   FutureSimulation/  the contract simulation modules are built against (6.5): SimulationModule, ModuleReference, data needs and tables, ModuleCatalog, NumericSimulation and NumericModel
   Simulations/       one folder per simulation module, each its own target seeing only FutureEngine and FutureSimulation
     Epidemic/        the Epidemic module (SEIR)
@@ -1327,6 +1352,7 @@ Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (n
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares, fields from checkpoints
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
+  FutureVisualsTests/   the country table, the projection, shading, points, and each backdrop drawn into an image
   FutureSimulationTests/ the module contract: NumericModel's events, readings and saved numbers, references, the catalog's checks, tables
   Simulations/Epidemic/  the Epidemic module against the final-size equation, early growth, R₀ below 1, vaccination, imported cases, events, extremes and conservation
   FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
@@ -1338,6 +1364,7 @@ scripts/
   build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, the .etf document type, the etf tool and the App Intents metadata
   appintents-protocols.json  the protocols whose constant values the compiler records for App Intents
   fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
+  make-world-countries.py  turns Natural Earth's 1:110m countries (GeoJSON) into the world map's table
 ```
 
 Run the tests with `swift test`.

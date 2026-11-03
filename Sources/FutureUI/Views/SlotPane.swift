@@ -215,6 +215,23 @@ private struct SlotSettings: View {
                     }
                     conversionNote
                 }
+                let backdrops = store.backdropChoices(forSlotAt: index)
+                if !backdrops.isEmpty || slot.backdrop != nil {
+                    labelled("Backdrop") {
+                        Picker("Backdrop", selection: Binding(get: { slot.backdrop?.text ?? "" },
+                                                              set: { store.setBackdrop(BackdropBinding(text: $0), inSlotAt: index) })) {
+                            Text("None").tag("")
+                            Divider()
+                            ForEach(backdrops) { Text($0.title).tag($0.binding.text) }
+                            // One from scenario.md that isn't among the choices, such as a field the model no longer has.
+                            if let own = slot.backdrop, !backdrops.contains(where: { $0.binding == own }) {
+                                Text(own.text).tag(own.text)
+                            }
+                        }
+                        .labelsHidden()
+                        .help("What's drawn faintly behind this slot's graph, following the cursor")
+                    }
+                }
                 labelled("Color") {
                     HStack(spacing: 3) {
                         ForEach(SlotPalette.colors, id: \.self) { hex in
@@ -319,7 +336,7 @@ private struct SlotSettings: View {
 
     private func labelled<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 8) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary).frame(width: 52, alignment: .leading)
+            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1).frame(width: 60, alignment: .leading)
             content()
             Spacer(minLength: 0)
         }

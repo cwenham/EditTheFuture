@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import FutureVisuals
 import FutureEngine
 
 /// The visible slice of time.
@@ -166,6 +167,8 @@ public struct PanelState: Sendable {
     public let status: String
     /// What the add-event pane's draft would change, or nil until the draft is complete.
     public let eventPreview: EventPreviewState?
+    /// What's drawn behind the focused graph, or nil for nothing (docs/DESIGN.md, 9.6).
+    public var backdrop: BackdropState? = nil
 
     public var scenarioName: String { timeline.scenarioName }
     public var frame: TimeFrame { timeline.frame }
@@ -199,4 +202,10 @@ extension TimelineState {
         }
         return ticks
     }
+}
+
+/// What's drawn behind the focused graph (docs/DESIGN.md, 9.6): which backdrop, and what it shows.
+public struct BackdropState: Sendable, Equatable {
+    public let id: String
+    public let input: BackdropInput
 }

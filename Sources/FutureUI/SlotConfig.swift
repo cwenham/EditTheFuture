@@ -22,6 +22,8 @@ struct SlotConfig: Sendable, Equatable {
     var variable: String
     /// A color of its own, or nil for its position's palette color.
     var color: String?
+    /// What's drawn behind its graph (docs/DESIGN.md, 9.6).
+    var backdrop: BackdropBinding?
     var format: ValueFormat
     /// A currency of its own for its money, or nil for the scenario's.
     var currency: Currency?

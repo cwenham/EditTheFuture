@@ -105,7 +105,8 @@ struct TimelineArea: View {
             GeometryReader { geometry in
                 let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
                 let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height, laneCount: timeline.lanes.count)
-                TimelineRows(timeline: timeline, cursor: .live(store), plotWidth: plotWidth, focusHeight: focusHeight,
+                TimelineRows(timeline: timeline, cursor: .live(store), backdrop: .live(store), plotWidth: plotWidth,
+                             focusHeight: focusHeight,
                              interactions: TimelineInteractions(
                                 selectSlot: { store.select(index: $0, click: $1) },
                                 pickDate: { store.beginEvent(at: timeline.frame.date(atFraction: $0)) },
