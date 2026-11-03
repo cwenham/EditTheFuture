@@ -36,16 +36,20 @@ struct Epidemic: NumericSimulation {
     let shape = SimulationShape(
         step: .daily,
         parameters: [
-            .parameter("r0", 2.5, range: 0.1...20, by: 0.1, label: "R₀: people each case infects"),
-            .parameter("incubation", 5, range: 0.5...60, by: 0.5, label: "Incubation in days"),
-            .parameter("illness", 7, range: 0.5...60, by: 0.5, label: "Days a case is infectious"),
-            .parameter("population", 1_000_000, range: 100...10_000_000_000, by: 100, label: "Population"),
+            .parameter("r0", 2.5, range: 0.1...20, by: 0.1, label: "R₀: people each case infects",
+                       about: "The basic reproduction number: how many people each case infects while nobody is immune. Above 1 it spreads; below 1 it dies out."),
+            .parameter("incubation", 5, range: 0.5...60, by: 0.5, label: "Incubation in days",
+                       about: "How long, on average, between catching it and being able to pass it on."),
+            .parameter("illness", 7, range: 0.5...60, by: 0.5, label: "Days a case is infectious",
+                       about: "How long, on average, each case can pass it on before recovering."),
+            .parameter("population", 1_000_000, range: 100...10_000_000_000, by: 100, label: "Population",
+                       about: "How many people there are, all able to catch it at first."),
         ],
         state: [
-            .value("exposed", 10, label: "Incubating"),
-            .value("infectious", label: "Infectious"),
-            .value("recovered", label: "Recovered"),
-            .value("vaccinated", label: "Vaccinated"),
+            .value("exposed", 10, label: "Incubating", about: "People who have caught it at the start, but can't pass it on yet."),
+            .value("infectious", label: "Infectious", about: "People who can pass it on at the start."),
+            .value("recovered", label: "Recovered", about: "People already immune from having had it at the start."),
+            .value("vaccinated", label: "Vaccinated", about: "People already immune from a vaccine at the start."),
         ],
         outputs: [
             .value("caught", label: "New cases"),

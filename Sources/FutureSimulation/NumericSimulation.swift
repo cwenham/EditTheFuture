@@ -75,15 +75,17 @@ public struct SimulationShape: Sendable {
 extension Variable {
     /// A parameter, as a formula's `param r0 = 2.5 range 0.1..20 by 0.1 label "R₀"` declares it.
     public static func parameter(_ name: String, _ value: Double, range: ClosedRange<Double>? = nil, by step: Double? = nil,
-                                 label: String, as quantity: Quantity? = nil, fit: Bool = false) -> Variable {
+                                 label: String, as quantity: Quantity? = nil, fit: Bool = false,
+                                 about: String? = nil) -> Variable {
         Variable(name: name, causality: .parameter, start: value, label: label, minimum: range?.lowerBound,
-                 maximum: range?.upperBound, increment: step, quantity: quantity, fittable: fit)
+                 maximum: range?.upperBound, increment: step, quantity: quantity, fittable: fit, about: about)
     }
 
     /// A value: a starting value in `state`, or an output.
     public static func value(_ name: String, _ start: Double = 0, label: String, as quantity: Quantity? = nil,
-                             fit: Bool = false) -> Variable {
-        Variable(name: name, causality: .output, start: start, label: label, quantity: quantity, fittable: fit)
+                             fit: Bool = false, about: String? = nil) -> Variable {
+        Variable(name: name, causality: .output, start: start, label: label, quantity: quantity, fittable: fit,
+                 about: about)
     }
 }
 

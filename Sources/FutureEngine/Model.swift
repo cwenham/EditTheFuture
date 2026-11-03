@@ -76,6 +76,8 @@ public struct Variable: Hashable, Sendable, Codable {
     public var source: Reference?
     /// The name people see, e.g. "Interest rate" for `rate` (FMI: `description`).
     public var label: String?
+    /// A sentence or two on what it means, shown on hover beside the label.
+    public var about: String?
     /// The range a slider covers (FMI: `min` and `max`). Values outside it can still be typed.
     public var minimum: Double?
     public var maximum: Double?
@@ -88,7 +90,7 @@ public struct Variable: Hashable, Sendable, Codable {
 
     public init(name: String, causality: Causality, unit: String? = nil, start: Double = 0, source: Reference? = nil,
                 label: String? = nil, minimum: Double? = nil, maximum: Double? = nil, increment: Double? = nil,
-                quantity: Quantity? = nil, fittable: Bool = false) {
+                quantity: Quantity? = nil, fittable: Bool = false, about: String? = nil) {
         self.name = name
         self.causality = causality
         self.unit = unit
@@ -100,6 +102,7 @@ public struct Variable: Hashable, Sendable, Codable {
         self.increment = increment
         self.quantity = quantity
         self.fittable = fittable
+        self.about = about
     }
 }
 

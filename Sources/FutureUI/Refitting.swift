@@ -12,6 +12,8 @@ public struct RefitState: Equatable, Sendable {
         /// The slot's value now, as the Slot tab writes it: "3%".
         public let current: String
         public var ticked: Bool
+        /// The hover text, as `SlotValue.help` writes it.
+        public var help: String = ""
     }
 
     /// Which readings count.
@@ -122,7 +124,7 @@ extension ScenarioStore {
             let value = shown.first { $0.name == name }
             return RefitState.Choice(name: name, label: value?.label ?? name,
                                      current: value?.value.map { value!.text($0) } ?? "from the formula",
-                                     ticked: marked.contains(name))
+                                     ticked: marked.contains(name), help: value?.help ?? name)
         }
         closeRefit()
         closePredict()

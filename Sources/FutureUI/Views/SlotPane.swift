@@ -364,7 +364,11 @@ private struct ValueRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(value.label).font(.system(size: 13)).lineLimit(1).help(value.name)
+                Text(value.label)
+                    .font(.system(size: 13))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(value.help)
                 Spacer(minLength: 4)
                 if value.isChanged {
                     Button {
@@ -377,15 +381,7 @@ private struct ValueRow: View {
                     .help("Put back the model's default" + (value.defaultValue.map { " (\(value.text($0)))" } ?? ""))
                     .accessibilityLabel("Reset \(value.label)")
                 }
-                TextField(value.value == nil ? "From formula" : "", text: $text)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .monospacedDigit()
-                    .frame(width: 96)
-                    .foregroundStyle(dragValue == nil ? Theme.text : Theme.proposal)
-                    .focused($editing)
-                    .onSubmit(commitText)
-                    .accessibilityLabel(value.label)
+                field
             }
             if let range = value.sliderRange {
                 slider(range)
@@ -421,6 +417,34 @@ private struct ValueRow: View {
                 error = nil
             }
         }
+    }
+
+    /// The field to type the value in. It's at least 96 points wide and grows with what's in it,
+    /// so a number of 10 digits or more isn't cut short.
+    private var field: some View {
+        let placeholder = value.value == nil ? "From formula" : ""
+        // A hidden copy of the text, in the field's font, sets the width; the field covers it.
+        // Past 24 characters it stops growing and the field scrolls, so the label keeps its room.
+        return Text(String((text.isEmpty ? placeholder : text).prefix(24)))
+            .font(.system(size: 13))
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .frame(minWidth: 96)
+            .hidden()
+            .overlay {
+                TextField(placeholder, text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13))
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .foregroundStyle(dragValue == nil ? Theme.text : Theme.proposal)
+                    .focused($editing)
+                    .onSubmit(commitText)
+                    .accessibilityLabel(value.label)
+            }
+            .layoutPriority(1)
     }
 
     @ViewBuilder

@@ -526,7 +526,7 @@ public final class ScenarioStore {
             SlotValue(name: variable.name, label: variable.label ?? variable.name, quantity: variable.quantity ?? .number,
                       money: money, minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
                       value: model?.startingValues[variable.name], defaultValue: model?.declaredDefaults[variable.name],
-                      isChanged: config.values[variable.name] != nil)
+                      isChanged: config.values[variable.name] != nil, about: variable.about)
         }
         let parameters = descriptor?.variables.filter { $0.causality == .parameter } ?? []
         let starting = (model?.startingValueNames ?? []).compactMap { descriptor?.variable(named: $0) }

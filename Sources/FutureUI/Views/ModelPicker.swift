@@ -287,7 +287,7 @@ private struct TemplateDetail: View {
             Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary).padding(.top, 4)
             ForEach(list) { value in
                 HStack {
-                    Text(value.label).font(.system(size: 12))
+                    Text(value.label).font(.system(size: 12)).help(value.help)
                     Spacer()
                     Text(value.value.map { SlotValue.text($0, value.quantity, money: money) } ?? "From formula")
                         .font(.system(size: 12, weight: .medium))
@@ -352,7 +352,7 @@ struct TemplateFacts {
             SlotValue(name: variable.name, label: variable.label ?? variable.name, quantity: variable.quantity ?? .number,
                       money: .money(.usd), minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
                       value: model.startingValues[variable.name], defaultValue: model.declaredDefaults[variable.name],
-                      isChanged: false)
+                      isChanged: false, about: variable.about)
         }
         var parts = [template.kind.title, descriptor.stepRate.adverb]
         if !model.handledEventKinds.isEmpty { parts.append("handles " + model.handledEventKinds.joined(separator: ", ")) }

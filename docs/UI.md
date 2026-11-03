@@ -129,10 +129,10 @@ Added in November 2026, so a worm that spreads in minutes can be watched (DESIGN
 
 **Events strip:** one row under the time axis for the focused slot. Its label reads "click a date or an event": clicking a one-off event's diamond edits it (5.4), and clicking anywhere else picks that date.
 
-**Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. It has three tabs:
+**Side pane:** always visible, docked on the left or right of the timeline. Drag its title bar to the other side, where a drop zone lights up, or use its arrow button; the side is remembered. Drag the edge that faces the timeline to change its width (the pointer becomes the left-right arrow over it), and double-click that edge to put the width back. The Event and Slot tabs share one width, from 260 points, and the Formula tab has its own, from 360; both are remembered, and the timeline always keeps 420 points. It has three tabs:
 - **Event:** adds events to the focused slot (5.3).
 - **Slot:** the focused slot's name, model, parameters, starting values and display settings (5.7).
-- **Formula:** the focused slot's formula editor (5.7). The pane is wider while it shows.
+- **Formula:** the focused slot's formula editor (5.7). The pane is wider while it shows (480 points until it's dragged).
 
 **Lanes:** one per other slot in the bank. Each lane has:
 - the slot number, color bar and name
@@ -334,6 +334,8 @@ Built in November 2026 (DESIGN.md, 8.2).
 - **Name.** Names start with a letter and can use letters, digits and spaces. Formulas write them without spaces: "Rainy day fund" is `RainyDayFund`. Renaming a slot updates the formulas and scripts in other slots that refer to it, so `Climate.temp` becomes `Weather.temp`, and `"Climate.temp"` in a script becomes `"Weather.temp"`.
 - **Model:** its name and kind, with Change…. Under it, Edit formula… and, for a slot with readings of one of its values, Refit… (5.11). For such slots, the name is the Predict with menu: "Predict with Hold the latest ⌄" (5.11).
 - **Parameters:** each has its label and value, and a slider when the model gives it a range.
+  - A long label wraps to a second line beside the field. Hovering over it shows the parameter's name in the formula, its whole label and, when the model says, what it means: "scanRate: Scans a second per infected host" and "How many random addresses each infected computer tries every second…". The same hover text is on the label in Refit, Predict with's fitted values and the model picker.
+  - The field is at least 96 points wide and grows with the number in it, so "4,000,000,000" isn't cut short.
   - These are the values the slot starts with. Changes from a date are events: they're added in the Event tab and listed under the slider ("Changes to 4.0% from Jun 2027"). "Change from a date…" opens the Event tab, ready to set that parameter.
   - While a slider is dragged, a dashed line shows the slot's new future. Letting go applies it.
   - Typing a value and pressing ↩ applies it straight away. Percent parameters are typed in percent: "6" means 6%.
@@ -368,7 +370,7 @@ A paused slot shows "Paused" and the reason in place of its line and values, and
 
 **Command bar:** `add savings account` adds a model to the first free slot, `add loan to 7` to slot 7, and `remove climate` asks to remove a slot in the Slot tab. 1–8 focus by position; an empty position says how to fill it.
 
-**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula, or its script (Edit script…). The side pane widens to 480 points while it shows. A slot whose model is a module has no text to edit: the tab says the model is built into the app in Swift, that its values are in the Slot tab, and that Change model… offers a blank formula or script for writing one's own. The Slot tab and Predict with don't offer Edit formula… for it.
+**The Formula tab** (⌥⌘I, or Edit formula… in the Slot tab) edits the focused slot's formula, or its script (Edit script…). The side pane widens to 480 points while it shows, or to the width it was last dragged to. A slot whose model is a module has no text to edit: the tab says the model is built into the app in Swift, that its values are in the Slot tab, and that Change model… offers a blank formula or script for writing one's own. The Slot tab and Predict with don't offer Edit formula… for it.
 - **The editor:** SF Mono with line numbers. Keywords are purple, numbers amber, `[t]` and `[t-1]` green, other slots' values and `event.amount` blue, built-ins cyan, labels green and comments grey.
 - **Completion:** typing a name opens a list under the caret of what fits there.
   - In an expression: this formula's values and parameters, other slots (choosing one goes straight on to its values), functions (the caret lands between the brackets), built-ins and `and`, `or`, `not`.

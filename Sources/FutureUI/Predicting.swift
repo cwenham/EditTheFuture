@@ -82,6 +82,8 @@ public struct PredictState: Equatable, Sendable {
         public let name: String
         public let label: String
         public let text: String
+        /// The hover text, as `SlotValue.help` writes it.
+        public var help: String = ""
     }
 
     public let slot: UUID
@@ -230,7 +232,7 @@ extension ScenarioStore {
                 guard let variable = model.descriptor.variable(named: name) else { continue }
                 result[name] = SlotValue(name: name, label: variable.label ?? name, quantity: variable.quantity ?? .number,
                                          money: slot.money, minimum: variable.minimum, maximum: variable.maximum, increment: variable.increment,
-                                         value: nil, defaultValue: nil, isChanged: false)
+                                         value: nil, defaultValue: nil, isChanged: false, about: variable.about)
             }
             return result
         }
@@ -479,7 +481,8 @@ extension ScenarioStore {
             values[name] = rounded
             let shown = candidate.shown[name]
             fitted.append(PredictState.Fitted(name: name, label: shown?.label ?? name,
-                                              text: shown?.text(rounded) ?? SlotValue.number(rounded)))
+                                              text: shown?.text(rounded) ?? SlotValue.number(rounded),
+                                              help: shown?.help ?? name))
         }
         let miss = outcome.miss
         let format = miss.variable == slot.variable ? slot.format : Self.format(of: candidate.shown.values.first?.quantity) ?? .number
