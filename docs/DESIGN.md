@@ -40,9 +40,22 @@ Begun in November 2026. The engine and the graph are meant to be used by other a
 
 **What an app can give a scenario:** a `ScenarioConfiguration`, with the simulation modules slots may run (a `ModuleCatalog`, with the data those modules need), the backdrops they may draw (`BackdropCatalog`), the models the picker offers and Predict with tries (`templates`), and where feed sign-ins are kept and how feeds are fetched. `.standard` is the app's. Everything that builds a model, offers a template or picks a backdrop reads the store's configuration, not a global: `SlotConfig.model` and `ScenarioStore.assemble` take the module catalog, and `ScenarioDocument.open` passes its configuration on.
 
-**What's public.** Inside the package, the views and the app reach the store through `package` access; only what an app that embeds the package needs is `public`. The store's panel plumbing (the pointer, the panel's opacity, focus requests, where the timeline sits in the window) is `package`. The rest of the public surface is still wider than an embedding app needs, and will be trimmed as the views an app can place on their own are made public.
+**What's public.** Inside the package, the views and the app reach the store through `package` access; only what an app that embeds the package needs is `public`. The store's panel plumbing (the pointer, the panel's opacity, focus requests) is `package`. The rest of the public surface is still wider than an embedding app needs, and will be trimmed as the views an app can place on their own are made public.
 
-**Still to do** (in order): the graph and the editing panes as views of their own, each sizing to the frame it's given and handling its own scrolling and zooming, which the Mac app does today in `PanelController`; then a style that sets the views' colours, fonts and sizes, with today's look as the default; then an example app built only on the public API.
+**The views an app can place** (`FutureUI`), each filling the frame it's given:
+
+| View | What it is |
+|---|---|
+| `ScenarioGraph(store:parts:interactive:wheel:drawsBackground:)` | The focused graph with its time axis, and optionally its title, the events strip and the lanes (`Parts`). The cursor follows the pointer. Interactive, clicks pick dates and events, set targets and select slots; read-only, they don't. |
+| `ScenarioEditor(store:)` | The side pane's tabs (Event, Slot, Formula) and what they show, with Drag the future's card while a target is set. |
+| `EventEditor`, `SlotEditor`, `FormulaEditorPane` (Mac) | One tab each, with its own popovers and sheets. Each has a `minimumWidth`. |
+| `PanelView(store:actions:wheel:)` | The whole panel, as the app shows it. |
+
+**Moving through time.** A graph takes the wheel, the trackpad and pinches over itself, wherever it's placed: a view behind it watches the window's events and takes those inside its bounds (SwiftUI has no wheel events on macOS 14), and never takes clicks. Elsewhere the wheel scrolls what's under the pointer, as before. `TimelineWheel` holds whether the mouse has a horizontal wheel; graphs given the same one agree, and the app's remembers it in its defaults and lets the menu change it. `TimelineKeys.handle(_:store:)` answers the graph's keys (docs/UI.md, 4.1) for an app to call from its own key handling, as the panel does for keys no text field took.
+
+**Settings the views keep.** The panel remembers its side pane's side and widths under names of its own (`PanelView.sideKey` and the like, `EditTheFuture.panel.…`), so an app embedding it keeps them apart from its own. The Mac app moves the old, plain names across when it starts.
+
+**Still to do** (in order): a style that sets the views' colours, fonts, sizes and background, with today's look as the default (the views draw in the panel's dark colours for now, with an opaque panel background when they're on their own); then an example app built only on the public API, and trimming the rest of the public surface. On iOS, the graph has no touch gestures for moving through time yet.
 
 ## 3. Glossary
 

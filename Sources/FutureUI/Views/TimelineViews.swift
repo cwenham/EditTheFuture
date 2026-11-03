@@ -94,6 +94,9 @@ struct TimelineRows: View {
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
+    /// Whether the events strip and the lanes show under the focused graph.
+    var showsEvents = true
+    var showsLanes = true
     @State private var easing = ScaleEasing()
     /// Bumped when the last range arrives, so the clock stops.
     @State private var settled = 0
@@ -104,7 +107,7 @@ struct TimelineRows: View {
         let _ = easing.retarget(timeline.scaleTargets, at: now)
         let end = easing.end(after: now)
         TimelineRowsContent(timeline: timeline, scales: easing, cursor: cursor, backdrop: backdrop, plotWidth: plotWidth,
-                            focusHeight: focusHeight, interactions: interactions)
+                            focusHeight: focusHeight, interactions: interactions, showsEvents: showsEvents, showsLanes: showsLanes)
             .background {
                 if end != nil {
                     TimelineView(.animation) { context in
@@ -133,6 +136,8 @@ struct TimelineRowsContent: View {
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
+    var showsEvents = true
+    var showsLanes = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -188,51 +193,8 @@ struct TimelineRowsContent: View {
                 Color.clear.frame(width: TimelineLayout.valueWidth)
             }
 
-            HStack(alignment: .top, spacing: TimelineLayout.gap) {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text("Events").font(.system(size: 12)).foregroundStyle(Theme.secondary)
-                    if interactions != nil {
-                        Text("click a date or an event").font(.system(size: 10)).foregroundStyle(Theme.secondary)
-                    }
-                }
-                .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
-                .padding(.trailing, 8)
-                .padding(.top, 2)
-                let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
-                                               editingID: timeline.focus.editingEventID)
-                EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: Color(timeline.focus.color),
-                            draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
-                    .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
-                    .overlay(alignment: .topLeading) {
-                        if interactions != nil { EventHotspots(items: strip) }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                        if let id = EventsStrip.editableEvent(at: location, in: strip) {
-                            interactions?.editEvent(id)
-                        } else {
-                            interactions?.pickDate(Double(location.x / plotWidth))
-                        }
-                    }
-                    .accessibilityActions {
-                        if let interactions {
-                            ForEach(strip.filter { $0.kind != .generated }) { item in
-                                Button("Edit \(item.label), \(DateText.monthYear(item.date))") { interactions.editEvent(item.id) }
-                            }
-                        }
-                    }
-                Color.clear.frame(width: TimelineLayout.valueWidth)
-            }
-            .frame(height: TimelineLayout.eventsHeight)
-
-            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
-
-            VStack(spacing: TimelineLayout.laneSpacing) {
-                ForEach(timeline.lanes) { lane in
-                    LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
-                }
-            }
-            .padding(.top, 8)
+            if showsEvents { events }
+            if showsLanes { lanes }
         }
         .overlay(alignment: .topLeading) {
             Eased(timeline: timeline, scales: scales) { shown in
@@ -241,6 +203,58 @@ struct TimelineRowsContent: View {
             }
             .allowsHitTesting(false)
         }
+    }
+
+    /// The events strip under the time axis.
+    private var events: some View {
+        HStack(alignment: .top, spacing: TimelineLayout.gap) {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("Events").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                if interactions != nil {
+                    Text("click a date or an event").font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                }
+            }
+            .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
+            .padding(.trailing, 8)
+            .padding(.top, 2)
+            let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
+                                           editingID: timeline.focus.editingEventID)
+            EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: Color(timeline.focus.color),
+                        draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
+                .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
+                .overlay(alignment: .topLeading) {
+                    if interactions != nil { EventHotspots(items: strip) }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                    if let id = EventsStrip.editableEvent(at: location, in: strip) {
+                        interactions?.editEvent(id)
+                    } else {
+                        interactions?.pickDate(Double(location.x / plotWidth))
+                    }
+                }
+                .accessibilityActions {
+                    if let interactions {
+                        ForEach(strip.filter { $0.kind != .generated }) { item in
+                            Button("Edit \(item.label), \(DateText.monthYear(item.date))") { interactions.editEvent(item.id) }
+                        }
+                    }
+                }
+            Color.clear.frame(width: TimelineLayout.valueWidth)
+        }
+        .frame(height: TimelineLayout.eventsHeight)
+    }
+
+    /// The other slots' lanes, under a hairline.
+    @ViewBuilder private var lanes: some View {
+        Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
+
+        VStack(spacing: TimelineLayout.laneSpacing) {
+            ForEach(timeline.lanes) { lane in
+                LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
+            }
+        }
+        .padding(.top, 8)
     }
 }
 

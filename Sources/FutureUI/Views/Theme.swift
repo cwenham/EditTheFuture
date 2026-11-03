@@ -44,15 +44,16 @@ enum TimelineLayout {
         max(120, width - labelWidth - valueWidth - 2 * gap)
     }
 
-    /// Height of everything under the focused graph: axis, events, divider and lanes.
-    static func heightBelowFocus(laneCount: Int) -> CGFloat {
+    /// Height of everything under the focused graph: axis, events, divider and lanes. A graph
+    /// without the events strip or the lanes (`ScenarioGraph.Parts`) leaves them out.
+    static func heightBelowFocus(laneCount: Int, events: Bool = true, lanes showsLanes: Bool = true) -> CGFloat {
         let lanes = CGFloat(laneCount) * laneRowHeight + CGFloat(max(laneCount - 1, 0)) * laneSpacing
-        return axisHeight + eventsHeight + 11 + 8 + lanes
+        return axisHeight + (events ? eventsHeight : 0) + (showsLanes ? 11 + 8 + lanes : 0)
     }
 
     /// The focused graph takes whatever height the window leaves after the rows under it.
-    static func focusHeight(forTotal height: CGFloat, laneCount: Int) -> CGFloat {
-        max(minimumFocusHeight, height - heightBelowFocus(laneCount: laneCount))
+    static func focusHeight(forTotal height: CGFloat, laneCount: Int, events: Bool = true, lanes: Bool = true) -> CGFloat {
+        max(minimumFocusHeight, height - heightBelowFocus(laneCount: laneCount, events: events, lanes: lanes))
     }
 
     static var plotLeading: CGFloat { labelWidth + gap }

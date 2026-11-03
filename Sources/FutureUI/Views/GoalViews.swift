@@ -115,7 +115,7 @@ struct GoalHandle: View {
                     .onHover { hovering = $0 }
                     .grabPointer(active: dragStart != nil)
                     .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .named(PanelView.panelSpace))
+                        DragGesture(minimumDistance: 1, coordinateSpace: .named(ScenarioGraph.space))
                             .onChanged { value in
                                 if dragStart == nil {
                                     dragStart = place.value

@@ -195,21 +195,39 @@ struct PanelViewTests {
         defer { window.close() }
         await store.waitUntilIdle()
         settle(view)
-        // The app places the pointer in the hosting view's coordinates, which are top-left like SwiftUI's.
+        // The graph catches the wheel over itself: under the header, through the lanes, beside the side pane.
         #expect(view.isFlipped)
-        let frame = store.timelineFrame
+        let catcher = try #require(Self.gestureView(in: view))
+        let frame = catcher.convert(catcher.bounds, to: view)
         #expect(abs(frame.minY - 110) < 6)  // below the header (56), padding (14) and slot title (40)
         #expect(frame.maxY > 600)           // down through the lanes
         #expect(frame.maxY < 820 - 52)      // above the command bar
         #expect(frame.width > 700 && frame.width < 1400 - 300)  // not the side pane
-        #expect(store.isOverTimeline(CGPoint(x: frame.midX, y: frame.midY)))
-        #expect(!store.isOverTimeline(CGPoint(x: 5, y: 400)) || !store.isOverTimeline(CGPoint(x: 1395, y: 400)))
-        #expect(!store.isOverTimeline(CGPoint(x: frame.midX, y: 30)))
+        #expect(catcher.hitTest(NSPoint(x: 10, y: 10)) == nil)  // never takes clicks
+
+        // A wheel turned over it moves time, one way or the other (the view may already be at its earliest).
+        let before = store.frame
+        for lines: Int32 in [-3, 3] where store.frame == before {
+            let wheel = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0))
+            let event = try #require(NSEvent(cgEvent: wheel))
+            #expect(catcher.handler?(event) == true)
+        }
+        #expect(store.frame != before)
 
         // The wider Formula tab leaves less room for the graphs.
         store.showFormulaEditor()
         settle(view)
-        #expect(abs((frame.width - store.timelineFrame.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+        let narrower = catcher.convert(catcher.bounds, to: view)
+        #expect(abs((frame.width - narrower.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+    }
+
+    /// The view behind a graph that catches its wheel and pinch events.
+    static func gestureView(in view: NSView) -> TimelineGestureView? {
+        if let found = view as? TimelineGestureView { return found }
+        for subview in view.subviews {
+            if let found = gestureView(in: subview) { return found }
+        }
+        return nil
     }
 
     @Test("The scenario menu lists the scenarios, and its items switch, edit, add and duplicate without crashing")

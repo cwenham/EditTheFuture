@@ -19,13 +19,14 @@ public struct PanelActions {
 public struct PanelView: View {
     @Bindable var store: ScenarioStore
     let actions: PanelActions
+    let wheel: TimelineWheel?
     @FocusState private var commandFocused: Bool
-    @AppStorage("eventPaneSide") private var paneSideName = PaneSide.right.rawValue
+    @AppStorage(PanelView.sideKey) private var paneSideName = PaneSide.right.rawValue
     @State private var paneOffset = CGSize.zero
     @State private var paneDragLocation: CGPoint?
     /// The widths the side pane was dragged to (SidePane.width(for:) until it is).
-    @AppStorage("sidePaneWidth") private var slotPaneWidth = Double(SidePane.width)
-    @AppStorage("formulaPaneWidth") private var formulaPaneWidth = Double(SidePane.formulaWidth)
+    @AppStorage(PanelView.widthKey) private var slotPaneWidth = Double(SidePane.width)
+    @AppStorage(PanelView.formulaWidthKey) private var formulaPaneWidth = Double(SidePane.formulaWidth)
     /// While its edge is dragged: the width it had when the drag began.
     @State private var resizeStart: CGFloat?
 
@@ -36,9 +37,16 @@ public struct PanelView: View {
     static let panelSpace = "panel"
     static let paneGap: CGFloat = 16
 
-    public init(store: ScenarioStore, actions: PanelActions) {
+    /// Where the side pane's side and widths are remembered, in `UserDefaults.standard`.
+    public static let sideKey = "EditTheFuture.panel.side"
+    public static let widthKey = "EditTheFuture.panel.sidePaneWidth"
+    public static let formulaWidthKey = "EditTheFuture.panel.formulaPaneWidth"
+
+    /// - Parameter wheel: what the wheels do over the graph, shared with the app's menu; nil for the graph's own.
+    public init(store: ScenarioStore, actions: PanelActions, wheel: TimelineWheel? = nil) {
         self.store = store
         self.actions = actions
+        self.wheel = wheel
     }
 
     public var body: some View {
@@ -50,7 +58,7 @@ public struct PanelView: View {
             GeometryReader { area in
                 HStack(alignment: .top, spacing: Self.paneGap) {
                     if side == .left { pane(side: side, areaWidth: area.size.width) }
-                    TimelineArea(store: store)
+                    ScenarioGraph(store: store, wheel: wheel, drawsBackground: false)
                     if side == .right { pane(side: side, areaWidth: area.size.width) }
                 }
                 .overlay {
@@ -126,55 +134,6 @@ public struct PanelView: View {
             .offset(paneOffset)
             .shadow(color: .black.opacity(paneDragLocation == nil ? 0 : 0.5), radius: 24, y: 12)
             .zIndex(1)
-    }
-}
-
-/// The focus title, timeline rows and hover handling. It reads only the timeline state, so
-/// moving the pointer doesn't redraw it; the cursor views inside read the cursor themselves.
-struct TimelineArea: View {
-    let store: ScenarioStore
-
-    var body: some View {
-        let timeline = store.timelineState()
-        VStack(alignment: .leading, spacing: 8) {
-            FocusTitle(focus: timeline.focus, overlays: timeline.overlays)
-            GeometryReader { geometry in
-                let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
-                let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height, laneCount: timeline.lanes.count)
-                TimelineRows(timeline: timeline, cursor: .live(store), backdrop: .live(store), plotWidth: plotWidth,
-                             focusHeight: focusHeight,
-                             interactions: TimelineInteractions(
-                                selectSlot: { store.select(index: $0, click: $1) },
-                                pickDate: { store.beginEvent(at: timeline.frame.date(atFraction: $0)) },
-                                pickDateOnLane: { index, fraction in
-                                    store.beginEvent(at: timeline.frame.date(atFraction: fraction), slotIndex: index)
-                                },
-                                editEvent: { store.editEvent(id: $0) },
-                                openDrift: { store.openDriftRefit(slot: store.focused.id) },
-                                canSetGoal: { store.canSetGoal(at: $0) },
-                                beginGoal: { store.beginGoal(at: $0, value: $1) },
-                                dragGoal: { store.dragGoal(to: $0) },
-                                endGoal: { store.endGoalDrag() }))
-                    .contentShape(Rectangle())
-                    .onContinuousHover { phase in
-                        guard case .active(let location) = phase else { return }
-                        let x = location.x - TimelineLayout.plotLeading
-                        store.pointerHovered(at: Self.pointerOnScreen(else: location), fraction: Double(x / plotWidth))
-                    }
-            }
-            // The app sends the mouse wheel to time only over this area.
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PanelView.panelSpace)) } action: { store.timelineFrame = $0 }
-        }
-    }
-
-    /// Where the pointer is on screen, which changes only when the pointer moves. The hover's own
-    /// location also changes when the timeline shifts under a still pointer (a wider side pane).
-    static func pointerOnScreen(else local: CGPoint) -> CGPoint {
-        #if os(macOS)
-        NSEvent.mouseLocation
-        #else
-        local
-        #endif
     }
 }
 

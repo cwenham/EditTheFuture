@@ -44,20 +44,7 @@ struct SidePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            if let goal = store.goal, goal.slot == store.focused.id {
-                GoalCard(store: store, state: goal)
-            } else {
-                switch store.sidePane {
-                case .event: AddEventPane(store: store)
-                case .slot: SlotPane(store: store)
-                case .formula:
-                    #if os(macOS)
-                    FormulaPane(store: store)
-                    #else
-                    SlotPane(store: store)
-                    #endif
-                }
-            }
+            SidePaneContent(store: store)
         }
         .padding(16)
         .frame(width: width)
@@ -91,13 +78,7 @@ struct SidePane: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.secondary)
                 .help("Drag to dock on the other side")
-            HStack(spacing: 2) {
-                tab(.event, "Event", help: "Add an event  E")
-                tab(.slot, "Slot", help: "The focused slot's model and values  ⌘I")
-                tab(.formula, "Formula", help: "Edit the focused slot's formula  ⌥⌘I")
-            }
-            .padding(2)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            SidePaneTabs(store: store)
             Spacer()
             Button(action: onMoveToOtherSide) {
                 Image(systemName: side == .left ? "arrow.right.to.line" : "arrow.left.to.line")
@@ -121,6 +102,21 @@ struct SidePane: View {
             if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
         }
         #endif
+    }
+}
+
+/// The side pane's tabs: Event, Slot and Formula.
+struct SidePaneTabs: View {
+    @Bindable var store: ScenarioStore
+
+    var body: some View {
+        HStack(spacing: 2) {
+            tab(.event, "Event", help: "Add an event  E")
+            tab(.slot, "Slot", help: "The focused slot's model and values  ⌘I")
+            tab(.formula, "Formula", help: "Edit the focused slot's formula  ⌥⌘I")
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func tab(_ tab: ScenarioStore.SidePaneTab, _ title: String, help: String) -> some View {
@@ -148,6 +144,29 @@ struct SidePane: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// What the side pane shows under its tabs: the selected tab, or Drag the future's ways to get
+/// there while a target is set on the focused slot (docs/UI.md, 5.2).
+struct SidePaneContent: View {
+    let store: ScenarioStore
+
+    var body: some View {
+        if let goal = store.goal, goal.slot == store.focused.id {
+            GoalCard(store: store, state: goal)
+        } else {
+            switch store.sidePane {
+            case .event: AddEventPane(store: store)
+            case .slot: SlotPane(store: store)
+            case .formula:
+                #if os(macOS)
+                FormulaPane(store: store)
+                #else
+                SlotPane(store: store)
+                #endif
+            }
+        }
     }
 }
 

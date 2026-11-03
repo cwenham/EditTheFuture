@@ -4,16 +4,16 @@ import SwiftUI
 import FutureUI
 import FutureKit
 
-/// Owns the floating panel: showing, hiding, peeking, adding events, scrolling and keys.
+/// Owns the floating panel: showing, hiding, peeking, adding events and copying. The graph in it
+/// handles its own wheel and pinch; keys no text field took go to `TimelineKeys`.
 @MainActor
 final class PanelController {
     let store: ScenarioStore
     let panel: FloatingPanel
-    /// The panel's SwiftUI content, for placing the pointer in the panel's top-left coordinates.
-    private weak var hosting: NSView?
     private var peekGesture = PeekGesture()
     private(set) var isPeeking = false
-    private var eventMonitor: Any?
+    /// What the wheels do over the graph, remembered between launches. The menu bar item can change it.
+    let wheel = TimelineWheel(rememberingUnder: PanelController.horizontalWheelKey)
     /// What's behind the panel, blurred; hidden when the panel is set to clear.
     private weak var blur: NSVisualEffectView?
 
@@ -42,7 +42,7 @@ final class PanelController {
             copySnapshot: { [weak self] in self?.copy(.everything) },
             scenarios: scenarios
         )
-        let hosting = NSHostingView(rootView: PanelView(store: store, actions: actions))
+        let hosting = NSHostingView(rootView: PanelView(store: store, actions: actions, wheel: wheel))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hosting)
         for view in [blur, hosting] {
@@ -54,7 +54,6 @@ final class PanelController {
             ])
         }
         panel.contentView = container
-        self.hosting = hosting
         panel.setFrameAutosaveName("EditTheFuturePanel")
         if !panel.setFrameUsingName("EditTheFuturePanel") { panel.center() }
 
@@ -66,7 +65,7 @@ final class PanelController {
         panel.onToggleSlotSettings = { [weak self] in self?.store.toggleSlotSettings() }
         panel.onShowFormula = { [weak self] in self?.store.showFormulaEditor() }
         panel.onHide = { [weak self] in self?.hide() }
-        panel.onKey = { [weak self] event in self?.handleKey(event) ?? false }
+        panel.onKey = { [weak self] event in self.map { TimelineKeys.handle(event, store: $0.store) } ?? false }
         panel.onEscape = { [weak self] in
             guard let store = self?.store, store.goal != nil else { return false }
             store.cancelGoal()
@@ -87,11 +86,6 @@ final class PanelController {
         }
 
         followBlurSetting()
-
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
-            guard let self, event.window === self.panel else { return event }
-            return self.handleGesture(event) ? nil : event
-        }
     }
 
     /// Shows or hides the blur to match the store, and again each time the setting changes.
@@ -120,8 +114,6 @@ final class PanelController {
 
     /// Puts the panel away for good, when another scenario opens in its place.
     func tearDown() {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
-        eventMonitor = nil
         panel.orderOut(nil)
         // Frees the frame's name for the next panel, which remembers the same frame.
         panel.saveFrame(usingName: "EditTheFuturePanel")
@@ -174,80 +166,16 @@ final class PanelController {
         }
     }
 
-    // MARK: Input
-
-    private func handleGesture(_ event: NSEvent) -> Bool {
-        switch event.type {
-        case .magnify:
-            store.zoom(by: 1 - event.magnification)
-            return true
-        case .scrollWheel:
-            // Over anything but the graphs and lanes, the wheel scrolls what's under the pointer:
-            // the formula editor, the insert palette, the Slot tab.
-            guard let hosting, store.isOverTimeline(hosting.convert(event.locationInWindow, from: nil)) else { return false }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let (action, found) = scrollMapper.map(ScrollMapper.Input(
-                dx: Double(event.scrollingDeltaX), dy: Double(event.scrollingDeltaY),
-                precise: event.hasPreciseScrollingDeltas,
-                shift: flags.contains(.shift), command: flags.contains(.command),
-                inverted: event.isDirectionInvertedFromDevice))
-            if found { rememberHorizontalWheel(true, announce: true) }
-            switch action {
-            case .pan(let fraction): store.pan(by: fraction)
-            case .zoom(let factor): store.zoom(by: factor)
-            case .none: return false
-            }
-            return true
-        default:
-            return false
-        }
-    }
-
     // MARK: Mouse wheels
 
     static let horizontalWheelKey = "mouse.hasHorizontalWheel"
-    private var scrollMapper = ScrollMapper(hasHorizontalWheel: UserDefaults.standard.bool(forKey: horizontalWheelKey))
 
-    var hasHorizontalWheel: Bool { scrollMapper.hasHorizontalWheel }
+    var hasHorizontalWheel: Bool { wheel.hasHorizontalWheel }
 
-    /// Records whether the mouse has a horizontal wheel (found automatically, or set from the menu).
-    func rememberHorizontalWheel(_ has: Bool, announce: Bool = false) {
-        scrollMapper.hasHorizontalWheel = has
-        UserDefaults.standard.set(has, forKey: Self.horizontalWheelKey)
-        if announce {
-            store.say("Horizontal wheel found: the vertical wheel now zooms and the horizontal wheel scrolls through time.")
-        }
-    }
-
-    /// Keys from docs/UI.md, 4.1, when the command bar isn't being edited.
-    private func handleKey(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // ↑ and ↓ choose among Drag the future's fixes while they show (docs/UI.md, 5.2).
-        if store.goal != nil, flags.subtracting(.numericPad).subtracting(.function).isEmpty {
-            switch event.keyCode {
-            case 126: store.moveGoalSelection(by: -1); return true
-            case 125: store.moveGoalSelection(by: 1); return true
-            default: break
-            }
-        }
-        switch event.keyCode {
-        case 123: store.moveCursor(by: -1, years: flags.contains(.shift)); return true  // ←
-        case 124: store.moveCursor(by: 1, years: flags.contains(.shift)); return true   // →
-        default: break
-        }
-        guard flags.subtracting(.shift).isEmpty, let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
-        switch key {
-        case "t": store.jumpToNow(); return true
-        case "e": store.beginEvent(at: store.cursor); return true
-        case "=", "+": store.zoom(by: 0.8); return true
-        case "-": store.zoom(by: 1.25); return true
-        default:
-            if let number = Int(key), (1...ScenarioStore.bankSize).contains(number) {
-                store.focus(key: number)
-                return true
-            }
-            return false
-        }
+    /// Records whether the mouse has a horizontal wheel, as set from the menu. The graph finds one
+    /// itself the first time it's used.
+    func rememberHorizontalWheel(_ has: Bool) {
+        wheel.hasHorizontalWheel = has
     }
 }
 #endif

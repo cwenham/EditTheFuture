@@ -329,6 +329,10 @@ public final class ScenarioStore {
     @ObservationIgnored public var scenarioFolder: URL?
 
     /// Formulas being edited and not yet applied, by slot id.
+    /// How many formula editors show outside the side pane (FutureUI's `FormulaEditorPane`). While
+    /// any do, or the side pane's Formula tab shows, the focused slot's formula is kept checked.
+    @ObservationIgnored package var formulaEditorsShown = 0
+    var showsFormula: Bool { sidePane == .formula || formulaEditorsShown > 0 }
     public internal(set) var formulaDrafts: [UUID: String] = [:]
     /// What's wrong with each slot's formula as it's being edited, worked out shortly after typing stops.
     public internal(set) var formulaChecks: [UUID: FormulaCheck] = [:]
@@ -350,15 +354,6 @@ public final class ScenarioStore {
     var slotFailures: [UUID: ScenarioEngine.SlotFailure] = [:]
     /// Which slot each of `computed`'s arrays belongs to, so results can follow slots that move.
     @ObservationIgnored private var computedSlots: [UUID] = []
-
-    /// Where the graphs and lanes are, in the panel's top-left coordinates (the hosting view's). The mouse wheel moves
-    /// time only over them; elsewhere it scrolls what's under the pointer, like the formula editor.
-    @ObservationIgnored package var timelineFrame = CGRect.zero
-
-    /// Whether a point in the panel (top-left coordinates) is over the graphs and lanes.
-    package func isOverTimeline(_ point: CGPoint) -> Bool {
-        timelineFrame.contains(point)
-    }
 
     /// Called when the command bar asks for something only the app can do (copying).
     @ObservationIgnored public var onAppAction: ((CommandBarAction) -> Void)?
@@ -615,7 +610,7 @@ public final class ScenarioStore {
     public func reloadScripts() {
         ScriptPrograms.reloadLibraries()
         refreshSlots(focus: nil)
-        if slots.indices.contains(focusedIndex), sidePane == .formula { updateFormulaCheck(forSlotAt: focusedIndex) }
+        if slots.indices.contains(focusedIndex), showsFormula { updateFormulaCheck(forSlotAt: focusedIndex) }
         say("Reloaded the script libraries")
     }
 
@@ -1379,7 +1374,7 @@ public final class ScenarioStore {
             guard let index = slotIndex(id: id) else { continue }
             say("\(slots[index].title) stopped after \(DateText.monthYear(failure.date)): \(failure.text)", isError: true)
         }
-        if slots.indices.contains(focusedIndex), sidePane == .formula { updateFormulaCheck(forSlotAt: focusedIndex) }
+        if slots.indices.contains(focusedIndex), showsFormula { updateFormulaCheck(forSlotAt: focusedIndex) }
     }
 
     func requestGoal(_ request: ScenarioEngine.GoalRequest) {

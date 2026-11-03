@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Python takes a moment to start, so it starts now, off the main thread (docs/DESIGN.md, 6.4).
         DispatchQueue.global(qos: .utility).async { ScriptPrograms.prepare(.python) }
+        Self.movePanelSettings()
         NSApp.mainMenu = makeMainMenu()
         makeStatusItem()
         registerHotKeys()
@@ -323,6 +324,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             NSWorkspace.shared.open(ScriptPrograms.librariesFolder)
         } catch {
             store?.say("Couldn't make the Libraries folder: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    /// The side pane's side and widths were kept under plain names before November 2026. They now
+    /// have names of their own (`PanelView.sideKey`), so an app embedding the panel keeps them apart.
+    private static func movePanelSettings() {
+        let defaults = UserDefaults.standard
+        for (old, new) in [("eventPaneSide", PanelView.sideKey), ("sidePaneWidth", PanelView.widthKey),
+                           ("formulaPaneWidth", PanelView.formulaWidthKey)] {
+            guard let value = defaults.object(forKey: old) else { continue }
+            if defaults.object(forKey: new) == nil { defaults.set(value, forKey: new) }
+            defaults.removeObject(forKey: old)
         }
     }
 
