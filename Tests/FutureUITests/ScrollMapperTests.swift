@@ -1,4 +1,5 @@
 import Testing
+@testable import FutureKit
 @testable import FutureUI
 
 @Suite("Scroll mapping")

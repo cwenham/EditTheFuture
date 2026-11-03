@@ -1,8 +1,11 @@
 import Foundation
 import Testing
+import FutureTestSupport
 import AppKit
 import SwiftUI
 import FutureDocument
+@testable import FutureKit
+@testable import FutureFiles
 @testable import FutureUI
 
 /// Mounts the real panel in a window and drives it, to catch SwiftUI update crashes.
@@ -317,7 +320,7 @@ struct PanelViewTests {
 
     @Test("Scrolling back before the start, with readings there, draws without crashing")
     func beforeTheStart() async throws {
-        let tests = BeforeStartTests()
+        let tests = HistoryScenario()
         let store = try await tests.makeStore()
         let (window, view) = mount(store)
         defer { window.close() }
@@ -336,37 +339,4 @@ struct PanelViewTests {
         }
         #expect(store.frame.start >= tests.firstReading)
     }
-}
-
-extension ScenarioDefinition {
-    /// Slots that outgrow every number: ×10 a month (overflows to infinity in 2047), ×−3 a month,
-    /// one that turns into NaN once it overflows, and one that starts near the largest Double.
-    static let runaway = ScenarioDefinition(
-        name: "Runaway",
-        start: utc(2022, 1),
-        slots: [
-            SlotSpec(name: "Rocket", formula: """
-                step 1 month
-                param growth = 10
-                init balance = 1000
-                balance[t] = balance[t-1] * growth
-                on deposit: balance += event.amount
-                """, variable: "balance", format: .currency),
-            SlotSpec(name: "Sinker", formula: """
-                step 1 month
-                init n = -1
-                n[t] = n[t-1] * 3
-                """, variable: "n", format: .number),
-            SlotSpec(name: "Furnace", formula: """
-                step 1 month
-                init temp = 1
-                temp[t] = temp[t-1] * 100 - temp[t-1] * 90
-                """, variable: "temp", format: .temperature),
-            // Every value it ever shows is beyond the ±1e300 plots are clamped to.
-            SlotSpec(name: "Giant", formula: """
-                step 1 month
-                init size = 1e301
-                size[t] = size[t-1] * 1.001
-                """, variable: "size", format: .currency),
-        ])
 }

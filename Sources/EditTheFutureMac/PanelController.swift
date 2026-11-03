@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 import FutureUI
+import FutureKit
 
 /// Owns the floating panel: showing, hiding, peeking, adding events, scrolling and keys.
 @MainActor

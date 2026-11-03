@@ -1,7 +1,9 @@
 import Foundation
 import SwiftUI
 import Testing
+import FutureTestSupport
 import FutureEngine
+@testable import FutureKit
 @testable import FutureUI
 
 @Suite("Plot drawing")

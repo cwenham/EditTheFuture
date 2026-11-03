@@ -2,6 +2,7 @@
 import SwiftUI
 import FutureFormula
 import FutureScript
+import FutureKit
 
 /// The side pane's Formula tab (docs/UI.md, 5.7): the focused slot's formula, checked as you
 /// type, with fixes for its mistakes and a palette of functions and other slots' values.
@@ -27,11 +28,11 @@ struct FormulaPane: View {
         let current = check?.text == text ? check : nil
         let drafted = store.hasFormulaDraft(forSlotAt: index)
         let summaries = store.formulaSlotSummaries(excludingSlotAt: index)
-        let titles = Dictionary(uniqueKeysWithValues: store.slots.map { ($0.name, ($0.title, $0.color, $0.key)) })
+        let titles = Dictionary(uniqueKeysWithValues: store.slots.map { ($0.name, ($0.title, Color($0.color), $0.key)) })
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 10, height: 10)
+                Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
                 Text(slot.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Text(slot.summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
                 Spacer(minLength: 4)
@@ -399,7 +400,7 @@ struct ModuleNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 10, height: 10)
+                Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
                 Text(slot.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Text(slot.summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
             }

@@ -57,3 +57,16 @@ enum TimelineLayout {
 
     static var plotLeading: CGFloat { labelWidth + gap }
 }
+
+extension Color {
+    /// `Color(hex: "#5AA9FF")`
+    public init(hex: String) {
+        let digits = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = UInt32(digits, radix: 16) ?? 0xFFFFFF
+        self.init(.sRGB,
+                  red: Double((value >> 16) & 0xFF) / 255,
+                  green: Double((value >> 8) & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255,
+                  opacity: 1)
+    }
+}

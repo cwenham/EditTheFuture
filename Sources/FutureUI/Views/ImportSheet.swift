@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// Importing readings, in the side pane over the Slot tab (docs/UI.md, 5.10): which columns are
 /// the dates and the values, which of the slot's values they're readings of, what they'll be

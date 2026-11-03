@@ -1,0 +1,257 @@
+import Foundation
+import Testing
+import FutureTestSupport
+import FutureEngine
+import FutureSimulation
+import FutureFormula
+@testable import FutureKit
+
+
+@Suite("Command bar")
+struct CommandBarTests {
+    @Test("Navigation commands")
+    func navigation() throws {
+        #expect(try CommandBarParser.parse("now") == .jumpToNow)
+        #expect(try CommandBarParser.parse("  Today ") == .jumpToNow)
+        #expect(try CommandBarParser.parse("goto 2035") == .moveCursor(utc(2035, 1)))
+        #expect(try CommandBarParser.parse("go to Jun 2035") == .moveCursor(utc(2035, 6)))
+        #expect(try CommandBarParser.parse("show 2031-03-15") == .moveCursor(utc(2031, 3, 15)))
+        #expect(try CommandBarParser.parse("3") == .focus("3"))
+        #expect(try CommandBarParser.parse("focus Index fund") == .focus("Index fund"))
+    }
+
+    @Test("Adding deposits and withdrawals")
+    func events() throws {
+        #expect(try CommandBarParser.parse("+500") == .addEvent(kind: "deposit", amount: 500, at: nil, repeats: nil))
+        #expect(try CommandBarParser.parse("+500 monthly from 2027-03")
+                == .addEvent(kind: "deposit", amount: 500, at: utc(2027, 3), repeats: .monthly))
+        #expect(try CommandBarParser.parse("-$6,000 on Aug 2028")
+                == .addEvent(kind: "withdraw", amount: 6000, at: utc(2028, 8), repeats: nil, currency: "$"))
+        #expect(try CommandBarParser.parse("+1.2k every year")
+                == .addEvent(kind: "deposit", amount: 1200, at: nil, repeats: .yearly))
+        #expect(try CommandBarParser.parse("+ 250 fortnightly")
+                == .addEvent(kind: "deposit", amount: 250, at: nil, repeats: .weeks(2)))
+    }
+
+    @Test("Adding readings")
+    func readings() throws {
+        #expect(try CommandBarParser.parse("reading 41200")
+                == .addReading(slot: nil, value: 41_200, format: nil, currency: nil, percent: false, at: nil))
+        #expect(try CommandBarParser.parse("reading savings £41,200 on 2026-10-01")
+                == .addReading(slot: "savings", value: 41_200, format: .currency, currency: "£", percent: false, at: utc(2026, 10, 1)))
+        #expect(try CommandBarParser.parse("reading Index fund 5.2k at Oct 2026")
+                == .addReading(slot: "Index fund", value: 5_200, format: nil, currency: nil, percent: false, at: utc(2026, 10, 1)))
+        #expect(try CommandBarParser.parse("reading 21.5°C")
+                == .addReading(slot: nil, value: 21.5, format: .temperature, currency: nil, percent: false, at: nil))
+        #expect(try CommandBarParser.parse("reading 4.5%")
+                == .addReading(slot: nil, value: 0.045, format: nil, currency: nil, percent: true, at: nil))
+        #expect(throws: CommandBarError.self) { try CommandBarParser.parse("reading savings") }
+        #expect(throws: CommandBarError.self) { try CommandBarParser.parse("reading 5 on someday") }
+    }
+
+    @Test("Setting parameters")
+    func parameters() throws {
+        #expect(try CommandBarParser.parse("set rate 4% from 2027-06") == .setParameter(name: "rate", value: 0.04, at: utc(2027, 6)))
+        #expect(try CommandBarParser.parse("set monthly 650") == .setParameter(name: "monthly", value: 650, at: nil))
+    }
+
+    @Test("Adding and removing models")
+    func models() throws {
+        #expect(try CommandBarParser.parse("add savings account") == .addModel("savings account", slot: nil))
+        #expect(try CommandBarParser.parse("add Loan to 7") == .addModel("Loan", slot: 7))
+        #expect(try CommandBarParser.parse("add loan to slot 3") == .addModel("loan", slot: 3))
+        #expect(try CommandBarParser.parse("add loan slot 3") == .addModel("loan", slot: 3))
+        #expect(try CommandBarParser.parse("remove Energy bill") == .removeSlot("Energy bill"))
+        #expect(try CommandBarParser.parse("delete 4") == .removeSlot("4"))
+        #expect(ModelLibrary.named("savings account")?.id == "savings-account")
+        #expect(ModelLibrary.named("mortgage")?.id == "loan")
+        #expect(ModelLibrary.named("loan")?.id == "loan")
+        #expect(ModelLibrary.named("weight")?.id == "body-weight")
+        #expect(ModelLibrary.named("teleporter") == nil)
+        #expect(ModelLibrary.search("half-life").map(\.id) == ["radioactive-decay"])
+    }
+
+    @Test("Every library model compiles and declares what the Slot tab needs")
+    func library() throws {
+        for template in ModelLibrary.all {
+            let model = try SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName, modules: .app)
+            #expect(model.descriptor.variable(named: template.variable) != nil, "\(template.name) has no \(template.variable)")
+            for parameter in model.descriptor.variables where parameter.causality == .parameter {
+                #expect(parameter.label != nil, "\(template.name).\(parameter.name) has no label")
+                // Forecast models are fitted to readings, whose size only the readings know, so a
+                // level or a change per year has no range (DESIGN.md, 8.4).
+                if template.category != .forecast {
+                    #expect(parameter.minimum != nil && parameter.maximum != nil, "\(template.name).\(parameter.name) has no range")
+                }
+                if let value = model.declaredDefaults[parameter.name], let low = parameter.minimum, let high = parameter.maximum {
+                    #expect(value >= low && value <= high, "\(template.name).\(parameter.name)'s default is outside its range")
+                }
+            }
+        }
+        #expect(Set(ModelLibrary.all.map(\.id)).count == ModelLibrary.all.count)
+    }
+
+    @Test("Clipboard and undo")
+    func clipboard() throws {
+        #expect(try CommandBarParser.parse("copy") == .copySnapshot)
+        #expect(try CommandBarParser.parse("copy data") == .copyData)
+        #expect(try CommandBarParser.parse("undo") == .undo)
+        #expect(try CommandBarParser.parse("redo") == .redo)
+    }
+
+    @Test("Mistakes get helpful errors")
+    func errors() {
+        #expect(throws: CommandBarError.empty) { try CommandBarParser.parse("   ") }
+        #expect(throws: CommandBarError.badGoto("next tuesday")) { try CommandBarParser.parse("goto next tuesday") }
+        #expect(throws: CommandBarError.badAmount("lots")) { try CommandBarParser.parse("+lots") }
+        #expect(throws: CommandBarError.notUnderstood("make it rain")) { try CommandBarParser.parse("make it rain") }
+    }
+}
+
+@Suite("Goto a value")
+struct GotoValueTests {
+    func parse(_ text: String) throws -> CommandBarAction { try CommandBarParser.parse(text) }
+
+    @Test("A unit says which kind of slot to look in")
+    func units() throws {
+        #expect(try parse("goto 100°C") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("goto 100 °C") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("go to 25c") == .findValue(slot: nil, value: 25, format: .temperature))
+        #expect(try parse("goto -5 degrees") == .findValue(slot: nil, value: -5, format: .temperature))
+        #expect(try parse("goto 212°F") == .findValue(slot: nil, value: 100, format: .temperature))
+        #expect(try parse("goto 50 fahrenheit") == .findValue(slot: nil, value: 10, format: .temperature))
+        #expect(try parse("goto $1M") == .findValue(slot: nil, value: 1_000_000, format: .currency, currency: "$"))
+        #expect(try parse("goto $1,250,000") == .findValue(slot: nil, value: 1_250_000, format: .currency, currency: "$"))
+        #expect(try parse("goto 2.5bn dollars") == .findValue(slot: nil, value: 2.5e9, format: .currency, currency: "dollars"))
+        #expect(try parse("show −$6k") == .findValue(slot: nil, value: -6_000, format: .currency, currency: "$"))
+    }
+
+    @Test("A slot name before the value picks the slot, with or without a unit")
+    func slots() throws {
+        #expect(try parse("goto climate 100°C") == .findValue(slot: "climate", value: 100, format: .temperature))
+        #expect(try parse("goto Mortgage $0") == .findValue(slot: "Mortgage", value: 0, format: .currency, currency: "$"))
+        #expect(try parse("goto Index fund 1.5m") == .findValue(slot: "Index fund", value: 1_500_000, format: nil))
+        #expect(try parse("goto savings 50000") == .findValue(slot: "savings", value: 50_000, format: nil))
+        #expect(try parse("goto 3 $250k") == .findValue(slot: "3", value: 250_000, format: .currency, currency: "$"))
+    }
+
+    @Test("Dates still win, and a bare number that isn't a date needs a unit or slot")
+    func datesAndErrors() throws {
+        #expect(try parse("goto 2035") == .moveCursor(utc(2035, 1)))
+        #expect(try parse("goto jun 2035") == .moveCursor(utc(2035, 6)))
+        for text in ["50000", "$", "°C", "lots", "$1e400", "inf", "nan°C", "savings"] {
+            #expect(throws: CommandBarError.badGoto(text)) { try parse("goto " + text) }
+        }
+    }
+}
+
+@Suite("Formatting")
+struct FormattingTests {
+    @Test("Values and axis labels")
+    func values() {
+        #expect(ValueStyle.money(.usd).full(41223.4) == "$41,223")
+        #expect(ValueStyle.money(.usd).full(-6000) == "−$6,000")
+        #expect(ValueStyle.money(.usd).axis(250_000) == "$250k")
+        #expect(ValueStyle.money(.usd).axis(1_250_000) == "$1.25M")
+        #expect(ValueStyle.money(.usd).axis(0) == "$0")
+        #expect(ValueStyle.temperature.full(14.25) == "14.2 °C" || ValueStyle.temperature.full(14.25) == "14.3 °C")
+        #expect(ValueStyle.temperature.axis(15) == "15°")
+    }
+
+    @Test("Nice ticks cover the data with round steps")
+    func ticks() {
+        let money = niceTicks(low: 18_000, high: 163_000, includeZero: true)
+        #expect(money.domain == 0...200_000)
+        #expect(money.ticks == [0, 50_000, 100_000, 150_000, 200_000])
+        let temperature = niceTicks(low: 2.3, high: 20.4)
+        #expect(temperature.ticks.first! <= 2.3 && temperature.ticks.last! >= 20.4)
+        let flat = niceTicks(low: 5, high: 5)
+        #expect(flat.domain.lowerBound < 5 && flat.domain.upperBound > 5)
+    }
+
+    @Test("Numbers too big to write out, infinity and NaN")
+    func hugeValues() {
+        // Past Int.max (about 9.2e18) labels used to crash when converted to whole numbers.
+        #expect(ValueStyle.money(.usd).axis(2.5e9) == "$2.5B")
+        #expect(ValueStyle.money(.usd).axis(4e12) == "$4T")
+        #expect(ValueStyle.money(.usd).axis(2.5e25) == "$2.5e25")
+        #expect(ValueStyle.money(.usd).axis(-1e300) == "−$1e300")
+        #expect(ValueStyle.number.axis(1e19) == "1e19")
+        #expect(ValueStyle.temperature.axis(-3e20) == "−3e20°")
+        #expect(ValueStyle.money(.usd).full(1.234e18) == "$1.23e18")
+        #expect(ValueStyle.money(.usd).full(-.infinity) == "−$∞")
+        #expect(ValueStyle.number.full(.infinity) == "∞")
+        #expect(ValueStyle.temperature.full(5e30) == "5e30 °C")
+        #expect(ValueStyle.money(.usd).full(.nan) == "—")
+        #expect(ValueStyle.number.axis(.nan) == "—")
+        #expect(ValueStyle.money(.usd).full(999_999_999_999_999) == "$999,999,999,999,999")
+    }
+
+    @Test("Nice ticks stay finite and few, whatever the values")
+    func extremeTicks() {
+        let cases: [(Double, Double)] = [
+            (0, .infinity), (-.infinity, .infinity), (.nan, 5), (.nan, .nan),
+            (0, .greatestFiniteMagnitude), (-.greatestFiniteMagnitude, .greatestFiniteMagnitude),
+            (1e17, 1e17 + 16),  // a range smaller than the values' precision
+            (3e20, 3e20), (7, 2),
+        ]
+        for (low, high) in cases {
+            let result = niceTicks(low: low, high: high, includeZero: low == 0)
+            #expect(result.domain.lowerBound.isFinite && result.domain.upperBound.isFinite, "\(low)...\(high)")
+            #expect(result.domain.lowerBound < result.domain.upperBound, "\(low)...\(high)")
+            #expect((2...101).contains(result.ticks.count), "\(low)...\(high)")
+            #expect(Set(result.ticks).count == result.ticks.count, "\(low)...\(high): ticks repeat")
+            for tick in result.ticks { _ = ValueStyle.money(.usd).axis(tick) }
+        }
+    }
+
+    @Test("Lane ranges are valid and finite, whatever the values")
+    func laneDomains() {
+        let cases: [(Double, Double)] = [
+            (1.5e305, 1.7e308),  // everything visible beyond the plot limit: this used to trap
+            (-1.7e308, -1.5e305), (5, 3), (0, 0), (.nan, 1), (-.infinity, .infinity),
+            (1e17, 1e17 + 16), (-.greatestFiniteMagnitude, .greatestFiniteMagnitude),
+        ]
+        for (low, high) in cases {
+            let domain = ScenarioStore.laneDomain(low: low, high: high)
+            #expect(domain.lowerBound.isFinite && domain.upperBound.isFinite, "\(low)...\(high)")
+            #expect(domain.lowerBound < domain.upperBound, "\(low)...\(high)")
+        }
+        #expect(ScenarioStore.laneDomain(low: 5, high: 3).contains(4.9))
+    }
+
+    @Test("Slot names read naturally")
+    func names() {
+        #expect(displayName("IndexFund") == "Index fund")
+        #expect(displayName("Savings") == "Savings")
+        #expect(displayName("EnergyBill") == "Energy bill")
+    }
+}
+
+@Suite("Snapshot data")
+struct SnapshotDataTests {
+    let data = SnapshotData(
+        scenario: "Test", createdAt: utc(2026, 10), start: utc(2026, 1), end: utc(2026, 3), cursor: utc(2026, 2), now: utc(2026, 2),
+        slots: [
+            .init(name: "Savings", variable: "balance", color: "#5AA9FF", format: .currency,
+                  points: [.init(t: utc(2026, 1), v: 100), .init(t: utc(2026, 2), v: 110.5), .init(t: utc(2026, 3), v: 121)]),
+            .init(name: "Climate", variable: "temp", color: "#FF7A93", format: .temperature,
+                  points: [.init(t: utc(2026, 1), v: 2.5), .init(t: utc(2026, 3), v: 8)]),
+        ])
+
+    @Test("The table has one row per focused point and holds other slots' values")
+    func table() {
+        #expect(data.tsv() == """
+            Date\tSavings (balance)\tClimate (temp)
+            2026-01-01\t100.00\t2.50
+            2026-02-01\t110.50\t2.50
+            2026-03-01\t121.00\t8.00
+
+            """)
+    }
+
+    @Test("JSON round-trips")
+    func json() throws {
+        #expect(try SnapshotData.decode(data.json()) == data)
+    }
+}

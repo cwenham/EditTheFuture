@@ -1,5 +1,6 @@
 import SwiftUI
 import FutureEngine
+import FutureKit
 
 /// Predict with (docs/UI.md, 5.11): the models that could make the slot's projection, each fitted
 /// to its readings and scored on readings it didn't see. Hovering a model, or moving to it with ↑

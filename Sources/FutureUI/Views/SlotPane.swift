@@ -2,6 +2,7 @@ import SwiftUI
 import FutureDocument
 import FutureEngine
 import FutureFeeds
+import FutureKit
 
 /// The side pane's Slot tab (docs/UI.md, 5.7): the focused slot's name, model, parameters,
 /// starting values and display settings.
@@ -94,7 +95,7 @@ private struct SlotSettings: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
-                Circle().fill(slot.color).frame(width: 10, height: 10)
+                Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
                 TextField("Name", text: $nameText)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 14, weight: .semibold))

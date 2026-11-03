@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import FutureKit
 
 /// Writes the visible timeline to the pasteboard in several formats at once, so each app
 /// pastes the one it understands (DESIGN.md, section 11).

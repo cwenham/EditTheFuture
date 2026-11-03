@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// Things the panel asks the app to do (they need AppKit or the window).
 public struct PanelActions {
@@ -264,7 +265,7 @@ struct SlotChip: View {
         } label: {
             HStack(spacing: 7) {
                 Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
-                Circle().fill(slot.color).frame(width: 8, height: 8)
+                Circle().fill(Color(slot.color)).frame(width: 8, height: 8)
                 Text(slot.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
                 if slot.isPaused {
                     Image(systemName: "pause.circle.fill")
@@ -279,7 +280,7 @@ struct SlotChip: View {
             .background(selected ? Color.white.opacity(0.10) : overlaid ? Color.white.opacity(0.06) : .clear,
                         in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(selected ? Color.white.opacity(0.22) : overlaid ? slot.color.opacity(0.6) : Theme.hairline))
+                .stroke(selected ? Color.white.opacity(0.22) : overlaid ? Color(slot.color).opacity(0.6) : Theme.hairline))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -427,7 +428,7 @@ struct FocusTitle: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            RoundedRectangle(cornerRadius: 3).fill(focus.color).frame(width: 10, height: 10)
+            RoundedRectangle(cornerRadius: 3).fill(Color(focus.color)).frame(width: 10, height: 10)
             Text(focus.name).font(.system(size: 18, weight: .semibold))
             OverlayLegend(overlays: overlays)
             // The summary gives way first when the slots drawn over the graph need the room.
@@ -449,7 +450,7 @@ struct OverlayLegend: View {
             HStack(spacing: 10) {
                 ForEach(overlays) { overlay in
                     HStack(spacing: 5) {
-                        Capsule().fill(overlay.color).frame(width: 12, height: 3)
+                        Capsule().fill(Color(overlay.color)).frame(width: 12, height: 3)
                         Text(overlay.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
                         if overlay.ownScale {
                             Text("own scale").font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)

@@ -3,6 +3,7 @@ import FutureEngine
 import FutureFeeds
 #if os(macOS)
 import AppKit
+import FutureKit
 #endif
 
 /// The scenario's name at the top left of the header. Clicking it opens the scenario menu
@@ -85,7 +86,8 @@ enum ScenarioMenu {
         for package in scenarios {
             let item = ActionMenuItem(package.name) { actions.open(package) }
             item.state = package == current ? .on : .off
-            if package.url.deletingLastPathComponent().standardizedFileURL.path != actions.folder.standardizedFileURL.path {
+            if let folder = actions.folder,
+               package.url.deletingLastPathComponent().standardizedFileURL.path != folder.standardizedFileURL.path {
                 item.toolTip = package.url.deletingLastPathComponent().path
             }
             menu.addItem(item)

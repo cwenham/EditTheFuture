@@ -2,6 +2,7 @@ import SwiftUI
 import FutureDocument
 import FutureEngine
 import FutureFeeds
+import FutureKit
 
 /// The feed setup screen (docs/UI.md, 5.10): pick a ready-made feed or a source, fill in its
 /// settings and sign-in, test it, and add it to a slot or give it a slot of its own.

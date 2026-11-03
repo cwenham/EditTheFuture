@@ -1,6 +1,8 @@
 import SwiftUI
 import FutureEngine
 import FutureFormula
+import FutureKit
+import FutureSimulation
 
 /// The model picker (docs/UI.md, 5.7): opened from an empty slot chip to add a model, or from
 /// Change… in the Slot tab to give a slot a different one.
@@ -17,8 +19,8 @@ struct ModelPicker: View {
 
     private var templates: [ModelTemplate] {
         query.trimmingCharacters(in: .whitespaces).isEmpty
-            ? ModelLibrary.all.filter { $0.category == category }
-            : ModelLibrary.search(query)
+            ? store.configuration.templates.filter { $0.category == category }
+            : ModelLibrary.search(query, in: store.configuration.templates)
     }
 
     private var selected: ModelTemplate? {
@@ -67,7 +69,7 @@ struct ModelPicker: View {
         .onAppear {
             searchFocused = true
             // Changing a model starts on the slot's current one.
-            if let index = changingIndex, let current = ModelLibrary.all.first(where: { $0.name == store.slots[index].model }) {
+            if let index = changingIndex, let current = store.configuration.templates.first(where: { $0.name == store.slots[index].model }) {
                 category = current.category
                 selection = current.id
             }
@@ -164,7 +166,7 @@ struct ModelPicker: View {
     @ViewBuilder
     private var detail: some View {
         if let template = selected {
-            TemplateDetail(template: template, start: store.start,
+            TemplateDetail(template: template, modules: store.configuration.modules, start: store.start,
                            money: changingIndex.map { store.slots[$0].money } ?? store.money(inSlotAt: -1),
                            color: color, warning: warning(for: template), actionTitle: actionTitle, action: choose)
                 .id(template.id)
@@ -176,7 +178,7 @@ struct ModelPicker: View {
     private var color: Color {
         switch request {
         case .add(let position): return Color(hex: SlotPalette.color(forSlotAt: position))
-        case .change: return changingIndex.map { store.slots[$0].color } ?? Theme.proposal
+        case .change: return changingIndex.map { Color(store.slots[$0].color) } ?? Theme.proposal
         }
     }
 
@@ -218,6 +220,7 @@ struct KindBadge: View {
 /// handles, reads and sends.
 private struct TemplateDetail: View {
     let template: ModelTemplate
+    let modules: ModuleCatalog
     let start: Date
     /// How its values would be written: in the scenario's currency, or the changed slot's.
     let money: ValueStyle
@@ -228,7 +231,7 @@ private struct TemplateDetail: View {
 
     @State private var preview: [Sample]?
 
-    private var facts: TemplateFacts { TemplateFacts.of(template) }
+    private var facts: TemplateFacts { TemplateFacts.of(template, modules: modules) }
 
     var body: some View {
         let facts = self.facts
@@ -277,7 +280,7 @@ private struct TemplateDetail: View {
         .padding(14)
         .task(id: template.id) {
             guard facts.reads == nil else { return }
-            preview = await TemplatePreview.samples(for: template, start: start)
+            preview = await TemplatePreview.samples(for: template, start: start, modules: modules)
         }
     }
 
@@ -333,17 +336,17 @@ struct TemplateFacts {
 
     private static var cache: [String: TemplateFacts] = [:]
 
-    static func of(_ template: ModelTemplate) -> TemplateFacts {
+    static func of(_ template: ModelTemplate, modules: ModuleCatalog) -> TemplateFacts {
         if let facts = cache[template.id] { return facts }
-        let facts = make(template)
+        let facts = make(template, modules: modules)
         cache[template.id] = facts
         return facts
     }
 
-    private static func make(_ template: ModelTemplate) -> TemplateFacts {
+    private static func make(_ template: ModelTemplate, modules: ModuleCatalog) -> TemplateFacts {
         let model: any AuthoredModel
         do {
-            model = try SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName)
+            model = try SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName, modules: modules)
         } catch {
             return TemplateFacts(line: template.kind.title, reads: nil, parameters: [], starting: [], error: String(describing: error))
         }
@@ -369,9 +372,10 @@ struct TemplateFacts {
 
 /// Computes a model's line for the picker on a background thread: the main thread never computes.
 enum TemplatePreview {
-    static func samples(for template: ModelTemplate, start: Date, years: Int = 20) async -> [Sample] {
+    static func samples(for template: ModelTemplate, start: Date, years: Int = 20, modules: ModuleCatalog) async -> [Sample] {
         await Task.detached(priority: .userInitiated) {
-            guard let model = try? SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName),
+            guard let model = try? SlotConfig.model(kind: template.kind, source: template.formula, name: template.slotName,
+                                                    modules: modules),
                   model.descriptor.inputs.isEmpty, model.descriptor.subscriptions.isEmpty else { return [Sample]() }
             let scenario = Scenario(start: start)
             guard let id = try? scenario.addSlot(template.slotName, model: model) else { return [] }

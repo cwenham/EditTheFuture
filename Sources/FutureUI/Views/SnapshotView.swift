@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// What the clipboard image shows: the timeline without any controls.
 public struct SnapshotView: View {
@@ -14,7 +15,7 @@ public struct SnapshotView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(state.scenarioName).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.secondary)
-                RoundedRectangle(cornerRadius: 3).fill(state.focus.color).frame(width: 10, height: 10)
+                RoundedRectangle(cornerRadius: 3).fill(Color(state.focus.color)).frame(width: 10, height: 10)
                 Text(state.focus.name).font(.system(size: 18, weight: .semibold))
                 OverlayLegend(overlays: state.timeline.overlays)
                 Spacer()

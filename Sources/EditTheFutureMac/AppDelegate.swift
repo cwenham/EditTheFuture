@@ -4,7 +4,9 @@ import Carbon
 import FutureCommands
 import FutureDocument
 import FutureScript
+import FutureFiles
 import FutureUI
+import FutureKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {

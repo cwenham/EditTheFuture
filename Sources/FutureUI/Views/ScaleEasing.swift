@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import FutureKit
 
 /// Which graph a value range belongs to. A range only eases between values of the same kind:
 /// focusing a slot with another kind of value (degrees after dollars) changes the scale at once,

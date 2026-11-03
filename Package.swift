@@ -30,6 +30,8 @@ let package = Package(
         .library(name: "FutureFeeds", targets: ["FutureFeeds"]),
         .library(name: "FutureSimulation", targets: ["FutureSimulation"]),
         .library(name: "FutureVisuals", targets: ["FutureVisuals"]),
+        .library(name: "FutureKit", targets: ["FutureKit"]),
+        .library(name: "FutureFiles", targets: ["FutureFiles"]),
         .library(name: "FutureUI", targets: ["FutureUI"]),
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
@@ -59,13 +61,21 @@ let package = Package(
         .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation", "WorldEpidemicSimulation",
                                                           "WormSimulation"],
                 path: "Sources/Simulations/Catalog"),
-        // Backdrops: visuals drawn faintly behind the focused graph, such as the world map (docs/DESIGN.md, 9.6).
+        // What backdrops show, such as the world's countries and the bright stars, without drawing them (docs/DESIGN.md, 9.6).
         .target(name: "FutureVisuals", dependencies: ["FutureEngine"]),
-        .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
-                                                 "FutureFeeds", "FutureSimulation", "SimulationCatalog", "FutureVisuals"]),
+        // A scenario to run, edit and read, for the app or any app that embeds it (docs/DESIGN.md, 2.1).
+        // It owns the engine's thread and undo, and draws nothing: no SwiftUI, AppKit or UIKit.
+        .target(name: "FutureKit", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
+                                                  "FutureFeeds", "FutureSimulation", "SimulationCatalog", "FutureVisuals"]),
+        // Scenarios kept as .etf folders, with their feeds and exchange rates kept up to date. Optional for apps that embed FutureKit.
+        .target(name: "FutureFiles", dependencies: ["FutureKit", "FutureEngine", "FutureDocument", "FutureFeeds", "FutureScript",
+                                                    "FutureSimulation"]),
+        // The views: the graph, the editing panes and the whole panel, and the backdrops drawn behind the graph.
+        .target(name: "FutureUI", dependencies: ["FutureKit", "FutureEngine", "FutureFormula", "FutureScript", "FutureDocument",
+                                                 "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
         // The compiler records the App Intents' constant values, which scripts/build-app.sh turns into
         // the app's Metadata.appintents, as Xcode would, so Shortcuts, Siri and Spotlight find them.
-        .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
+        .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureKit", "FutureFiles", "FutureCommands", "FutureEngine", "FutureScript",
                                                                     "FutureDocument", "FutureFeeds"],
                           swiftSettings: [.unsafeFlags(["-emit-const-values", "-Xfrontend", "-const-gather-protocols-file",
                                                         "-Xfrontend", Context.packageDirectory + "/scripts/appintents-protocols.json"])]),
@@ -76,7 +86,7 @@ let package = Package(
         // Runs a script model without the app: swift run etf-script <file>
         .executableTarget(name: "etf-script", dependencies: ["FutureScript", "FutureEngine"]),
         // Performance benchmarks: swift run -c release etf-bench
-        .executableTarget(name: "etf-bench", dependencies: ["FutureUI", "FutureFormula", "FutureEngine", "FutureSimulation",
+        .executableTarget(name: "etf-bench", dependencies: ["FutureUI", "FutureKit", "FutureFormula", "FutureEngine", "FutureSimulation",
                                                              "SimulationCatalog"]),
         .testTarget(name: "FutureEngineTests", dependencies: ["FutureEngine"]),
         .testTarget(name: "FutureFormulaTests", dependencies: ["FutureFormula", "FutureEngine"]),
@@ -94,7 +104,12 @@ let package = Package(
                     path: "Tests/Simulations/WorldEpidemic"),
         .testTarget(name: "WormSimulationTests", dependencies: ["WormSimulation", "FutureSimulation", "FutureEngine"],
                     path: "Tests/Simulations/Worm"),
-        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
-                                                          "FutureDocument", "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
+        // Dates and scenarios the tests of FutureKit, FutureFiles and FutureUI share.
+        .target(name: "FutureTestSupport", dependencies: ["FutureKit", "FutureEngine", "FutureDocument"], path: "Tests/Support"),
+        .testTarget(name: "FutureKitTests", dependencies: ["FutureKit", "FutureTestSupport", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
+                                                           "FutureDocument", "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
+        .testTarget(name: "FutureFilesTests", dependencies: ["FutureFiles", "FutureKit", "FutureTestSupport", "FutureEngine", "FutureDocument", "FutureFeeds"]),
+        .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureKit", "FutureFiles", "FutureTestSupport", "FutureEngine",
+                                                          "FutureFormula", "FutureSimulation", "FutureVisuals"]),
     ] + pythonTargets
 )

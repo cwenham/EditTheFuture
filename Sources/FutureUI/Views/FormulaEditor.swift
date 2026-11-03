@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import FutureFormula
 import FutureScript
+import FutureKit
 
 /// The formula editor (docs/UI.md, 5.7): an AppKit text view with line numbers, colouring,
 /// underlined mistakes and a completion list that follows the caret.

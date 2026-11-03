@@ -2,6 +2,7 @@ import SwiftUI
 import FutureVisuals
 import CoreText
 import FutureEngine
+import FutureKit
 
 /// Click handlers for the timeline. Fractions are 0...1 across the plot width.
 struct TimelineInteractions {
@@ -58,9 +59,9 @@ struct BackdropLayer: View {
     let source: BackdropSource
 
     var body: some View {
-        if let state = source.state, let backdrop = BackdropCatalog.builtIn.backdrop(id: state.id) {
+        if let state = source.state, let backdrop = BackdropDrawings.builtIn.backdrop(id: state.id) {
             ZStack {
-                BackdropBase(id: state.id, color: state.input.color).equatable()
+                BackdropBase(id: state.id, color: Color(state.input.color)).equatable()
                 Canvas { context, size in backdrop.draw(state.input, in: &context, size: size) }
             }
             .allowsHitTesting(false)
@@ -76,7 +77,7 @@ struct BackdropBase: View, Equatable {
 
     var body: some View {
         Canvas { context, size in
-            BackdropCatalog.builtIn.backdrop(id: id)?.drawBase(color: color, in: &context, size: size)
+            BackdropDrawings.builtIn.backdrop(id: id)?.drawBase(color: color, in: &context, size: size)
         }
     }
 }
@@ -148,7 +149,7 @@ struct TimelineRowsContent: View {
                         if timeline.focus.goal != nil {
                             Eased(timeline: timeline, scales: scales) { shown in
                                 if let goal = shown.focus.goal {
-                                    GoalOverlay(goal: goal, frame: shown.frame, domain: shown.focus.yDomain, color: shown.focus.color)
+                                    GoalOverlay(goal: goal, frame: shown.frame, domain: shown.focus.yDomain, color: Color(shown.focus.color))
                                 }
                             }
                         }
@@ -199,7 +200,7 @@ struct TimelineRowsContent: View {
                 .padding(.top, 2)
                 let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
                                                editingID: timeline.focus.editingEventID)
-                EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: timeline.focus.color,
+                EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: Color(timeline.focus.color),
                             draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
                     .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
                     .overlay(alignment: .topLeading) {
@@ -236,7 +237,7 @@ struct TimelineRowsContent: View {
         .overlay(alignment: .topLeading) {
             Eased(timeline: timeline, scales: scales) { shown in
                 CursorOverlay(cursor: cursor, frame: shown.frame, plotWidth: plotWidth, focusHeight: focusHeight,
-                              focusDomain: shown.focus.yDomain, focusColor: shown.focus.color, overlays: shown.overlays)
+                              focusDomain: shown.focus.yDomain, focusColor: Color(shown.focus.color), overlays: shown.overlays)
             }
             .allowsHitTesting(false)
         }
@@ -280,11 +281,11 @@ struct FocusChart: View {
         let focus = timeline.focus
         // Other slots drawn over the graph go underneath, a little thinner (docs/UI.md, 5.12).
         var series = timeline.overlays.map { overlay in
-            PlotSeries(samples: overlay.samples, color: overlay.color.opacity(focus.goal == nil ? 0.9 : 0.35), lineWidth: 1.75,
+            PlotSeries(samples: overlay.samples, color: Color(overlay.color).opacity(focus.goal == nil ? 0.9 : 0.35), lineWidth: 1.75,
                        domain: overlay.ownScale ? overlay.yDomain : nil)
         }
         // While a target is set, the line as it is fades, so the proposed path stands out.
-        series.append(PlotSeries(samples: focus.samples, color: focus.color.opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2))
+        series.append(PlotSeries(samples: focus.samples, color: Color(focus.color).opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2))
         if !focus.preview.isEmpty {
             series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
         }
@@ -308,7 +309,7 @@ struct FocusChart: View {
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
                           bands: bands, series: series, rules: rules,
-                          eventLines: PlotEventLines(dates: Self.eventLineDates(focus.events), color: focus.color.opacity(0.22)),
+                          eventLines: PlotEventLines(dates: Self.eventLineDates(focus.events), color: Color(focus.color).opacity(0.22)),
                           readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
                           modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
@@ -351,7 +352,7 @@ struct CursorOverlay: View {
                 ForEach(overlays) { overlay in
                     if let value = state.overlayValues[overlay.id], let y = dotY(value, domain: overlay.yDomain) {
                         Circle()
-                            .fill(overlay.color)
+                            .fill(Color(overlay.color))
                             .frame(width: 7, height: 7)
                             .offset(x: x - 3.5, y: y - 3.5)
                     }
@@ -769,7 +770,7 @@ struct LaneRow: View {
                         .monospacedDigit()
                         .foregroundStyle(Theme.secondary)
                         .frame(width: 10)
-                    RoundedRectangle(cornerRadius: 2).fill(lane.color).frame(width: 3, height: 22)
+                    RoundedRectangle(cornerRadius: 2).fill(Color(lane.color)).frame(width: 3, height: 22)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 4) {
                             Text(lane.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -841,7 +842,7 @@ struct LanePlot: View {
 
     var body: some View {
         PlotCanvas(frame: timeline.frame, domain: lane.easedDomain(by: scales), now: timeline.now,
-                   series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
+                   series: [PlotSeries(samples: lane.samples, color: Color(lane.color), lineWidth: 1.6)],
                    rules: [PlotRule(date: timeline.now, color: Theme.nowLine)], modelStart: timeline.start)
     }
 }

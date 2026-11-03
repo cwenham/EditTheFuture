@@ -1,5 +1,7 @@
 import Foundation
 import Testing
+import FutureTestSupport
+@testable import FutureKit
 @testable import FutureUI
 
 /// Graphs' value ranges easing to new ones over a second (docs/UI.md, 2.4).

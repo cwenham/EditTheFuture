@@ -1,5 +1,6 @@
 import SwiftUI
 import FutureEngine
+import FutureKit
 
 /// Where values go on the focused graph, for views placed over it.
 private struct GraphMapping {

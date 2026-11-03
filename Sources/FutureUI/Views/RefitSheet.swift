@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// Refit, in the side pane over the Slot tab (docs/UI.md, 5.11): which values may change, which
 /// readings count, what the fit found, and Apply. The graph shows the fitted line dashed.

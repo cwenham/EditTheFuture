@@ -2,6 +2,7 @@
 import AppKit
 import UserNotifications
 import FutureUI
+import FutureKit
 
 /// Sends a notification when a slot's readings start drifting while the panel isn't showing, and
 /// opens Refit when it's clicked (docs/UI.md, 5.6).

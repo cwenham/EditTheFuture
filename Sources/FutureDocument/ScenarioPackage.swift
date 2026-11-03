@@ -74,3 +74,28 @@ public struct ScenarioPackage: Sendable, Hashable {
         try? FileManager.default.removeItem(at: cacheURL(slot: slot))
     }
 }
+
+extension ScenarioPackage {
+    /// The folder name for a scenario called `name`: slashes and colons become dashes, and leading
+    /// dots go, so the folder isn't hidden.
+    public static func folderName(for name: String) -> String {
+        var text = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        while text.hasPrefix(".") { text.removeFirst() }
+        text = text.trimmingCharacters(in: .whitespaces)
+        // Room for ".etf" within the 255 bytes a file name can have.
+        while text.utf8.count > 200 { text.removeLast() }
+        return text.isEmpty ? "Untitled" : text
+    }
+
+    /// `base`, else `base 2`, `base 3`… whichever no scenario there uses.
+    public static func uniqueName(_ base: String, taken: Set<String>) -> String {
+        var name = base, number = 2
+        while taken.contains(Self.folderName(for: name).lowercased()) {
+            name = "\(base) \(number)"
+            number += 1
+        }
+        return name
+    }
+}

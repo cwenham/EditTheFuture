@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// Which side of the panel the add-event pane is docked on.
 public enum PaneSide: String, Sendable {
@@ -26,7 +27,7 @@ struct AddEventPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 9, height: 9)
+                Circle().fill(Color(slot.color)).frame(width: 9, height: 9)
                 Text(slot.title).font(.system(size: 14, weight: .semibold))
                 Spacer()
                 if isEditing {

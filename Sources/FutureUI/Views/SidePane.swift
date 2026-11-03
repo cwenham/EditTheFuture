@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// The side pane (docs/UI.md, section 3): docked on one side of the timeline, with an Event tab
 /// for adding events and a Slot tab for the focused slot's model and values.

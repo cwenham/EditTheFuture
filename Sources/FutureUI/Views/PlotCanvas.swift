@@ -1,5 +1,6 @@
 import SwiftUI
 import FutureEngine
+import FutureKit
 
 /// One line on a plot.
 struct PlotSeries {
