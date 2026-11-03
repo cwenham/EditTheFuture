@@ -63,6 +63,9 @@ private struct SlotSettings: View {
             if !slot.parameterValues.isEmpty {
                 section("Parameters") {
                     ForEach(slot.parameterValues) { value in
+                        if let place = SlotPane.place(startingAt: value, in: slot.parameterValues) {
+                            CountryMenu(store: store, slotID: slot.id, latitude: place.latitude, longitude: place.longitude)
+                        }
                         ValueRow(store: store, slotID: slot.id, value: value, isParameter: true,
                                  changes: store.scheduledChanges(of: value, inSlotAt: index))
                     }
@@ -71,6 +74,9 @@ private struct SlotSettings: View {
             if !slot.startingValues.isEmpty {
                 section("Starting values · \(DateText.monthYear(store.start))") {
                     ForEach(slot.startingValues) { value in
+                        if let place = SlotPane.place(startingAt: value, in: slot.startingValues) {
+                            CountryMenu(store: store, slotID: slot.id, latitude: place.latitude, longitude: place.longitude)
+                        }
                         ValueRow(store: store, slotID: slot.id, value: value, isParameter: false, changes: [])
                     }
                 }
@@ -343,6 +349,49 @@ private struct SlotSettings: View {
     }
 }
 
+extension SlotPane {
+    /// The latitude and longitude of a place whose first half is `value`, so the country menu goes above it.
+    static func place(startingAt value: SlotValue, in values: [SlotValue]) -> (latitude: SlotValue, longitude: SlotValue)? {
+        guard let coordinate = value.coordinate,
+              let index = values.firstIndex(of: value),
+              let partner = values.firstIndex(where: { $0.name == coordinate.partner }), index < partner else { return nil }
+        let pair = coordinate.axis == .latitude ? (value, values[partner]) : (values[partner], value)
+        return (pair.0, pair.1)
+    }
+}
+
+/// A menu of countries over a place's latitude and longitude: choosing one sets both to the point
+/// where the world map puts its name, as one change. Its title is the country nearest the place now.
+private struct CountryMenu: View {
+    let store: ScenarioStore
+    let slotID: UUID
+    let latitude: SlotValue
+    let longitude: SlotValue
+
+    var body: some View {
+        let nearest = latitude.value.flatMap { lat in longitude.value.flatMap { CountryPlaces.nearest(latitude: lat, longitude: $0) } }
+        HStack(spacing: 6) {
+            Text("Country").font(.system(size: 13))
+            Spacer(minLength: 4)
+            Menu {
+                ForEach(CountryPlaces.all) { country in
+                    Button(country.name) {
+                        guard let index = store.slotIndex(id: slotID) else { return }
+                        store.setStartingValues([latitude.name: country.latitude, longitude.name: country.longitude],
+                                                inSlotAt: index)
+                    }
+                }
+            } label: {
+                Text(nearest.map { "Nearest: \($0.name)" } ?? "Choose a country")
+            }
+            .fixedSize()
+            .help("Set \(latitude.label.lowercased()) and \(longitude.label.lowercased()) to the middle of a country. "
+                  + "Or type them, or paste both into either field.")
+            .accessibilityLabel("Country for \(latitude.label) and \(longitude.label)")
+        }
+    }
+}
+
 /// One parameter or starting value: its label, a field to type it, and a slider when the model
 /// gives a range. Dragging shows a dashed preview; letting go applies it.
 private struct ValueRow: View {
@@ -477,6 +526,10 @@ private struct ValueRow: View {
             text = shown.map(value.text) ?? ""
             return
         }
+        if let coordinate = value.coordinate {
+            commitCoordinate(typed, coordinate)
+            return
+        }
         guard let parsed = value.parse(typed), parsed.isFinite else {
             error = "“\(typed)” isn't a number. Try 4.5%, $1,200, 1.5k or 21°C."
             return
@@ -484,6 +537,26 @@ private struct ValueRow: View {
         error = nil
         store.setStartingValue(value.name, to: parsed, inSlotAt: slotIndex)
         text = value.text(parsed)
+    }
+
+    /// A latitude or longitude, or both pasted together into either field: "51.5074, -0.1278".
+    private func commitCoordinate(_ typed: String, _ coordinate: SlotValue.Coordinate) {
+        switch GeoText.parse(typed, for: coordinate.axis) {
+        case .one(let degrees):
+            error = nil
+            store.setStartingValue(value.name, to: degrees, inSlotAt: slotIndex)
+            text = value.text(degrees)
+        case .both(let latitude, let longitude):
+            error = nil
+            let mine = coordinate.axis == .latitude ? latitude : longitude
+            let theirs = coordinate.axis == .latitude ? longitude : latitude
+            store.setStartingValues([value.name: mine, coordinate.partner: theirs], inSlotAt: slotIndex)
+            text = value.text(mine)
+        case nil:
+            let limit = coordinate.axis == .latitude ? "−90 (south) to 90 (north)" : "−180 (west) to 180 (east)"
+            error = "“\(typed)” isn't a \(coordinate.axis == .latitude ? "latitude" : "longitude"). It runs from \(limit); "
+                + "try 51.5074, 51.5074° N, 51°30′26″N, or both: 51.5074, -0.1278."
+        }
     }
 }
 

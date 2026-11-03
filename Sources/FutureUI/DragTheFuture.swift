@@ -201,7 +201,8 @@ extension ScenarioStore {
     private func changeOptions(slotAt index: Int) -> [GoalState.Option] {
         let slot = slots[index]
         var options = [GoalState.Option(id: "anything", label: "Anything")]
-        options += slot.parameterValues.map { GoalState.Option(id: "p:" + $0.name, label: $0.label) }
+        // Not where a place is: moving where an outbreak starts isn't a way to reach a number.
+        options += slot.parameterValues.filter { $0.coordinate == nil }.map { GoalState.Option(id: "p:" + $0.name, label: $0.label) }
         options += slot.eventKinds.map { GoalState.Option(id: "e:" + $0, label: "One-off " + $0) }
         return options
     }
@@ -220,7 +221,7 @@ extension ScenarioStore {
                                 bounds: value.sliderRange, step: nil))
         }
         let later = state.startOptions.last.flatMap { $0 > state.start ? $0 : nil }
-        for value in slot.parameterValues where state.change == "anything" || state.change == "p:" + value.name {
+        for value in slot.parameterValues where value.coordinate == nil && (state.change == "anything" || state.change == "p:" + value.name) {
             parameter(value, from: state.start, later: false)
             if let later { parameter(value, from: later, later: true) }
         }

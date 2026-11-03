@@ -148,6 +148,8 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
     public let isChanged: Bool
     /// What it means, when the model says.
     public var about: String? = nil
+    /// Half of a latitude and longitude pair, typed as text with no slider (`markingPlaces`).
+    public var coordinate: Coordinate? = nil
 
     /// The hover text: its name in the formula, its whole label (which may be cut short beside the
     /// field), and what it means: "scanRate: Scans a second per infected host" then a sentence.
@@ -159,7 +161,7 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
 
     /// The slider's range, when the model gives a usable one.
     public var sliderRange: ClosedRange<Double>? {
-        guard let low = minimum, let high = maximum, low.isFinite, high.isFinite, low < high else { return nil }
+        guard coordinate == nil, let low = minimum, let high = maximum, low.isFinite, high.isFinite, low < high else { return nil }
         return low...high
     }
 
@@ -177,7 +179,7 @@ public struct SlotValue: Identifiable, Sendable, Equatable {
     }
 
     public func text(_ value: Double) -> String {
-        SlotValue.text(value, quantity, money: money)
+        coordinate == nil ? SlotValue.text(value, quantity, money: money) : GeoText.text(value)
     }
 
     /// Reads what was typed, in the slot's style: "4.5%", "£1,200", "1.234,5 €", "1.5k", "21°C".
