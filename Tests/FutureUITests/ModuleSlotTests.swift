@@ -26,8 +26,8 @@ struct ModuleSlotTests {
         #expect(epidemic.variable == "infectious")
         #expect(epidemic.format == .number)
         #expect(ModelLibrary.named("epidemic")?.id == "epidemic")
-        #expect(ModelLibrary.search("swift").map(\.id) == ["epidemic"])
-        #expect(ModelLibrary.search("infection").map(\.id) == ["epidemic"])
+        #expect(ModelLibrary.search("swift").map(\.id) == ["epidemic", "world-epidemic"])
+        #expect(ModelLibrary.search("infection").map(\.id) == ["epidemic", "world-epidemic"])
     }
 
     @Test("Adding the module gives a slot that runs, takes its events, and has no formula to edit")

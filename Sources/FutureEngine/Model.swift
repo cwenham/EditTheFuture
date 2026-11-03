@@ -123,6 +123,17 @@ public enum Capability: String, Hashable, Sendable, Codable {
     case assimilatesReadings
 }
 
+/// How a field's values are best shaded: a hint from the model to visuals (docs/DESIGN.md, 4.10).
+public enum FieldScale: Hashable, Sendable, Codable {
+    /// Each against the largest at the time, so the most is always the brightest.
+    case relative
+    /// Shares of a whole, 0 to 1, as they are.
+    case share
+    /// From `faintest` to `full` on a logarithmic scale, for values that span many powers of ten, such
+    /// as the share of a country infectious: one in a million is just visible, a tenth is full.
+    case logarithmic(faintest: Double, full: Double)
+}
+
 /// A field: one value for each of a set of keys, such as each country's share infected
 /// (docs/DESIGN.md, 4.10). A model works it out from its state when asked, so it isn't stored for
 /// every step as variables are.
@@ -134,13 +145,17 @@ public struct FieldDescriptor: Hashable, Sendable, Codable {
     public var geometry: String
     public var keys: [String]
     public var quantity: Quantity?
+    /// How to shade it. nil is `share` for percents and `relative` for anything else.
+    public var scale: FieldScale?
 
-    public init(name: String, label: String? = nil, geometry: String, keys: [String], quantity: Quantity? = nil) {
+    public init(name: String, label: String? = nil, geometry: String, keys: [String], quantity: Quantity? = nil,
+                scale: FieldScale? = nil) {
         self.name = name
         self.label = label
         self.geometry = geometry
         self.keys = keys
         self.quantity = quantity
+        self.scale = scale
     }
 }
 

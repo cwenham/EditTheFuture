@@ -1,4 +1,5 @@
 import Foundation
+import FutureDocument
 import FutureEngine
 import FutureScript
 import FutureSimulation
@@ -61,6 +62,8 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
     /// The variable the graph shows.
     public let variable: String
     public let format: ValueFormat
+    /// What a new slot draws behind its graph (docs/DESIGN.md, 9.6).
+    public var backdrop: BackdropBinding?
 
     public init(id: String, name: String, category: Category, kind: ModelKind = .formula, summary: String,
                 slotName: String, formula: String, variable: String, format: ValueFormat) {
@@ -77,18 +80,22 @@ public struct ModelTemplate: Identifiable, Hashable, Sendable {
 
     /// The template as a slot of a scenario definition.
     public func slot(named name: String? = nil, values: [String: Double] = [:], position: Int? = nil) -> SlotSpec {
-        SlotSpec(name: name ?? slotName, model: self.name, kind: kind, formula: formula, variable: variable, format: format,
-                 position: position, values: values)
+        var spec = SlotSpec(name: name ?? slotName, model: self.name, kind: kind, formula: formula, variable: variable, format: format,
+                            position: position, values: values)
+        spec.backdrop = backdrop
+        return spec
     }
 
-    /// A module as the picker lists it. Its format is that of the value it shows first.
+    /// A module as the picker lists it. Its format is that of the value it shows first, and new slots
+    /// get the backdrop it suggests.
     init(module: any SimulationModule) {
         let info = module.info
-        let quantity = (try? module.makeModel(name: info.slotName, values: [:], data: .none))?
+        let quantity = (try? ModuleCatalog.app.makeModel(module.reference, name: info.slotName, values: [:]))?
             .descriptor.variable(named: info.shows)?.quantity
         self.init(id: module.id, name: info.name, category: Category(rawValue: info.category) ?? .growth,
                   kind: .module(module.reference), summary: info.summary, slotName: info.slotName, formula: "",
                   variable: info.shows, format: ValueFormat(quantity))
+        backdrop = info.backdrop.flatMap(BackdropBinding.init(text:))
     }
 
     /// What a slot's model is called when it starts from this template: blank ones are the slot's own.
@@ -114,7 +121,7 @@ public enum ModelLibrary {
     ] + (ScriptLanguage.python.isAvailable ? [marketSwings, blankPython] : []) + ForecastModels.library + modules
 
     /// The simulation modules built into the app (docs/DESIGN.md, 6.5), as the picker lists them.
-    public static let modules: [ModelTemplate] = ModuleCatalog.builtIn.modules.map(ModelTemplate.init(module:))
+    public static let modules: [ModelTemplate] = ModuleCatalog.app.modules.map(ModelTemplate.init(module:))
 
     /// The Epidemic module.
     public static var epidemic: ModelTemplate { modules.first { $0.id == "epidemic" }! }

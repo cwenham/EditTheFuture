@@ -63,7 +63,7 @@ struct SlotConfig: Sendable, Equatable {
         switch kind {
         case .formula: return try FormulaModel(source, name: name, values: values)
         case .script(let language): return try ScriptModel(source, language: language, name: name, values: values)
-        case .module(let reference): return try ModuleCatalog.builtIn.makeModel(reference, name: name, values: values)
+        case .module(let reference): return try ModuleCatalog.app.makeModel(reference, name: name, values: values)
         case .plugin, .remote: throw ScriptError("\(kind.title) models can't run yet.")
         }
     }
