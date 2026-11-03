@@ -3,7 +3,7 @@ import FutureKit
 
 // The panes for editing a scenario, for any app that embeds them (docs/DESIGN.md, 2.1). Each fills
 // the frame it's given, down to its minimum width, and brings its own popovers and sheets. They draw
-// in the panel's colours for now; a style an app can set comes later.
+// in the current `FutureStyle`, on its panel colour.
 
 /// The side pane's tabs and what they show: Event, Slot and Formula, or Drag the future's ways to
 /// get there while a target is set (docs/UI.md, 3 and 5.2). It follows the graph: clicking a date
@@ -87,16 +87,17 @@ public struct FormulaEditorPane: View {
 }
 #endif
 
-/// What the panes have in the panel around them: its padding, colours and dark appearance.
+/// What the panes have in the panel around them: its padding, colours and appearance, from the style.
 struct EditorChrome: ViewModifier {
     let minimumWidth: CGFloat
+    @Environment(\.futureStyle.panePadding) private var padding
 
     func body(content: Content) -> some View {
         content
-            .padding(16)
+            .padding(padding)
             .frame(minWidth: minimumWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(Theme.text)
             .background(Theme.panel)
-            .environment(\.colorScheme, .dark)
+            .futureAppearance()
     }
 }

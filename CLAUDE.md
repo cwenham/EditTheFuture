@@ -21,6 +21,7 @@ A Swift app (Mac first, then iPad and iPhone) showing an infinite, editable grap
 - **Commits:** commit only when the user asks, on that branch. Merge into `main` only when the user asks. The remote is `origin` (github.com/cwenham/EditTheFuture); push only when the user asks.
 - **Docs:** keep DESIGN.md and UI.md in step with the code, written plainly.
 - **Layers** (DESIGN.md 2.1): `FutureKit` (the store and engine) and `FutureFiles` import no SwiftUI, AppKit or UIKit; colours there are `RGBA`. `FutureUI` is only views. Something the views or the app need from `FutureKit` is `package`, not `public`, unless an app embedding the package needs it too.
+- **Styles** (DESIGN.md 2.1): views draw with `Theme` colours (faint fills are `Theme.ink.opacity(…)`) and `.futureFont(size, weight:)`, never fixed colours such as `Color.white` or `.font(.system(size:))`, so an app's `FutureStyle` reaches them. Where a plain `Color` is needed, read `@Environment(\.futureStyle)` and use `style[Theme.x]`.
 - **Threads:** the main thread never computes. `ScenarioEngine` (an actor) owns the scenario, and `ScenarioStore` draws from its cached results. Tests `await store.waitUntilIdle()` before reading results.
 - **Redraws:** never assign an `@Observable` property its current value. Views read only what they draw (`timelineState()`, `cursorState()`, `statusText()`).
 - **Extreme values:** values can be huge, infinite or NaN.

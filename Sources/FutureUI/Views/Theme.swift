@@ -1,28 +1,36 @@
 import SwiftUI
 
-/// Colors and sizes from docs/UI.md, section 2.
+/// The colours views draw with, looked up in the current `FutureStyle` where they're drawn
+/// (docs/UI.md, section 2, for the standard ones).
 public enum Theme {
-    public static let panel = Color(.sRGB, red: 20 / 255, green: 22 / 255, blue: 27 / 255, opacity: 1)
-    public static let text = Color(hex: "#ECEEF1")
-    public static let secondary = Color(hex: "#A3A9B1")
-    public static let hairline = Color.white.opacity(0.08)
-    public static let chipBorder = Color.white.opacity(0.14)
-    public static let futureTint = Color.white.opacity(0.03)
+    public static let panel = ThemeColor(.panel)
+    public static let text = ThemeColor(.text)
+    public static let secondary = ThemeColor(.secondary)
+    /// White on dark styles, black on light: faint fills, borders and selections are this at a low opacity.
+    public static let ink = ThemeColor(.ink)
+    /// Text on a filled `proposal` button.
+    public static let onAccent = ThemeColor(.onAccent)
+    public static let hairline = ThemeColor(.hairline)
+    public static let chipBorder = ThemeColor(.chipBorder)
+    public static let futureTint = ThemeColor(.futureTint)
     /// Shade left of the scenario's start, where there are only readings (docs/UI.md, 2.4).
-    public static let beforeStart = Color.black.opacity(0.18)
+    public static let beforeStart = ThemeColor(.beforeStart)
     /// The dashed line at the scenario's start, where the models' lines begin.
-    public static let startLine = Color.white.opacity(0.3)
-    public static let grid = Color.white.opacity(0.07)
-    public static let nowLine = Color.white.opacity(0.45)
-    public static let cursorLine = Color.white.opacity(0.85)
-    public static let proposal = Color(hex: "#A9D0FF")
-    public static let warning = Color(hex: "#FFC77A")
-    /// Behind warnings such as the drift pill: rgba(255,180,84,0.16) (docs/UI.md, 2.1).
-    public static let warningFill = Color(.sRGB, red: 1, green: 180 / 255, blue: 84 / 255, opacity: 0.16)
-    public static let error = Color(hex: "#FF9C9C")
-    public static let success = Color(hex: "#9FE3C4")
+    public static let startLine = ThemeColor(.startLine)
+    public static let grid = ThemeColor(.grid)
+    public static let nowLine = ThemeColor(.nowLine)
+    public static let cursorLine = ThemeColor(.cursorLine)
+    public static let proposal = ThemeColor(.proposal)
+    public static let warning = ThemeColor(.warning)
+    /// Behind warnings such as the drift pill (docs/UI.md, 2.1).
+    public static let warningFill = ThemeColor(.warningFill)
+    public static let error = ThemeColor(.error)
+    public static let success = ThemeColor(.success)
     /// Readings: dots on a thin line, drawn at 85% (docs/UI.md, 2.4).
-    public static let reading = Color(hex: "#ECEEF1")
+    public static let reading = ThemeColor(.reading)
+    /// Behind the formula editor, and its completion list.
+    public static let codeBackground = ThemeColor(.codeBackground)
+    public static let codePopup = ThemeColor(.codePopup)
 }
 
 /// Column layout shared by the focused graph, the axis rows and every lane,

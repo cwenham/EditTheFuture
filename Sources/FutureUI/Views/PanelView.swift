@@ -78,7 +78,7 @@ public struct PanelView: View {
         .foregroundStyle(Theme.text)
         .background(Theme.panel.opacity(store.opacity))
         .coordinateSpace(name: Self.panelSpace)
-        .environment(\.colorScheme, .dark)
+        .futureAppearance()
         .onChange(of: store.commandBarFocusRequest) { commandFocused = true }
     }
 
@@ -162,7 +162,7 @@ struct PanelHeader: View {
                     .padding(.trailing, 6)
                 IconButton(systemName: "doc.on.doc", label: "Copy snapshot (Command-C)", action: actions.copySnapshot)
                 HStack(spacing: 6) {
-                    Text("Opacity").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                    Text("Opacity").futureFont(12).foregroundStyle(Theme.secondary)
                     Slider(value: $store.opacity, in: 0.6...1)
                         .frame(width: 80)
                         .controlSize(.mini)
@@ -171,7 +171,7 @@ struct PanelHeader: View {
                     Toggle("Blur", isOn: $store.blursBehind)
                         .toggleStyle(.checkbox)
                         .controlSize(.small)
-                        .font(.system(size: 12))
+                        .futureFont(12)
                         .foregroundStyle(Theme.secondary)
                         .help("Blur what's behind the panel. Off, the panel is clear, so you can read the windows beneath it.")
                         .accessibilityLabel("Blur behind panel")
@@ -223,12 +223,12 @@ struct SlotChip: View {
             if let index = store.slotIndex(id: slot.id), let click = SlotClick.current { store.select(index: index, click: click) }
         } label: {
             HStack(spacing: 7) {
-                Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
+                Text("\(slot.key)").futureFont(11).monospacedDigit().foregroundStyle(Theme.secondary)
                 Circle().fill(Color(slot.color)).frame(width: 8, height: 8)
-                Text(slot.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(slot.title).futureFont(13, weight: .medium).lineLimit(1)
                 if slot.isPaused {
                     Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.warning)
                         .accessibilityLabel("Paused")
                 }
@@ -236,10 +236,11 @@ struct SlotChip: View {
             .padding(.leading, 8)
             .padding(.trailing, 10)
             .frame(height: 30)
-            .background(selected ? Color.white.opacity(0.10) : overlaid ? Color.white.opacity(0.06) : .clear,
+            .background(selected ? Theme.ink.opacity(0.10) : overlaid ? Theme.ink.opacity(0.06) : .clear,
                         in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(selected ? Color.white.opacity(0.22) : overlaid ? Color(slot.color).opacity(0.6) : Theme.hairline))
+                .stroke(selected ? AnyShapeStyle(Theme.ink.opacity(0.22)) : overlaid ? AnyShapeStyle(Color(slot.color).opacity(0.6))
+                        : AnyShapeStyle(Theme.hairline)))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -251,7 +252,7 @@ struct SlotChip: View {
               ?? "Focus \(slot.title)  \(slot.key). ⌘-click to \(overlaid ? "take it off" : "draw it over") the graph, ⇧-click for a range.")
         .contextMenu { SlotMenu(store: store, slot: slot) }
         .draggable(slot.id.uuidString) {
-            Text(slot.title).font(.system(size: 13, weight: .medium)).padding(6)
+            Text(slot.title).futureFont(13, weight: .medium).padding(6)
         }
         .dropDestination(for: String.self) { items, _ in
             store.dropSlot(items.first, atPosition: slot.key - 1)
@@ -309,13 +310,13 @@ struct EmptySlotChip: View {
             store.openPicker(.add(position: position))
         } label: {
             HStack(spacing: 6) {
-                Text("\(key)").font(.system(size: 11)).monospacedDigit()
-                Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
+                Text("\(key)").futureFont(11).monospacedDigit()
+                Image(systemName: "plus").futureFont(9, weight: .semibold)
             }
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.ink.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -349,8 +350,8 @@ struct NowButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.uturn.backward").font(.system(size: 11, weight: .semibold))
-                Text("Now").font(.system(size: 13, weight: .medium))
+                Image(systemName: "arrow.uturn.backward").futureFont(11, weight: .semibold)
+                Text("Now").futureFont(13, weight: .medium)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
@@ -371,7 +372,7 @@ struct IconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 13))
+                .futureFont(13)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
@@ -388,10 +389,10 @@ struct FocusTitle: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             RoundedRectangle(cornerRadius: 3).fill(Color(focus.color)).frame(width: 10, height: 10)
-            Text(focus.name).font(.system(size: 18, weight: .semibold))
+            Text(focus.name).futureFont(18, weight: .semibold)
             OverlayLegend(overlays: overlays)
             // The summary gives way first when the slots drawn over the graph need the room.
-            Text(focus.summary).font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1)
+            Text(focus.summary).futureFont(12).foregroundStyle(Theme.secondary).lineLimit(1)
                 .layoutPriority(-1)
             Spacer(minLength: 0)
         }
@@ -410,9 +411,9 @@ struct OverlayLegend: View {
                 ForEach(overlays) { overlay in
                     HStack(spacing: 5) {
                         Capsule().fill(Color(overlay.color)).frame(width: 12, height: 3)
-                        Text(overlay.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Text(overlay.name).futureFont(13, weight: .medium).lineLimit(1)
                         if overlay.ownScale {
-                            Text("own scale").font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                            Text("own scale").futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                     }
                     .fixedSize()
@@ -437,27 +438,27 @@ struct PanelFooter: View {
     var body: some View {
         HStack(spacing: 14) {
             HStack(spacing: 10) {
-                Image(systemName: "sparkle").font(.system(size: 12))
+                Image(systemName: "sparkle").futureFont(12)
                 TextField("Add an event or run a command, e.g. +500 monthly from 2027-03", text: $store.commandText)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .futureFont(13)
                     .focused(commandFocused)
                     .onSubmit { store.runCommandFromPanel() }
                     .accessibilityLabel("Command")
                 Text("⌘K")
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.16)))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.ink.opacity(0.16)))
             }
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+            .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline))
 
             Text(store.message ?? store.statusText())
-                .font(.system(size: 12))
+                .futureFont(12)
                 .foregroundStyle(store.messageIsError ? Theme.error : Theme.secondary)
                 .lineLimit(1)
                 .frame(maxWidth: 420, alignment: .trailing)

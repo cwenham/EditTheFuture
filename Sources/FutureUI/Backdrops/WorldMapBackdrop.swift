@@ -23,8 +23,8 @@ public struct WorldMapBackdrop: Backdrop {
         let rect = Self.mapRect(in: size)
         guard rect.width > 1, rect.height > 1 else { return }
         let world = Self.cache.paths(in: rect).world
-        context.fill(world, with: .color(.white.opacity(0.045)))
-        context.stroke(world, with: .color(.white.opacity(0.10)), style: StrokeStyle(lineWidth: 0.5, lineJoin: .round))
+        context.fill(world, with: .style(Theme.ink.opacity(0.045)))
+        context.stroke(world, with: .style(Theme.ink.opacity(0.10)), style: StrokeStyle(lineWidth: 0.5, lineJoin: .round))
     }
 
     /// Countries shaded by the field, and the point.

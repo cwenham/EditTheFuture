@@ -23,7 +23,7 @@ struct ScenarioTitle: View {
         if let actions {
             Button { showMenu(actions) } label: { label(menu: true) }
                 .buttonStyle(.plain)
-                .background(Color.white.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
+                .background(Theme.ink.opacity(hovering ? 0.08 : 0), in: RoundedRectangle(cornerRadius: 8))
                 .onHover { hovering = $0 }
                 #if os(macOS)
                 .background(MenuAnchorView(anchor: anchor))
@@ -43,14 +43,14 @@ struct ScenarioTitle: View {
     private func label(menu: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 13, weight: .semibold))
+                .futureFont(13, weight: .semibold)
             Text(store.name)
-                .font(.system(size: 14, weight: .semibold))
+                .futureFont(14, weight: .semibold)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if menu {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+                    .futureFont(9, weight: .bold)
                     .foregroundStyle(Theme.secondary)
             }
         }
@@ -156,7 +156,7 @@ struct ScenarioFormView: View {
     var body: some View {
         if let form = store.scenarioForm {
             VStack(alignment: .leading, spacing: 14) {
-                Text(title(form)).font(.system(size: 15, weight: .semibold))
+                Text(title(form)).futureFont(15, weight: .semibold)
 
                 field("Name") {
                     TextField("Name", text: binding(form, \.name))
@@ -226,7 +226,7 @@ struct ScenarioFormView: View {
                         }
                         if let signUp = RateProviders.openExchangeRates.signIn.signUp {
                             Link("Get an App ID", destination: signUp)
-                                .font(.system(size: 11))
+                                .futureFont(11)
                                 .foregroundStyle(Theme.proposal)
                         }
                     }
@@ -238,7 +238,7 @@ struct ScenarioFormView: View {
                         HStack(spacing: 8) {
                             TextField("The engine's own", text: binding(form, \.seedText))
                                 .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 13).monospacedDigit())
+                                .futureFont(13).monospacedDigit()
                                 .onSubmit(save)
                                 .accessibilityLabel("Seed")
                             Button("New Seed") { store.scenarioForm?.seedText = ScenarioForm.text(seed: ScenarioForm.randomSeed()) }
@@ -250,7 +250,7 @@ struct ScenarioFormView: View {
 
                 if let message = form.problem ?? form.failure {
                     Text(message)
-                        .font(.system(size: 12))
+                        .futureFont(12)
                         .foregroundStyle(Theme.error)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -269,7 +269,7 @@ struct ScenarioFormView: View {
             .frame(width: Self.width, alignment: .leading)
             .presentationBackground(Theme.panel)
             .foregroundStyle(Theme.text)
-            .environment(\.colorScheme, .dark)
+            .futureAppearance()
             .onAppear { nameFocused = true }
         }
     }
@@ -351,14 +351,14 @@ struct ScenarioFormView: View {
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.secondary)
+            Text(label).futureFont(12, weight: .medium).foregroundStyle(Theme.secondary)
             content()
         }
     }
 
     private func hint(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .futureFont(11)
             .foregroundStyle(Theme.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }

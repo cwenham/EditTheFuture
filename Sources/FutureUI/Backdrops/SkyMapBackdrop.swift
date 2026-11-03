@@ -36,7 +36,7 @@ public struct SkyMapBackdrop: Backdrop {
             let unit = Hammer.unit(rightAscension: ra, declination: dec)
             return CGPoint(x: rect.minX + unit.x * rect.height, y: rect.minY + unit.y * rect.height)
         }
-        context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.10)), lineWidth: 0.5)
+        context.stroke(Path(ellipseIn: rect), with: .style(Theme.ink.opacity(0.10)), lineWidth: 0.5)
         // The celestial equator and the ecliptic, tilted 23.44° to it; each broken where it wraps.
         let tilt = 23.44 * Double.pi / 180
         for line in ["equator", "ecliptic"] {
@@ -54,7 +54,7 @@ public struct SkyMapBackdrop: Backdrop {
                 if let last, abs(point.x - last.x) < rect.width / 2 { path.addLine(to: point) } else { path.move(to: point) }
                 last = point
             }
-            context.stroke(path, with: .color(.white.opacity(line == "ecliptic" ? 0.09 : 0.06)),
+            context.stroke(path, with: .style(Theme.ink.opacity(line == "ecliptic" ? 0.09 : 0.06)),
                            style: StrokeStyle(lineWidth: 0.6, dash: line == "ecliptic" ? [3, 3] : []))
         }
         let scale = min(1, rect.height / 400)

@@ -55,7 +55,24 @@ Begun in November 2026. The engine and the graph are meant to be used by other a
 
 **Settings the views keep.** The panel remembers its side pane's side and widths under names of its own (`PanelView.sideKey` and the like, `EditTheFuture.panel.…`), so an app embedding it keeps them apart from its own. The Mac app moves the old, plain names across when it starts.
 
-**Still to do** (in order): a style that sets the views' colours, fonts, sizes and background, with today's look as the default (the views draw in the panel's dark colours for now, with an opaque panel background when they're on their own); then an example app built only on the public API, and trimming the rest of the public surface. On iOS, the graph has no touch gestures for moving through time yet.
+**How the views look.** A `FutureStyle` sets the views' colours, fonts and appearance, through the environment: `.futureStyle(style)` on the views or anything around them. `.standard` is the panel's look (UI.md, section 2) and the default; `.light` is the same views on a light background. An app starts from either and changes what it wants:
+
+| Part | What it sets |
+|---|---|
+| `colors` | The panel colour behind everything (`.clear` lets what's behind show), text and secondary text, `ink` (white on dark, black on light: faint fills, borders and selections are it at a low opacity), the text on filled buttons, hairlines, the graph's grid, tints and lines, proposals, warnings, errors, successes and readings, and the formula editor's colours (`code`). Slots keep their own colours, which come from the scenario. |
+| `fonts` | A `scale` for every size, a `family` in place of the system font (code stays monospaced), or the system font's `design`. |
+| `colorScheme` | Light or dark, for the controls inside: buttons, menus, text fields. |
+| `panePadding`, `cornerRadius` | Inside the editing panes. |
+
+How the views follow it:
+
+- `Theme.text` and the other colours are `ThemeColor`s: a `ShapeStyle` that looks its colour up in the style where it's drawn, so `.foregroundStyle(Theme.secondary)` needs nothing else. Canvases draw them with `.style(_:)`. Code that needs a plain `Color`, such as the values a plot is built from, reads the style from the environment and asks it: `style[Theme.proposal]`.
+- Fixed sizes go through `.futureFont(size, weight:design:)`, which reads the style's fonts. Text drawn in a canvas uses `context.environment.futureStyle.fonts`. The events strip's labels keep the system font at 11 points, because they're measured with CoreText to stop them overlapping.
+- The formula editor's `NSTextView` gets its colours and font size from the style when SwiftUI updates it (`FormulaColors`), and colours its text again when they change.
+- Views never use fixed colours such as `Color.white`; the clipboard image is always drawn in the standard style.
+- The graph's columns (the label and value columns, lane heights) don't grow with the font scale, so a large scale can cut labels short.
+
+**Still to do:** an example app built only on the public API, and trimming the rest of the public surface. On iOS, the graph has no touch gestures for moving through time yet.
 
 ## 3. Glossary
 

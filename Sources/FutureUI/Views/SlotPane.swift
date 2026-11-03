@@ -51,7 +51,7 @@ private struct SlotSettings: View {
             if store.pendingRemoval == slot.id { removalQuestion }
             if let reason = slot.pausedReason {
                 Label {
-                    Text(reason).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text(reason).futureFont(12).fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "pause.circle")
                 }
@@ -94,20 +94,20 @@ private struct SlotSettings: View {
     private var nameRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("\(slot.key)").font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary)
+                Text("\(slot.key)").futureFont(11).monospacedDigit().foregroundStyle(Theme.secondary)
                 Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
                 TextField("Name", text: $nameText)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 14, weight: .semibold))
+                    .futureFont(14, weight: .semibold)
                     .focused($editingName)
                     .onSubmit(rename)
                     .accessibilityLabel("Slot name")
             }
             if let nameError {
-                Text(nameError).font(.system(size: 11)).foregroundStyle(Theme.error)
+                Text(nameError).futureFont(11).foregroundStyle(Theme.error)
             } else if editingName {
                 Text("Formulas call it \(formulaName(fromTitle: nameText) ?? "…") · ↩ to rename")
-                    .font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                    .futureFont(11).foregroundStyle(Theme.secondary)
             }
         }
         .onChange(of: editingName) {
@@ -129,15 +129,15 @@ private struct SlotSettings: View {
                 if store.canRefit(slot: slot.id) {
                     // Predict with (docs/UI.md, 5.11): a slot with readings chooses its model by how
                     // well each one predicts them. The pane is narrow, so the kind badge gives way.
-                    Text("Predict with").font(.system(size: 13)).foregroundStyle(Theme.secondary).fixedSize()
+                    Text("Predict with").futureFont(13).foregroundStyle(Theme.secondary).fixedSize()
                     Button {
                         store.openPredict(slotAt: index)
                     } label: {
                         HStack(spacing: 3) {
                             Text(slot.model).lineLimit(1)
-                            Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                            Image(systemName: "chevron.down").futureFont(8, weight: .semibold)
                         }
-                        .font(.system(size: 13))
+                        .futureFont(13)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -149,12 +149,12 @@ private struct SlotSettings: View {
                     }
                 } else {
                     Text(slot.kind.title)
-                        .font(.system(size: 11, weight: .medium))
+                        .futureFont(11, weight: .medium)
                         .foregroundStyle(Theme.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.chipBorder))
-                    Text(slot.model).font(.system(size: 13)).lineLimit(1)
+                    Text(slot.model).futureFont(13).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Button("Change…") { store.openPicker(.change(slot: slot.id)) }
@@ -167,20 +167,20 @@ private struct SlotSettings: View {
             }
             HStack {
                 if let reads = slot.reads {
-                    Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                    Text(reads).futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if store.canRefit(slot: slot.id) {
                     Button("Refit…") { store.openRefit(slotAt: index) }
                         .buttonStyle(.plain)
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.proposal)
                         .help("Fit \(slot.title)'s values to its readings")
                 }
                 if slot.kind == .formula || slot.isScript {
                     Button(slot.isScript ? "Edit script…" : "Edit formula…") { store.showFormulaEditor() }
                         .buttonStyle(.plain)
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.proposal)
                         .help("Open the Formula tab  ⌥⌘I")
                 }
@@ -250,7 +250,7 @@ private struct SlotSettings: View {
                             Button {
                                 store.setColor(nil, inSlotAt: index)
                             } label: {
-                                Image(systemName: "arrow.uturn.backward").font(.system(size: 10, weight: .semibold))
+                                Image(systemName: "arrow.uturn.backward").futureFont(10, weight: .semibold)
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(Theme.secondary)
@@ -280,7 +280,7 @@ private struct SlotSettings: View {
     private var removalQuestion: some View {
         VStack(alignment: .leading, spacing: 10) {
                 Text(store.removalQuestion(forSlotAt: index))
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Cancel") { store.cancelRemoval() }
@@ -311,7 +311,7 @@ private struct SlotSettings: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             content()
         }
     }
@@ -322,18 +322,18 @@ private struct SlotSettings: View {
         if let note = store.conversionNote(forSlotAt: index) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(note)
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 let status = store.rateStatus
                 if status.isFetching {
-                    Text("Fetching exchange rates…").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                    Text("Fetching exchange rates…").futureFont(11).foregroundStyle(Theme.secondary)
                 } else if let error = status.error {
-                    Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Text(error).futureFont(11).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
                 }
                 Button("Exchange rates…") { store.openScenarioForm(.edit) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.proposal)
                     .help("Choose where the scenario's exchange rates come from")
             }
@@ -343,7 +343,7 @@ private struct SlotSettings: View {
 
     private func labelled<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 8) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary).lineLimit(1).frame(width: 60, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).lineLimit(1).frame(width: 60, alignment: .leading)
             content()
             Spacer(minLength: 0)
         }
@@ -372,7 +372,7 @@ private struct CountryMenu: View {
     var body: some View {
         let nearest = latitude.value.flatMap { lat in longitude.value.flatMap { CountryPlaces.nearest(latitude: lat, longitude: $0) } }
         HStack(spacing: 6) {
-            Text("Country").font(.system(size: 13))
+            Text("Country").futureFont(13)
             Spacer(minLength: 4)
             Menu {
                 ForEach(CountryPlaces.all) { country in
@@ -415,7 +415,7 @@ private struct ValueRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(value.label)
-                    .font(.system(size: 13))
+                    .futureFont(13)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(value.help)
@@ -424,7 +424,7 @@ private struct ValueRow: View {
                     Button {
                         store.setStartingValue(value.name, to: nil, inSlotAt: slotIndex)
                     } label: {
-                        Image(systemName: "arrow.uturn.backward").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "arrow.uturn.backward").futureFont(10, weight: .semibold)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.secondary)
@@ -440,23 +440,23 @@ private struct ValueRow: View {
                     Spacer()
                     Text(value.text(range.upperBound))
                 }
-                .font(.system(size: 10))
+                .futureFont(10)
                 .foregroundStyle(Theme.secondary)
             }
             if value.value == nil && !value.isChanged {
-                Text("Worked out by the formula as it runs").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text("Worked out by the formula as it runs").futureFont(11).foregroundStyle(Theme.secondary)
             }
             ForEach(changes, id: \.self) { change in
-                Text(change).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(change).futureFont(11).foregroundStyle(Theme.secondary)
             }
             if isParameter {
                 Button("Change from a date…") { store.beginParameterChange(value.name) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.proposal)
             }
             if let error {
-                Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                Text(error).futureFont(11).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
             }
         }
         .onAppear { text = shown.map(value.text) ?? "" }
@@ -476,7 +476,7 @@ private struct ValueRow: View {
         // A hidden copy of the text, in the field's font, sets the width; the field covers it.
         // Past 24 characters it stops growing and the field scrolls, so the label keeps its room.
         return Text(String((text.isEmpty ? placeholder : text).prefix(24)))
-            .font(.system(size: 13))
+            .futureFont(13)
             .monospacedDigit()
             .lineLimit(1)
             .fixedSize()
@@ -486,7 +486,7 @@ private struct ValueRow: View {
             .overlay {
                 TextField(placeholder, text: $text)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13))
+                    .futureFont(13)
                     .multilineTextAlignment(.trailing)
                     .monospacedDigit()
                     .foregroundStyle(dragValue == nil ? Theme.text : Theme.proposal)
@@ -573,13 +573,13 @@ private struct ReadingsSection: View {
         let sources = index.map { store.readingSources(ofSlotAt: $0) } ?? []
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Readings").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text("Readings").futureFont(11).foregroundStyle(Theme.secondary)
                 Spacer()
                 if sources.contains(where: { $0.feed != nil }) {
                     Button {
                         store.refreshFeeds(slot: slot.id)
                     } label: {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold))
+                        Image(systemName: "arrow.clockwise").futureFont(10, weight: .semibold)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.secondary)
@@ -593,7 +593,7 @@ private struct ReadingsSection: View {
                 } else {
                     HStack(alignment: .top, spacing: 6) {
                         Label(Self.describe(source), systemImage: "doc.text")
-                            .font(.system(size: 12))
+                            .futureFont(12)
                             .foregroundStyle(Theme.secondary)
                             .lineLimit(2)
                             .help("Edit it in scenario.md")
@@ -601,7 +601,7 @@ private struct ReadingsSection: View {
                         Button {
                             if let index { store.removeReadingSource(at: offset, inSlotAt: index) }
                         } label: {
-                            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                            Image(systemName: "xmark").futureFont(9, weight: .semibold)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.secondary)
@@ -612,7 +612,7 @@ private struct ReadingsSection: View {
             }
             if sources.isEmpty {
                 Text("Real-world values that correct the model: market prices, rates, debt, climate, disease…")
-                    .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                    .futureFont(11).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 14) {
                 Button("Add a feed…") { store.openFeedSetup(.add(slot: slot.id)) }
@@ -634,7 +634,7 @@ private struct ReadingsSection: View {
                 #endif
             }
             .buttonStyle(.plain)
-            .font(.system(size: 12))
+            .futureFont(12)
             .foregroundStyle(Theme.proposal)
         }
     }
@@ -661,12 +661,12 @@ private struct FeedRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Image(systemName: "dot.radiowaves.left.and.right").font(.system(size: 11)).foregroundStyle(Theme.secondary)
-                Text(spec.title).font(.system(size: 13)).lineLimit(1)
+                Image(systemName: "dot.radiowaves.left.and.right").futureFont(11).foregroundStyle(Theme.secondary)
+                Text(spec.title).futureFont(13).lineLimit(1)
                 Spacer(minLength: 4)
                 Button("Edit…") { store.openFeedSetup(.edit(slot: slot.id, source: source)) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.proposal)
                     .popover(isPresented: Binding(get: { store.feedSetup == .edit(slot: slot.id, source: source) },
                                                   set: { if !$0 { store.closeFeedSetup() } }), arrowEdge: .leading) {
@@ -675,18 +675,18 @@ private struct FeedRow: View {
                 Button {
                     if let index = store.slotIndex(id: slot.id) { store.removeFeed(at: source, inSlotAt: index) }
                 } label: {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "xmark").futureFont(9, weight: .semibold)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.secondary)
                 .help("Remove this feed. Undo brings it back.")
                 .accessibilityLabel("Remove \(spec.title)")
             }
-            Text(summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1).help(details)
+            Text(summary).futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1).help(details)
             statusLine
         }
         .padding(8)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// "FRED · DGS10 → rate, as a percent". Settings too long for one line are in the tooltip.
@@ -706,18 +706,18 @@ private struct FeedRow: View {
     @ViewBuilder
     private var statusLine: some View {
         if let status, let error = status.error, !status.isFetching {
-            Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+            Text(error).futureFont(11).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
         } else if status?.isFetching == true {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
-                Text("Fetching…").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text("Fetching…").futureFont(11).foregroundStyle(Theme.secondary)
             }
         } else if let status, status.count > 0, let last = status.last {
             let checked = status.checked.map { " · checked " + Self.ago($0) } ?? ""
             Text("\(SlotValue.number(Double(status.count))) readings to \(DateText.monthYear(last))\(checked)")
-                .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                .futureFont(11).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
         } else if status != nil {
-            Text("No readings yet").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text("No readings yet").futureFont(11).foregroundStyle(Theme.secondary)
         }
     }
 

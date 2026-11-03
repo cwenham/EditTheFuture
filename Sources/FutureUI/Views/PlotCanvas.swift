@@ -93,11 +93,11 @@ struct PlotCanvas: View {
 
             if now < frame.end {
                 let start = max(0, x(now))
-                context.fill(Path(CGRect(x: start, y: 0, width: size.width - start, height: size.height)), with: .color(Theme.futureTint))
+                context.fill(Path(CGRect(x: start, y: 0, width: size.width - start, height: size.height)), with: .style(Theme.futureTint))
             }
             let startX = modelStart.flatMap { $0 > frame.start ? min(x($0), size.width) : nil }
             if let startX {
-                context.fill(Path(CGRect(x: 0, y: 0, width: startX, height: size.height)), with: .color(Theme.beforeStart))
+                context.fill(Path(CGRect(x: 0, y: 0, width: startX, height: size.height)), with: .style(Theme.beforeStart))
             }
             if !gridValues.isEmpty {
                 var grid = Path()
@@ -106,7 +106,7 @@ struct PlotCanvas: View {
                     grid.move(to: CGPoint(x: 0, y: lineY))
                     grid.addLine(to: CGPoint(x: size.width, y: lineY))
                 }
-                context.stroke(grid, with: .color(Theme.grid), lineWidth: 1)
+                context.stroke(grid, with: .style(Theme.grid), lineWidth: 1)
             }
             if let eventLines, !eventLines.dates.isEmpty {
                 var path = Path()
@@ -139,14 +139,14 @@ struct PlotCanvas: View {
                         dots.addEllipse(in: CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5))
                     }
                     context.fill(dots, with: .color(color))
-                    context.stroke(dots, with: .color(Theme.panel.opacity(0.6)), lineWidth: 0.75)
+                    context.stroke(dots, with: .style(Theme.panel.opacity(0.6)), lineWidth: 0.75)
                 }
             }
             if let startX, startX < size.width {
                 var path = Path()
                 path.move(to: CGPoint(x: startX, y: 0))
                 path.addLine(to: CGPoint(x: startX, y: size.height))
-                context.stroke(path, with: .color(Theme.startLine), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                context.stroke(path, with: .style(Theme.startLine), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
             for rule in rules where frame.contains(rule.date) {
                 var path = Path()

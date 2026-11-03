@@ -47,7 +47,7 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 | `success` | `#9FE3C4` | Parsed natural language, positive deltas |
 | `reading` | `#ECEEF1` at 85% | Readings: dots on a thin line |
 
-Light and high-contrast themes are open questions (section 13). With Reduce Transparency on, the panel is opaque (α = 1) and the blur is off.
+These are `FutureStyle.standard`'s colours (DESIGN.md 2.1). A light style, `FutureStyle.light`, exists for apps that embed the views; the app itself is dark only, and a high-contrast style is an open question (section 13). With Reduce Transparency on, the panel is opaque (α = 1) and the blur is off.
 
 ### 2.2 Slot palette
 
@@ -63,6 +63,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - **Formulas:** SF Mono.
 - **Sizes (Mac):** 11 axis and small labels, 12 secondary, 13 body, 15 section titles, 18 focused slot name, 22 cursor readout.
 - **iOS:** the same sizes +2, following Dynamic Type.
+- Sizes are written for the standard style; a style's `fonts.scale` multiplies them, and its `family` replaces SF Pro (not SF Mono) (DESIGN.md 2.1).
 
 ### 2.4 Marks on the graph
 

@@ -54,7 +54,7 @@ public struct PartsBackdrop: Backdrop {
         let left = center.x + radius + 20
         var y = center.y - CGFloat(field.keys.count) * rowHeight / 2 + rowHeight / 2
         if let label = input.label {
-            let title = context.resolve(Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.35)))
+            let title = context.resolve(Text(label).font(context.environment.futureStyle.fonts.font(size: 11, weight: .medium)).foregroundStyle(Theme.ink.opacity(0.35)))
             context.draw(title, at: CGPoint(x: left, y: y - rowHeight), anchor: .leading)
         }
         for (index, key) in field.keys.enumerated() {
@@ -63,7 +63,7 @@ public struct PartsBackdrop: Backdrop {
                          with: .color(Color(input.color).opacity(Self.shades[index % Self.shades.count])))
             let name = input.keyLabels[key] ?? key
             let text = context.resolve(Text("\(name)  \(Self.percent(shares[index]))")
-                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.white.opacity(0.42)))
+                .font(context.environment.futureStyle.fonts.font(size: 11)).monospacedDigit().foregroundStyle(Theme.ink.opacity(0.42)))
             context.draw(text, at: CGPoint(x: left + 15, y: y), anchor: .leading)
             y += rowHeight
         }

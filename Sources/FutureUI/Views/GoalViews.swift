@@ -51,7 +51,7 @@ struct GoalOverlay: View {
                     .stroke(Theme.proposal, lineWidth: 1.4)
                     if let gap = goal.gap, abs(currentY - targetY) > 14 {
                         Text(gap)
-                            .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                            .futureFont(12, weight: .semibold).monospacedDigit()
                             .foregroundStyle(Theme.proposal)
                             .padding(.horizontal, 4)
                             .background(Theme.panel.opacity(0.85), in: RoundedRectangle(cornerRadius: 4))
@@ -72,8 +72,8 @@ struct GoalOverlay: View {
                     .background(Circle().fill(Theme.proposal.opacity(0.22)).frame(width: 30, height: 30))
                     .position(x: x, y: targetY)
                 Text(goal.label)
-                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(Color(hex: "#14161B"))
+                    .futureFont(12, weight: .semibold).monospacedDigit()
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
                     .background(Theme.text, in: RoundedRectangle(cornerRadius: 8))
@@ -170,9 +170,9 @@ struct GoalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Ways to get there").font(.system(size: 15, weight: .semibold))
+                Text("Ways to get there").futureFont(15, weight: .semibold)
                 if let summary = store.goalSummary() {
-                    Text(summary).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                    Text(summary).futureFont(12).foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -191,7 +191,7 @@ struct GoalCard: View {
             fixes
             Spacer(minLength: 0)
             Text("Drag the target to move it · ↑↓ choose · ⌘↩ add · Esc cancel")
-                .font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                .futureFont(11).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel") { store.cancelGoal() }
@@ -213,11 +213,11 @@ struct GoalCard: View {
                 if state.phase == .solving {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text("Working out ways…").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                        Text("Working out ways…").futureFont(12).foregroundStyle(Theme.secondary)
                     }
                 } else {
                     Text("No change of that kind reaches the target within its range. Try Anything, or start sooner.")
-                        .font(.system(size: 12)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                        .futureFont(12).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             ForEach(Array(state.fixes.enumerated()), id: \.element.id) { index, fix in
@@ -225,26 +225,26 @@ struct GoalCard: View {
                 Button { store.selectGoalFix(index) } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(fix.title).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            Text(fix.title).futureFont(13, weight: .semibold).monospacedDigit()
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 4)
                             if index == 0 {
                                 Text("Smallest change")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(Color(hex: "#14161B"))
+                                    .futureFont(10, weight: .semibold)
+                                    .foregroundStyle(Theme.onAccent)
                                     .padding(.horizontal, 5).padding(.vertical, 2)
                                     .background(Theme.proposal, in: RoundedRectangle(cornerRadius: 4))
                                     .fixedSize()
                             }
                         }
-                        Text(fix.detail).font(.system(size: 12)).foregroundStyle(Theme.secondary).monospacedDigit()
+                        Text(fix.detail).futureFont(12).foregroundStyle(Theme.secondary).monospacedDigit()
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(selected ? Theme.proposal.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 10))
                     .overlay(RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(selected ? Theme.proposal : Color.white.opacity(0.12), lineWidth: selected ? 1.5 : 1))
+                        .strokeBorder(selected ? Theme.proposal : Theme.ink.opacity(0.12), lineWidth: selected ? 1.5 : 1))
                     .contentShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
@@ -259,7 +259,7 @@ struct GoalCard: View {
 
     private func menu<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             content()
                 .labelsHidden()
                 .pickerStyle(.menu)

@@ -13,9 +13,9 @@ struct ImportSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Import readings into \(slot.title)").font(.system(size: 15, weight: .semibold))
+                Text("Import readings into \(slot.title)").futureFont(15, weight: .semibold)
                 Text("From \(state.origin). Readings correct the model up to now, and show on the graph.")
-                    .font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                    .futureFont(11).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             section("Dates") {
                 columnPicker("Dates", selection: Binding(get: { state.dateColumn },
@@ -38,7 +38,7 @@ struct ImportSheet: View {
             section("Called") {
                 TextField("Statements", text: $title)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .onSubmit { store.setImportTitle(title) }
                     .onChange(of: title) { store.setImportTitle(title) }
                     .accessibilityLabel("What the readings are called")
@@ -63,19 +63,19 @@ struct ImportSheet: View {
     private var preview: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let problem = state.problem {
-                Text(problem).font(.system(size: 12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                Text(problem).futureFont(12).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
             } else if let preview = state.preview {
-                Text(preview.summary).font(.system(size: 12)).monospacedDigit().fixedSize(horizontal: false, vertical: true)
+                Text(preview.summary).futureFont(12).monospacedDigit().fixedSize(horizontal: false, vertical: true)
                 if let notes = preview.notes {
-                    Text(notes).font(.system(size: 11)).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
+                    Text(notes).futureFont(11).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
                 }
-                Text(preview.destination).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(preview.destination).futureFont(11).foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// A menu of the table's columns, by name.
@@ -93,7 +93,7 @@ struct ImportSheet: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             content()
         }
     }

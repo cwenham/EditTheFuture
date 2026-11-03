@@ -9,6 +9,7 @@ import FutureSimulation
 struct ModelPicker: View {
     let store: ScenarioStore
     let request: ScenarioStore.PickerRequest
+    @Environment(\.futureStyle) private var style
 
     @State private var query = ""
     @State private var category = ModelTemplate.Category.money
@@ -47,10 +48,10 @@ struct ModelPicker: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondary)
                 TextField("Search models", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .futureFont(14)
                     .focused($searchFocused)
                     .onSubmit(choose)
-                Text(title).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Text(title).futureFont(12).foregroundStyle(Theme.secondary)
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
@@ -74,7 +75,7 @@ struct ModelPicker: View {
                 selection = current.id
             }
         }
-        .environment(\.colorScheme, .dark)
+        .futureAppearance()
     }
 
     private var categories: some View {
@@ -87,11 +88,11 @@ struct ModelPicker: View {
                     selection = nil
                 } label: {
                     Text(item.title)
-                        .font(.system(size: 13))
+                        .futureFont(13)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(active ? Color.white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        .background(active ? Theme.ink.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -105,7 +106,7 @@ struct ModelPicker: View {
                     store.openFeedSetup(.newSlot(position: position))
                 } label: {
                     Label("Data feed…", systemImage: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 12))
+                        .futureFont(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
@@ -126,7 +127,7 @@ struct ModelPicker: View {
                     Text(query.isEmpty && category == .plugins
                          ? "Plug-ins will appear here once the WebAssembly host is built (milestone M4). Lua and Python scripts are in the other categories."
                          : "No models match “\(query)”.")
-                        .font(.system(size: 12))
+                        .futureFont(12)
                         .foregroundStyle(Theme.secondary)
                         .padding(10)
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,12 +139,12 @@ struct ModelPicker: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
-                                Text(template.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                Text(template.name).futureFont(13, weight: .medium).lineLimit(1)
                                 Spacer(minLength: 4)
                                 KindBadge(kind: template.kind)
                             }
                             Text(template.summary)
-                                .font(.system(size: 11))
+                                .futureFont(11)
                                 .foregroundStyle(Theme.secondary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -178,7 +179,7 @@ struct ModelPicker: View {
     private var color: Color {
         switch request {
         case .add(let position): return Color(hex: SlotPalette.color(forSlotAt: position))
-        case .change: return changingIndex.map { Color(store.slots[$0].color) } ?? Theme.proposal
+        case .change: return changingIndex.map { Color(store.slots[$0].color) } ?? style[Theme.proposal]
         }
     }
 
@@ -208,7 +209,7 @@ struct KindBadge: View {
 
     var body: some View {
         Text(kind.title)
-            .font(.system(size: 10, weight: .medium))
+            .futureFont(10, weight: .medium)
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
@@ -237,14 +238,14 @@ private struct TemplateDetail: View {
         let facts = self.facts
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(template.name).font(.system(size: 16, weight: .semibold))
-                Text(facts.line).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(template.name).futureFont(16, weight: .semibold)
+                Text(facts.line).futureFont(11).foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Group {
                 if let reads = facts.reads {
                     Text("Reads \(reads), so it has no preview on its own.")
-                        .font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                        .futureFont(11).foregroundStyle(Theme.secondary)
                         .frame(maxWidth: .infinity, minHeight: 64, alignment: .center)
                 } else if let preview {
                     Sparkline(samples: preview, color: color)
@@ -255,7 +256,7 @@ private struct TemplateDetail: View {
             .frame(height: 64)
             .accessibilityLabel("Preview of \(template.name) over 20 years")
             Text("20 years from \(DateText.monthYear(start)), with its defaults")
-                .font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                .futureFont(10).foregroundStyle(Theme.secondary)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -264,11 +265,11 @@ private struct TemplateDetail: View {
                 }
             }
             if let warning {
-                Text(warning).font(.system(size: 11)).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
+                Text(warning).futureFont(11).foregroundStyle(Theme.warning).fixedSize(horizontal: false, vertical: true)
             }
             if let error = facts.error {
                 Text("This model can't be added: \(error)")
-                    .font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    .futureFont(11).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
@@ -287,13 +288,13 @@ private struct TemplateDetail: View {
     @ViewBuilder
     private func values(_ title: String, _ list: [SlotValue]) -> some View {
         if !list.isEmpty {
-            Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary).padding(.top, 4)
+            Text(title).futureFont(11).foregroundStyle(Theme.secondary).padding(.top, 4)
             ForEach(list) { value in
                 HStack {
-                    Text(value.label).font(.system(size: 12)).help(value.help)
+                    Text(value.label).futureFont(12).help(value.help)
                     Spacer()
                     Text(value.value.map { SlotValue.text($0, value.quantity, money: money) } ?? "From formula")
-                        .font(.system(size: 12, weight: .medium))
+                        .futureFont(12, weight: .medium)
                         .monospacedDigit()
                 }
             }
@@ -320,7 +321,7 @@ private struct Sparkline: View {
                 if offset == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
             }
             context.stroke(path, with: .color(color), lineWidth: 2)
-            context.fill(Path(CGRect(x: 0, y: size.height - 1, width: size.width, height: 1)), with: .color(Theme.hairline))
+            context.fill(Path(CGRect(x: 0, y: size.height - 1, width: size.width, height: 1)), with: .style(Theme.hairline))
         }
     }
 }

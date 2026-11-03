@@ -5,6 +5,7 @@ import FutureKit
 /// for adding events and a Slot tab for the focused slot's model and values.
 struct SidePane: View {
     @Bindable var store: ScenarioStore
+    @Environment(\.futureStyle) private var style
     let side: PaneSide
     var onMoveToOtherSide: () -> Void
     var onDragChanged: (DragGesture.Value) -> Void
@@ -46,11 +47,11 @@ struct SidePane: View {
             header
             SidePaneContent(store: store)
         }
-        .padding(16)
+        .padding(style.panePadding)
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.hairline))
+        .background(Theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: style.cornerRadius))
+        .overlay(RoundedRectangle(cornerRadius: style.cornerRadius).stroke(Theme.hairline))
         .overlay(alignment: side == .right ? .leading : .trailing) { resizeEdge }
     }
 
@@ -75,14 +76,14 @@ struct SidePane: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 12, weight: .semibold))
+                .futureFont(12, weight: .semibold)
                 .foregroundStyle(Theme.secondary)
                 .help("Drag to dock on the other side")
             SidePaneTabs(store: store)
             Spacer()
             Button(action: onMoveToOtherSide) {
                 Image(systemName: side == .left ? "arrow.right.to.line" : "arrow.left.to.line")
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -116,7 +117,7 @@ struct SidePaneTabs: View {
             tab(.formula, "Formula", help: "Edit the focused slot's formula  ⌥⌘I")
         }
         .padding(2)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func tab(_ tab: ScenarioStore.SidePaneTab, _ title: String, help: String) -> some View {
@@ -134,11 +135,11 @@ struct SidePaneTabs: View {
             }
         } label: {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .futureFont(13, weight: .semibold)
                 .foregroundStyle(selected ? Theme.text : Theme.secondary)
                 .padding(.horizontal, 12)
                 .frame(height: 24)
-                .background(selected ? Color.white.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background(selected ? Theme.ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

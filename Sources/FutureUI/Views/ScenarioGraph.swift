@@ -81,8 +81,8 @@ public struct ScenarioGraph: View {
         }
         .coordinateSpace(name: Self.space)
         .foregroundStyle(Theme.text)
-        .background { if drawsBackground { Theme.panel } }
-        .environment(\.colorScheme, .dark)
+        .background(drawsBackground ? Theme.panel : .clear)
+        .futureAppearance()
     }
 
     /// What clicks on the graph do, or nil when it isn't interactive.
