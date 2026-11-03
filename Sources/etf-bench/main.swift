@@ -278,7 +278,22 @@ MainActor.assumeIsolated {
             print("engine runs: \(runs)")
         }
         if section == "cursor-loop" {
-            let store = try ScenarioStore(definition: .homeAndMoney, now: utc(2026, 10, 25))
+            // `parts` and `map` draw a backdrop behind the focused graph (docs/DESIGN.md, 9.6).
+            let variant = CommandLine.arguments.dropFirst(2).first
+            var definition = ScenarioDefinition.homeAndMoney
+            if variant == "map" {
+                var ship = SlotSpec(name: "Ship", formula: "step 1 day\nlat[t] = 40 + 12 * sin(2 * pi * days / 90)\nlon[t] = -70 + 0.8 * days",
+                                    variable: "lat", format: .number, position: 6)
+                ship.backdrop = BackdropBinding(id: "world-map", latitude: "lat", longitude: "lon")
+                definition.slots.append(ship)
+            }
+            let store = try ScenarioStore(definition: definition, now: utc(2026, 10, 25))
+            if variant == "parts" {
+                store.addModel(ModelLibrary.epidemic, atPosition: 6)
+                store.setBackdrop(BackdropBinding(id: "parts", field: "groups"), inSlotAt: store.focusedIndex)
+                store.show(utc(2026, 4))
+            }
+            if variant == "map", let index = store.slots.firstIndex(where: { $0.name == "Ship" }) { store.focus(index: index) }
             let view = NSHostingView(rootView: PanelView(store: store, actions: PanelActions(hide: {}, copySnapshot: {})))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 820), styleMask: [.titled], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false

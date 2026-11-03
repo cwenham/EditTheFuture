@@ -26,6 +26,8 @@ public struct SlotSpec: Sendable {
     public var readings: SlotReadings
     /// Why the slot can't run, from a mistake in its section of scenario.md.
     public var problem: String?
+    /// What's drawn behind its graph (docs/DESIGN.md, 9.6).
+    public var backdrop: BackdropBinding?
     /// Whether scenario.md said what the graph shows, and how (`SlotConfig.showsInFile`).
     var showsInFile = true
     var formatInFile = false

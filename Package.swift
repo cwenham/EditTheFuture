@@ -29,6 +29,7 @@ let package = Package(
         .library(name: "FutureDocument", targets: ["FutureDocument"]),
         .library(name: "FutureFeeds", targets: ["FutureFeeds"]),
         .library(name: "FutureSimulation", targets: ["FutureSimulation"]),
+        .library(name: "FutureVisuals", targets: ["FutureVisuals"]),
         .library(name: "FutureUI", targets: ["FutureUI"]),
         .executable(name: "EditTheFutureMac", targets: ["EditTheFutureMac"]),
         .executable(name: "etf-script", targets: ["etf-script"]),
@@ -54,8 +55,10 @@ let package = Package(
         // The modules that come with the app.
         .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation"],
                 path: "Sources/Simulations/Catalog"),
+        // Backdrops: visuals drawn faintly behind the focused graph, such as the world map (docs/DESIGN.md, 9.6).
+        .target(name: "FutureVisuals", dependencies: ["FutureEngine"]),
         .target(name: "FutureUI", dependencies: ["FutureEngine", "FutureFormula", "FutureScript", "FutureCommands", "FutureDocument",
-                                                 "FutureFeeds", "FutureSimulation", "SimulationCatalog"]),
+                                                 "FutureFeeds", "FutureSimulation", "SimulationCatalog", "FutureVisuals"]),
         // The compiler records the App Intents' constant values, which scripts/build-app.sh turns into
         // the app's Metadata.appintents, as Xcode would, so Shortcuts, Siri and Spotlight find them.
         .executableTarget(name: "EditTheFutureMac", dependencies: ["FutureUI", "FutureCommands", "FutureEngine", "FutureScript",
@@ -79,10 +82,11 @@ let package = Package(
                     linkerSettings: [.linkedLibrary("sqlite3")]),
         .testTarget(name: "FutureFeedsTests", dependencies: ["FutureFeeds", "FutureDocument", "FutureEngine"]),
         .testTarget(name: "FutureSimulationTests", dependencies: ["FutureSimulation", "FutureEngine"]),
+        .testTarget(name: "FutureVisualsTests", dependencies: ["FutureVisuals", "FutureEngine"]),
         // A module's tests see only the module, the contract and the engine, as the module does.
         .testTarget(name: "EpidemicSimulationTests", dependencies: ["EpidemicSimulation", "FutureSimulation", "FutureEngine"],
                     path: "Tests/Simulations/Epidemic"),
         .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
-                                                          "FutureDocument", "FutureFeeds", "FutureSimulation"]),
+                                                          "FutureDocument", "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
     ] + pythonTargets
 )

@@ -470,4 +470,50 @@ struct ScenarioFormatTests {
         #expect(again.contains("## 1. Outbreak [shows: infectious]\n\n```etf\nstep 1 day"))
         #expect(try ScenarioFormat.parse(again).file.slots[0].source == back.slots[0].source)
     }
+
+    @Test("A slot's backdrop reads and writes in its heading; one that can't be read is kept and reported")
+    func backdrops() throws {
+        let text = """
+            # B [start: 2026-01-01]
+
+            ## 1. Outbreak [Epidemic, module: epidemic@1, backdrop: parts of groups]
+
+            ## 2. Ship [backdrop: world-map at lat lon]
+
+            ```etf
+            lat[t] = 50
+            lon[t] = 0
+            ```
+
+            ## 3. Typo [backdrop: world map of everything]
+
+            ```etf
+            x[t] = 1
+            ```
+
+            """
+        let parsed = try ScenarioFormat.parse(text)
+        #expect(parsed.file.slots[0].backdrop == BackdropSetting(id: "parts", field: "groups"))
+        #expect(parsed.file.slots[1].backdrop == BackdropSetting(id: "world-map", latitude: "lat", longitude: "lon"))
+        #expect(parsed.file.slots[2].backdrop == nil)
+        #expect(parsed.problems.contains { $0.message.hasPrefix("“world map of everything” isn't a backdrop") })
+        #expect(ScenarioFormat.text(for: parsed.file, over: parsed) == text)
+
+        var file = parsed.file
+        file.slots[0].backdrop = BackdropSetting(id: "world-map")
+        file.slots[1].backdrop = nil
+        let changed = ScenarioFormat.text(for: file, over: parsed)
+        #expect(changed.contains("## 1. Outbreak [Epidemic, module: epidemic@1, backdrop: world-map]"))
+        #expect(changed.contains("## 2. Ship\n"))
+        // The unreadable one stays as it was written.
+        #expect(changed.contains("## 3. Typo [backdrop: world map of everything]"))
+
+        for good in ["world-map", "parts of groups", "World-Map at latitude longitude"] {
+            #expect(BackdropSetting(text: good) != nil, "\(good)")
+        }
+        #expect(BackdropSetting(text: "World-Map at latitude longitude")?.text == "world-map at latitude longitude")
+        for bad in ["", "world map", "parts of", "world-map at lat", "world-map of a.b", "world-map near x"] {
+            #expect(BackdropSetting(text: bad) == nil, "\(bad)")
+        }
+    }
 }

@@ -6,6 +6,7 @@ import FutureEngine
 import FutureFeeds
 import FutureFormula
 import FutureScript
+import FutureVisuals
 
 /// The app's state for one scenario: its slots, what's focused, the cursor, the visible range, the
 /// side pane, the command bar and undo. Views read `timelineState()`, `cursorState()` and
@@ -59,6 +60,8 @@ public final class ScenarioStore {
         public let emits: [String]
         /// Why the slot can't run, or nil when it runs (docs/UI.md, 5.7).
         public let pausedReason: String?
+        /// What's drawn behind its graph when it's focused (docs/DESIGN.md, 9.6).
+        public var backdrop: BackdropBinding? = nil
 
         public var color: Color { Color(hex: colorHex) }
         public var isPaused: Bool { pausedReason != nil }
@@ -179,7 +182,9 @@ public final class ScenarioStore {
     /// Connections and event routes between the slots that run.
     public private(set) var linkCount: Int
 
-    public private(set) var focusedIndex = 0
+    public private(set) var focusedIndex = 0 {
+        didSet { if focusedIndex != oldValue { requestFields() } }
+    }
     /// Other slots drawn over the focused graph in their own colours, in the order they were added
     /// (docs/UI.md, 5.12). Never holds the focused slot.
     public internal(set) var overlaidIDs: [UUID] = []
@@ -422,6 +427,7 @@ public final class ScenarioStore {
                                     events: spec.events, rules: spec.rules)
             config.readings = spec.readings
             config.problem = spec.problem
+            config.backdrop = spec.backdrop
             config.showsInFile = spec.showsInFile
             config.formatInFile = spec.formatInFile
             configs.append(config)
@@ -531,7 +537,7 @@ public final class ScenarioStore {
                         reads: reads.isEmpty ? nil : "← " + reads.joined(separator: ", "),
                         eventKinds: model?.handledEventKinds ?? [], parameters: model?.parameterNames ?? [],
                         parameterValues: parameters.map(value), startingValues: starting.map(value),
-                        outputs: outputs, emits: descriptor?.emits ?? [], pausedReason: paused)
+                        outputs: outputs, emits: descriptor?.emits ?? [], pausedReason: paused, backdrop: config.backdrop)
     }
 
     /// Replaces the slots, remembering the old ones for undo.
@@ -1139,7 +1145,7 @@ public final class ScenarioStore {
         requested = (revision, from, through)
         enqueue(.fetch(ScenarioEngine.FetchRequest(version: revision, generation: fetchGeneration, from: from,
                                                    through: through, parameterDate: eventDraft.date,
-                                                   outputs: slots.map { (wantedOutputs[$0.id] ?? []).sorted() })))
+                                                   outputs: slots.map { outputsWanted(for: $0).sorted() })))
     }
 
     // MARK: Outputs (docs/DESIGN.md, 4.9)
@@ -1153,6 +1159,17 @@ public final class ScenarioStore {
         wantedOutputs[id] = names.isEmpty ? nil : names
         // Fetch again at once only for outputs the results don't have yet.
         if !names.isSubset(of: old) { requestData(force: true) }
+    }
+
+    /// The outputs a slot's results bring besides the drawn one: those asked for, and the latitude and
+    /// longitude of a backdrop that draws its position.
+    private func outputsWanted(for slot: SlotInfo) -> Set<String> {
+        var names = wantedOutputs[slot.id] ?? []
+        if let backdrop = slot.backdrop, let latitude = backdrop.latitude, let longitude = backdrop.longitude {
+            names.insert(latitude)
+            names.insert(longitude)
+        }
+        return names
     }
 
     /// A slot's output over the range the latest results cover: the one its graph draws, or one asked
@@ -1186,11 +1203,25 @@ public final class ScenarioStore {
         return fieldsAtCursor[slots[index].id]?[name]
     }
 
+    /// The fields to work out at the cursor for a slot: those watched, and the field its backdrop
+    /// draws when it's the focused slot.
+    private func fieldsWanted(forSlotAt index: Int) -> Set<String> {
+        guard slots.indices.contains(index) else { return [] }
+        let slot = slots[index]
+        var names = watchedFields[slot.id] ?? []
+        if index == focusedIndex, let backdrop = slot.backdrop, descriptors.indices.contains(index),
+           let field = backdrop.field(in: descriptors[index]) {
+            names.insert(field.name)
+        }
+        return names
+    }
+
     /// Asks the engine for the watched fields at the cursor. A request still waiting is replaced.
     func requestFields() {
         var wanted: [Int: [String]] = [:]
-        for (index, slot) in slots.enumerated() {
-            if let names = watchedFields[slot.id], !slot.isPaused { wanted[index] = names.sorted() }
+        for (index, slot) in slots.enumerated() where !slot.isPaused {
+            let names = fieldsWanted(forSlotAt: index)
+            if !names.isEmpty { wanted[index] = names.sorted() }
         }
         guard !wanted.isEmpty else {
             if !fieldsAtCursor.isEmpty { fieldsAtCursor = [:] }
@@ -1204,11 +1235,10 @@ public final class ScenarioStore {
         guard result.version == revision, result.at == cursor else { return }
         var fields: [UUID: [String: FieldSample]] = [:]
         for (index, named) in result.fields where slots.indices.contains(index) {
-            let id = slots[index].id
-            // Only what's still watched.
-            let watched = watchedFields[id] ?? []
-            let kept = named.filter { watched.contains($0.key) }
-            if !kept.isEmpty { fields[id] = kept }
+            // Only what's still wanted.
+            let wanted = fieldsWanted(forSlotAt: index)
+            let kept = named.filter { wanted.contains($0.key) }
+            if !kept.isEmpty { fields[slots[index].id] = kept }
         }
         if fields != fieldsAtCursor { fieldsAtCursor = fields }
     }
@@ -1220,7 +1250,7 @@ public final class ScenarioStore {
         noteFailures(result.failures)
         requestData()  // the view may have moved on, or this fetch was cut short
         // Results changed, perhaps after an edit, so the fields at the cursor may have too.
-        if !watchedFields.isEmpty { requestFields() }
+        if !watchedFields.isEmpty || slots.indices.contains(focusedIndex) && focused.backdrop != nil { requestFields() }
     }
 
     /// Keeps the errors slots raised while computing, and says so when one first appears.
@@ -1672,7 +1702,31 @@ public final class ScenarioStore {
 
     /// The whole panel at once, for clipboard snapshots and tests.
     public func panelState() -> PanelState {
-        PanelState(timeline: timelineState(), cursor: cursorState(), status: statusText(), eventPreview: eventPreview())
+        PanelState(timeline: timelineState(), cursor: cursorState(), status: statusText(), eventPreview: eventPreview(),
+                   backdrop: backdropState())
+    }
+
+    /// What's drawn behind the focused graph (docs/DESIGN.md, 9.6): its backdrop, with the field at the
+    /// cursor or the position there. Only the backdrop's view reads it, so only it redraws as the
+    /// field changes.
+    public func backdropState() -> BackdropState? {
+        guard slots.indices.contains(focusedIndex) else { return nil }
+        let slot = slots[focusedIndex]
+        guard let binding = slot.backdrop, !slot.isPaused, BackdropCatalog.builtIn.backdrop(id: binding.id) != nil else { return nil }
+        var input = BackdropInput(color: slot.color)
+        if let latitude = binding.latitude, let longitude = binding.longitude {
+            input.point = GeoPoint.valid(latitude: outputValue(latitude, ofSlotAt: focusedIndex, at: cursor),
+                                         longitude: outputValue(longitude, ofSlotAt: focusedIndex, at: cursor))
+        } else if descriptors.indices.contains(focusedIndex), let descriptor = descriptors[focusedIndex],
+                  let field = binding.field(in: descriptor) {
+            input.field = fieldsAtCursor[slot.id]?[field.name]
+            input.label = field.label
+            input.quantity = field.quantity
+            for variable in descriptor.variables where field.keys.contains(variable.name) {
+                if let label = variable.label { input.keyLabels[variable.name] = label }
+            }
+        }
+        return BackdropState(id: binding.id, input: input)
     }
 
     private func markers(forSlotAt index: Int) -> [EventMarker] {

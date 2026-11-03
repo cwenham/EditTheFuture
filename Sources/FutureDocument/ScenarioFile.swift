@@ -50,6 +50,8 @@ public struct SlotFile: Sendable, Equatable {
     public var currency: Currency?
     /// Hex, without the "#": "5AA9FF".
     public var color: String?
+    /// What's drawn behind the slot's graph: `world-map of infected` (docs/DESIGN.md, 9.6).
+    public var backdrop: BackdropSetting?
     /// The slot's own parameter and starting values, in place of the model's defaults.
     public var values: [String: Double]
     /// Values (and `set` event fields) with these names are written as percents: `4.5%`.
@@ -62,6 +64,7 @@ public struct SlotFile: Sendable, Equatable {
 
     public init(position: Int, name: String, model: String = "", language: ModelLanguage = .formula, source: String = "",
                 module: String? = nil, shows: String? = nil, format: String? = nil, currency: Currency? = nil, color: String? = nil,
+                backdrop: BackdropSetting? = nil,
                 values: [String: Double] = [:],
                 percentNames: Set<String> = [], events: [Event] = [], rules: [RecurringEvent] = [],
                 readings: [ReadingSource] = [], problem: String? = nil) {
@@ -75,6 +78,7 @@ public struct SlotFile: Sendable, Equatable {
         self.format = format
         self.currency = currency
         self.color = color
+        self.backdrop = backdrop
         self.values = values
         self.percentNames = percentNames
         self.events = events
@@ -82,6 +86,56 @@ public struct SlotFile: Sendable, Equatable {
         self.readings = readings
         self.problem = problem
     }
+}
+
+/// What a slot draws behind its graph (docs/DESIGN.md, 9.6), as its heading writes it after `backdrop:`:
+///
+/// - `world-map`: the backdrop with the slot's first field it can draw.
+/// - `world-map of infected`: with that field.
+/// - `world-map at lat lon`: a point, from two of the slot's values, latitude then longitude.
+public struct BackdropSetting: Hashable, Sendable {
+    public var id: String
+    public var field: String?
+    public var latitude: String?
+    public var longitude: String?
+
+    public init(id: String, field: String? = nil) {
+        self.id = id
+        self.field = field
+    }
+
+    public init(id: String, latitude: String, longitude: String) {
+        self.id = id
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+
+    /// Reads `world-map`, `world-map of infected` or `world-map at lat lon`.
+    public init?(text: String) {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        func isName(_ word: String) -> Bool { word.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" } }
+        guard let first = words.first, first.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { return nil }
+        id = first.lowercased()
+        switch words.count {
+        case 1:
+            break
+        case 3 where words[1].lowercased() == "of" && isName(words[2]):
+            field = words[2]
+        case 4 where words[1].lowercased() == "at" && isName(words[2]) && isName(words[3]):
+            latitude = words[2]
+            longitude = words[3]
+        default:
+            return nil
+        }
+    }
+
+    public var text: String {
+        if let latitude, let longitude { return "\(id) at \(latitude) \(longitude)" }
+        if let field { return "\(id) of \(field)" }
+        return id
+    }
+
+    public var isPoint: Bool { latitude != nil && longitude != nil }
 }
 
 /// What a slot's model is written in: the language of its fenced block.
