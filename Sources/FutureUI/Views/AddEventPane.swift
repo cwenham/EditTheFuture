@@ -1,4 +1,5 @@
 import SwiftUI
+import FutureKit
 
 /// Which side of the panel the add-event pane is docked on.
 public enum PaneSide: String, Sendable {
@@ -26,16 +27,16 @@ struct AddEventPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 9, height: 9)
-                Text(slot.title).font(.system(size: 14, weight: .semibold))
+                Circle().fill(Color(slot.color)).frame(width: 9, height: 9)
+                Text(slot.title).futureFont(14, weight: .semibold)
                 Spacer()
                 if isEditing {
                     Text("Editing an event")
-                        .font(.system(size: 11, weight: .semibold))
+                        .futureFont(11, weight: .semibold)
                         .foregroundStyle(Theme.proposal)
                 } else {
                     Text("1–8 or click a lane to change")
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.secondary)
                 }
             }
@@ -86,14 +87,14 @@ struct AddEventPane: View {
                         .disabled(store.eventDateIsNow)
                 }
                 Text(dateHint)
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.secondary)
             }
 
             EffectBox(store: store, isSetParameter: isSetParameter)
 
             if let error = store.draftError {
-                Text(error).font(.system(size: 12)).foregroundStyle(Theme.error)
+                Text(error).futureFont(12).foregroundStyle(Theme.error)
             }
 
             if store.confirmingEventDeletion {
@@ -120,7 +121,7 @@ struct AddEventPane: View {
             Spacer(minLength: 0)
 
             Text("Or type +500 monthly in the command bar")
-                .font(.system(size: 11))
+                .futureFont(11)
                 .foregroundStyle(Theme.secondary)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -140,14 +141,14 @@ struct AddEventPane: View {
         Button(title) { store.commitEvent() }
             .buttonStyle(.borderedProminent)
             .tint(Theme.proposal.opacity(0.85))
-            .foregroundStyle(Color(hex: "#14161B"))
+            .foregroundStyle(Theme.onAccent)
     }
 
     /// Asked before the event being edited is deleted (docs/DESIGN.md, 13).
     private var deletionQuestion: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(store.eventDeletionQuestion)
-                .font(.system(size: 12))
+                .futureFont(12)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Cancel") { store.cancelEventDeletion() }
@@ -194,7 +195,7 @@ struct AddEventPane: View {
 
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text(label).futureFont(11).foregroundStyle(Theme.secondary)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -209,20 +210,20 @@ struct EffectBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Effect").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text("Effect").futureFont(11).foregroundStyle(Theme.secondary)
             if let preview = store.eventPreview() {
                 row("At cursor · \(preview.cursorDate)", preview.atCursor)
                 row("At right edge · \(preview.edgeDate)", preview.atEdge)
                 Text("Scroll the timeline to watch it play out")
-                    .font(.system(size: 11))
+                    .futureFont(11)
                     .foregroundStyle(Theme.secondary)
             } else if store.draftIsComplete {
                 Text("Working out the effect…")
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .foregroundStyle(Theme.secondary)
             } else {
                 Text(isSetParameter ? "Enter a value to see its effect over time" : "Enter an amount to see its effect over time")
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .foregroundStyle(Theme.secondary)
             }
         }
@@ -233,10 +234,10 @@ struct EffectBox: View {
 
     private func row(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary)
             Spacer()
             Text(value)
-                .font(.system(size: 13, weight: .semibold))
+                .futureFont(13, weight: .semibold)
                 .monospacedDigit()
                 .foregroundStyle(Theme.proposal)
         }
@@ -263,7 +264,7 @@ struct DockZones: View {
             .fill(Theme.proposal.opacity(active ? 0.16 : 0.04))
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Theme.proposal.opacity(active ? 0.9 : 0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])))
-            .overlay(Text("Dock \(side.rawValue)").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.proposal))
+            .overlay(Text("Dock \(side.rawValue)").futureFont(12, weight: .medium).foregroundStyle(Theme.proposal))
             .frame(width: width)
     }
 }

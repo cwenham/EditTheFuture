@@ -1,40 +1,37 @@
-import SwiftUI
+import Foundation
 import FutureEngine
 
-/// A visual drawn faintly behind the focused graph, showing the slot's state at the cursor, such as
-/// a world map shaded by each country's share infected (docs/DESIGN.md, 9.6). Backdrops only draw:
-/// the app works out what they show and hands it over in a `BackdropInput`.
-public protocol Backdrop: Sendable {
+/// What a backdrop is, without how it draws (docs/DESIGN.md, 9.6): enough for the scenario to offer it
+/// and work out what it shows. FutureUI's `Backdrop` draws one.
+public struct BackdropKind: Sendable {
     /// Written in scenario.md (`backdrop: world-map`), so it never changes.
-    var id: String { get }
+    public let id: String
     /// As the Slot tab's Backdrop menu says it: "World map".
-    var name: String { get }
+    public let name: String
     /// The geometries of fields it draws (FieldDescriptor.geometry): `world/countries`, `groups`.
-    var geometries: Set<String> { get }
-    /// Whether it can place a point from a latitude and a longitude, such as a ship's position.
-    var drawsPoints: Bool { get }
+    public let geometries: Set<String>
+    /// Whether it can place a point from two values, such as a ship's latitude and longitude.
+    public let drawsPoints: Bool
     /// The names of the two values it places a point from, as a slot might call them: latitude and
     /// longitude on Earth, declination and right ascension on the sky (both in degrees).
-    var pointNames: [(String, String)] { get }
+    public let pointNames: [(String, String)]
 
-    /// Draws what follows the cursor into a context the size of the focused graph. The layer is
-    /// drawn under the graph's lines and grid, so it should be faint.
-    func draw(_ input: BackdropInput, in context: inout GraphicsContext, size: CGSize)
-
-    /// Draws what doesn't follow the cursor, such as a map's outlines, underneath. It's a layer of its
-    /// own, drawn again only when the size, colour or backdrop changes, so moving the cursor doesn't
-    /// pay for it. The default draws nothing.
-    func drawBase(color: Color, in context: inout GraphicsContext, size: CGSize)
-}
-
-extension Backdrop {
-    public var drawsPoints: Bool { false }
-
-    public var pointNames: [(String, String)] { drawsPoints ? [("latitude", "longitude"), ("lat", "lon")] : [] }
-
-    public func drawBase(color: Color, in context: inout GraphicsContext, size: CGSize) {}
+    public init(id: String, name: String, geometries: Set<String>, drawsPoints: Bool = false,
+                pointNames: [(String, String)]? = nil) {
+        self.id = id
+        self.name = name
+        self.geometries = geometries
+        self.drawsPoints = drawsPoints
+        self.pointNames = pointNames ?? (drawsPoints ? [("latitude", "longitude"), ("lat", "lon")] : [])
+    }
 
     public func draws(geometry: String) -> Bool { geometries.contains(geometry) }
+
+    public static let worldMap = BackdropKind(id: "world-map", name: "World map", geometries: ["world/countries"],
+                                              drawsPoints: true)
+    public static let skyMap = BackdropKind(id: "sky-map", name: "Sky map", geometries: ["sky/stars"], drawsPoints: true,
+                                            pointNames: [("declination", "rightAscension"), ("dec", "ra")])
+    public static let parts = BackdropKind(id: "parts", name: "Parts of a whole", geometries: ["groups"])
 }
 
 /// What a backdrop shows: the slot's field at the cursor, or a point, in the slot's colour.
@@ -49,10 +46,10 @@ public struct BackdropInput: Sendable, Equatable {
     /// written as they are.
     public var keyLabels: [String: String]
     public var point: GeoPoint?
-    public var color: Color
+    public var color: RGBA
 
     public init(field: FieldSample? = nil, label: String? = nil, quantity: Quantity? = nil, scale: FieldScale? = nil,
-                keyLabels: [String: String] = [:], point: GeoPoint? = nil, color: Color) {
+                keyLabels: [String: String] = [:], point: GeoPoint? = nil, color: RGBA) {
         self.field = field
         self.label = label
         self.quantity = quantity
@@ -109,22 +106,23 @@ public struct GeoPoint: Sendable, Equatable {
     }
 }
 
-/// The backdrops an app offers (docs/DESIGN.md, 9.6). A new one is a type that draws, and a line here.
+/// The backdrops an app offers (docs/DESIGN.md, 9.6). A new one is a kind here and a type in FutureUI
+/// that draws it.
 public struct BackdropCatalog: Sendable {
-    public let backdrops: [any Backdrop]
+    public let backdrops: [BackdropKind]
 
-    public init(_ backdrops: [any Backdrop]) {
+    public init(_ backdrops: [BackdropKind]) {
         self.backdrops = backdrops
     }
 
-    public static let builtIn = BackdropCatalog([WorldMapBackdrop(), SkyMapBackdrop(), PartsBackdrop()])
+    public static let builtIn = BackdropCatalog([.worldMap, .skyMap, .parts])
 
-    public func backdrop(id: String) -> (any Backdrop)? {
+    public func backdrop(id: String) -> BackdropKind? {
         backdrops.first { $0.id == id }
     }
 
     /// The backdrops that draw fields of this geometry.
-    public func drawing(geometry: String) -> [any Backdrop] {
+    public func drawing(geometry: String) -> [BackdropKind] {
         backdrops.filter { $0.draws(geometry: geometry) }
     }
 }

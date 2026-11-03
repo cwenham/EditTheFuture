@@ -5,6 +5,7 @@ import FutureCommands
 import FutureEngine
 import FutureUI
 import SwiftUI
+import FutureKit
 
 // Shortcuts, Siri and Spotlight (DESIGN.md, 10.2). The intents run inside the app and wait for its
 // scenario to open. Reading runs at once; anything that edits asks first (DESIGN.md, 13).

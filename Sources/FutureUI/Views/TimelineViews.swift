@@ -2,6 +2,7 @@ import SwiftUI
 import FutureVisuals
 import CoreText
 import FutureEngine
+import FutureKit
 
 /// Click handlers for the timeline. Fractions are 0...1 across the plot width.
 struct TimelineInteractions {
@@ -58,9 +59,9 @@ struct BackdropLayer: View {
     let source: BackdropSource
 
     var body: some View {
-        if let state = source.state, let backdrop = BackdropCatalog.builtIn.backdrop(id: state.id) {
+        if let state = source.state, let backdrop = BackdropDrawings.builtIn.backdrop(id: state.id) {
             ZStack {
-                BackdropBase(id: state.id, color: state.input.color).equatable()
+                BackdropBase(id: state.id, color: Color(state.input.color)).equatable()
                 Canvas { context, size in backdrop.draw(state.input, in: &context, size: size) }
             }
             .allowsHitTesting(false)
@@ -76,7 +77,7 @@ struct BackdropBase: View, Equatable {
 
     var body: some View {
         Canvas { context, size in
-            BackdropCatalog.builtIn.backdrop(id: id)?.drawBase(color: color, in: &context, size: size)
+            BackdropDrawings.builtIn.backdrop(id: id)?.drawBase(color: color, in: &context, size: size)
         }
     }
 }
@@ -93,6 +94,9 @@ struct TimelineRows: View {
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
+    /// Whether the events strip and the lanes show under the focused graph.
+    var showsEvents = true
+    var showsLanes = true
     @State private var easing = ScaleEasing()
     /// Bumped when the last range arrives, so the clock stops.
     @State private var settled = 0
@@ -103,7 +107,7 @@ struct TimelineRows: View {
         let _ = easing.retarget(timeline.scaleTargets, at: now)
         let end = easing.end(after: now)
         TimelineRowsContent(timeline: timeline, scales: easing, cursor: cursor, backdrop: backdrop, plotWidth: plotWidth,
-                            focusHeight: focusHeight, interactions: interactions)
+                            focusHeight: focusHeight, interactions: interactions, showsEvents: showsEvents, showsLanes: showsLanes)
             .background {
                 if end != nil {
                     TimelineView(.animation) { context in
@@ -132,6 +136,8 @@ struct TimelineRowsContent: View {
     let plotWidth: CGFloat
     var focusHeight: CGFloat = TimelineLayout.focusHeight
     var interactions: TimelineInteractions?
+    var showsEvents = true
+    var showsLanes = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -148,7 +154,7 @@ struct TimelineRowsContent: View {
                         if timeline.focus.goal != nil {
                             Eased(timeline: timeline, scales: scales) { shown in
                                 if let goal = shown.focus.goal {
-                                    GoalOverlay(goal: goal, frame: shown.frame, domain: shown.focus.yDomain, color: shown.focus.color)
+                                    GoalOverlay(goal: goal, frame: shown.frame, domain: shown.focus.yDomain, color: Color(shown.focus.color))
                                 }
                             }
                         }
@@ -187,59 +193,68 @@ struct TimelineRowsContent: View {
                 Color.clear.frame(width: TimelineLayout.valueWidth)
             }
 
-            HStack(alignment: .top, spacing: TimelineLayout.gap) {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text("Events").font(.system(size: 12)).foregroundStyle(Theme.secondary)
-                    if interactions != nil {
-                        Text("click a date or an event").font(.system(size: 10)).foregroundStyle(Theme.secondary)
-                    }
-                }
-                .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
-                .padding(.trailing, 8)
-                .padding(.top, 2)
-                let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
-                                               editingID: timeline.focus.editingEventID)
-                EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: timeline.focus.color,
-                            draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
-                    .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
-                    .overlay(alignment: .topLeading) {
-                        if interactions != nil { EventHotspots(items: strip) }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                        if let id = EventsStrip.editableEvent(at: location, in: strip) {
-                            interactions?.editEvent(id)
-                        } else {
-                            interactions?.pickDate(Double(location.x / plotWidth))
-                        }
-                    }
-                    .accessibilityActions {
-                        if let interactions {
-                            ForEach(strip.filter { $0.kind != .generated }) { item in
-                                Button("Edit \(item.label), \(DateText.monthYear(item.date))") { interactions.editEvent(item.id) }
-                            }
-                        }
-                    }
-                Color.clear.frame(width: TimelineLayout.valueWidth)
-            }
-            .frame(height: TimelineLayout.eventsHeight)
-
-            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
-
-            VStack(spacing: TimelineLayout.laneSpacing) {
-                ForEach(timeline.lanes) { lane in
-                    LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
-                }
-            }
-            .padding(.top, 8)
+            if showsEvents { events }
+            if showsLanes { lanes }
         }
         .overlay(alignment: .topLeading) {
             Eased(timeline: timeline, scales: scales) { shown in
                 CursorOverlay(cursor: cursor, frame: shown.frame, plotWidth: plotWidth, focusHeight: focusHeight,
-                              focusDomain: shown.focus.yDomain, focusColor: shown.focus.color, overlays: shown.overlays)
+                              focusDomain: shown.focus.yDomain, focusColor: Color(shown.focus.color), overlays: shown.overlays)
             }
             .allowsHitTesting(false)
         }
+    }
+
+    /// The events strip under the time axis.
+    private var events: some View {
+        HStack(alignment: .top, spacing: TimelineLayout.gap) {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("Events").futureFont(12).foregroundStyle(Theme.secondary)
+                if interactions != nil {
+                    Text("click a date or an event").futureFont(10).foregroundStyle(Theme.secondary)
+                }
+            }
+            .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
+            .padding(.trailing, 8)
+            .padding(.top, 2)
+            let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
+                                           editingID: timeline.focus.editingEventID)
+            EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: Color(timeline.focus.color),
+                        draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
+                .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
+                .overlay(alignment: .topLeading) {
+                    if interactions != nil { EventHotspots(items: strip) }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                    if let id = EventsStrip.editableEvent(at: location, in: strip) {
+                        interactions?.editEvent(id)
+                    } else {
+                        interactions?.pickDate(Double(location.x / plotWidth))
+                    }
+                }
+                .accessibilityActions {
+                    if let interactions {
+                        ForEach(strip.filter { $0.kind != .generated }) { item in
+                            Button("Edit \(item.label), \(DateText.monthYear(item.date))") { interactions.editEvent(item.id) }
+                        }
+                    }
+                }
+            Color.clear.frame(width: TimelineLayout.valueWidth)
+        }
+        .frame(height: TimelineLayout.eventsHeight)
+    }
+
+    /// The other slots' lanes, under a hairline.
+    @ViewBuilder private var lanes: some View {
+        Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
+
+        VStack(spacing: TimelineLayout.laneSpacing) {
+            ForEach(timeline.lanes) { lane in
+                LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
+            }
+        }
+        .padding(.top, 8)
     }
 }
 
@@ -255,7 +270,7 @@ struct YAxisLabels: View {
             let slack = span * 0.01
             for tick in ticks where tick >= domain.lowerBound - slack && tick <= domain.upperBound + slack {
                 let y = size.height * (1 - (tick - domain.lowerBound) / (span == 0 ? 1 : span))
-                let label = context.resolve(Text(style.axis(tick)).font(.system(size: 11)).monospacedDigit()
+                let label = context.resolve(Text(style.axis(tick)).font(context.environment.futureStyle.fonts.font(size: 11)).monospacedDigit()
                     .foregroundStyle(Theme.secondary))
                 // Keep the top and bottom labels inside the canvas instead of half-clipped.
                 let clampedY = min(max(y, 7), size.height - 7)
@@ -268,6 +283,7 @@ struct YAxisLabels: View {
 }
 
 struct FocusChart: View {
+    @Environment(\.futureStyle) private var style
     let timeline: TimelineState
 
     /// The dates of the events a person added: one-off events and where recurring ones start.
@@ -280,36 +296,36 @@ struct FocusChart: View {
         let focus = timeline.focus
         // Other slots drawn over the graph go underneath, a little thinner (docs/UI.md, 5.12).
         var series = timeline.overlays.map { overlay in
-            PlotSeries(samples: overlay.samples, color: overlay.color.opacity(focus.goal == nil ? 0.9 : 0.35), lineWidth: 1.75,
+            PlotSeries(samples: overlay.samples, color: Color(overlay.color).opacity(focus.goal == nil ? 0.9 : 0.35), lineWidth: 1.75,
                        domain: overlay.ownScale ? overlay.yDomain : nil)
         }
         // While a target is set, the line as it is fades, so the proposed path stands out.
-        series.append(PlotSeries(samples: focus.samples, color: focus.color.opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2))
+        series.append(PlotSeries(samples: focus.samples, color: Color(focus.color).opacity(focus.goal == nil ? 1 : 0.45), lineWidth: 2))
         if !focus.preview.isEmpty {
-            series.append(PlotSeries(samples: focus.preview, color: Theme.proposal, lineWidth: 2, dash: [6, 5]))
+            series.append(PlotSeries(samples: focus.preview, color: style[Theme.proposal], lineWidth: 2, dash: [6, 5]))
         }
         if !focus.heldBack.isEmpty {
-            series.append(PlotSeries(samples: focus.heldBack, color: Theme.proposal, lineWidth: 1.25, dash: [1.5, 3]))
+            series.append(PlotSeries(samples: focus.heldBack, color: style[Theme.proposal], lineWidth: 1.25, dash: [1.5, 3]))
         }
         var bands: [PlotBand] = []
         if let drift = focus.drift {
-            bands.append(PlotBand(points: drift.band, color: Theme.warning.opacity(0.12)))
-            series.append(PlotSeries(samples: drift.line, color: Theme.warning.opacity(0.8), lineWidth: 1.25, dash: [1.5, 3]))
+            bands.append(PlotBand(points: drift.band, color: style[Theme.warning.opacity(0.12)]))
+            series.append(PlotSeries(samples: drift.line, color: style[Theme.warning.opacity(0.8)], lineWidth: 1.25, dash: [1.5, 3]))
         }
-        var rules = [PlotRule(date: timeline.now, color: Theme.nowLine)]
+        var rules = [PlotRule(date: timeline.now, color: style[Theme.nowLine])]
         if let goal = focus.goal {
-            rules.append(PlotRule(date: goal.date, color: Color.white.opacity(0.35), dash: [3, 4]))
+            rules.append(PlotRule(date: goal.date, color: style[Theme.ink.opacity(0.35)], dash: [3, 4]))
         }
         if let cutoff = focus.cutoff {
-            rules.append(PlotRule(date: cutoff, color: Theme.proposal.opacity(0.45), dash: [1.5, 3]))
+            rules.append(PlotRule(date: cutoff, color: style[Theme.proposal.opacity(0.45)], dash: [1.5, 3]))
         }
         if let draftDate = focus.draftDate {
-            rules.append(PlotRule(date: draftDate, color: Theme.proposal, dash: [3, 3]))
+            rules.append(PlotRule(date: draftDate, color: style[Theme.proposal], dash: [3, 3]))
         }
         return PlotCanvas(frame: timeline.frame, domain: focus.yDomain, now: timeline.now, gridValues: focus.yTicks,
                           bands: bands, series: series, rules: rules,
-                          eventLines: PlotEventLines(dates: Self.eventLineDates(focus.events), color: focus.color.opacity(0.22)),
-                          readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: Theme.reading),
+                          eventLines: PlotEventLines(dates: Self.eventLineDates(focus.events), color: Color(focus.color).opacity(0.22)),
+                          readings: focus.readings.isEmpty ? nil : PlotReadings(samples: focus.readings, color: style[Theme.reading]),
                           modelStart: timeline.start)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Self.accessibilityName(timeline)
@@ -351,7 +367,7 @@ struct CursorOverlay: View {
                 ForEach(overlays) { overlay in
                     if let value = state.overlayValues[overlay.id], let y = dotY(value, domain: overlay.yDomain) {
                         Circle()
-                            .fill(overlay.color)
+                            .fill(Color(overlay.color))
                             .frame(width: 7, height: 7)
                             .offset(x: x - 3.5, y: y - 3.5)
                     }
@@ -363,8 +379,8 @@ struct CursorOverlay: View {
                         .offset(x: x - 4, y: y - 4)
                 }
                 Text(state.readoutDate)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#14161B"))
+                    .futureFont(11, weight: .semibold)
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Theme.text, in: RoundedRectangle(cornerRadius: 4))
@@ -396,8 +412,8 @@ struct DriftPill: View {
         let nowX = timeline.frame.x(timeline.now, width: width)
         let pill = Button { action?() } label: {
             HStack(spacing: 5) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
-                Text("Drift · " + drift.text).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Image(systemName: "exclamationmark.triangle.fill").futureFont(10)
+                Text("Drift · " + drift.text).futureFont(11, weight: .semibold).lineLimit(1)
             }
             .foregroundStyle(Theme.warning)
             .padding(.horizontal, 8)
@@ -434,7 +450,7 @@ struct NowLabel: View {
     var body: some View {
         if timeline.frame.contains(timeline.now) {
             Text(timeline.nowText)
-                .font(.system(size: 11, weight: .semibold))
+                .futureFont(11, weight: .semibold)
                 .foregroundStyle(Theme.text)
                 .fixedSize()
                 .offset(x: timeline.frame.x(timeline.now, width: width) + 6, y: 4)
@@ -451,7 +467,7 @@ struct StartLabel: View {
 
     var body: some View {
         Canvas { context, size in
-            let font = Font.system(size: 11, weight: .semibold)
+            let font = context.environment.futureStyle.fonts.font(size: 11, weight: .semibold)
             let label = context.resolve(Text(timeline.startText).font(font).foregroundStyle(Theme.secondary))
             let startX = timeline.frame.x(timeline.start, width: size.width)
             var nowLabel: (from: CGFloat, to: CGFloat)?
@@ -485,16 +501,16 @@ struct Readout: View {
         let state = cursor.state
         VStack(alignment: .leading, spacing: 2) {
             Text(state.readoutDate)
-                .font(.system(size: 12))
+                .futureFont(12)
                 .foregroundStyle(Theme.secondary)
             Text(state.readoutValue)
-                .font(.system(size: 22, weight: .semibold))
+                .futureFont(22, weight: .semibold)
                 .monospacedDigit()
                 .lineLimit(1)
                 // Small enough for a national debt written out in full: $40,463,151,897,249.
                 .minimumScaleFactor(0.45)
             Text(state.readoutNote)
-                .font(.system(size: 12))
+                .futureFont(12)
                 .foregroundStyle(Theme.secondary)
         }
         .padding(.top, 4)
@@ -508,7 +524,7 @@ struct TimeAxis: View {
     var body: some View {
         Canvas { context, size in
             for tick in timeline.timeTicks {
-                let label = context.resolve(Text(tick.label).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary))
+                let label = context.resolve(Text(tick.label).font(context.environment.futureStyle.fonts.font(size: 11)).monospacedDigit().foregroundStyle(Theme.secondary))
                 context.draw(label, at: CGPoint(x: timeline.frame.x(tick.date, width: size.width), y: size.height / 2))
             }
         }
@@ -654,7 +670,7 @@ struct EventsStrip: View {
                 let editing = item.id == editingID
                 let thickness: CGFloat = editing ? 3 : 2
                 let bar = CGRect(x: item.x, y: Self.barY(row: item.row) - thickness / 2, width: item.barEnd - item.x, height: thickness)
-                context.fill(Path(bar), with: .color(editing ? Theme.proposal : color.opacity(0.45)))
+                context.fill(Path(bar), with: .color(editing ? context.environment.futureStyle[Theme.proposal] : color.opacity(0.45)))
             }
             for item in items {
                 let center = CGPoint(x: item.x, y: Self.markerY)
@@ -667,7 +683,7 @@ struct EventsStrip: View {
                     let moved = editing && draftDate != item.date
                     context.fill(Self.diamond(at: center, size: 9), with: .color(color.opacity(moved ? 0.35 : 1)))
                     if editing {
-                        context.stroke(Self.diamond(at: center, size: 12), with: .color(Theme.proposal), lineWidth: 1.5)
+                        context.stroke(Self.diamond(at: center, size: 12), with: .style(Theme.proposal), lineWidth: 1.5)
                     }
                 case .generated:
                     context.stroke(Path(ellipseIn: CGRect(x: item.x - 4, y: Self.markerY - 4, width: 8, height: 8)),
@@ -683,7 +699,7 @@ struct EventsStrip: View {
             let editedDate = markers.first { $0.id == editingID }?.date
             if let draftDate, frame.contains(draftDate), draftDate != editedDate {
                 context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: Self.markerY), size: 10),
-                               with: .color(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
+                               with: .style(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
             }
         }
         .accessibilityElement(children: .ignore)
@@ -765,24 +781,24 @@ struct LaneRow: View {
             } label: {
                 HStack(spacing: 8) {
                     Text("\(lane.key)")
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .monospacedDigit()
                         .foregroundStyle(Theme.secondary)
                         .frame(width: 10)
-                    RoundedRectangle(cornerRadius: 2).fill(lane.color).frame(width: 3, height: 22)
+                    RoundedRectangle(cornerRadius: 2).fill(Color(lane.color)).frame(width: 3, height: 22)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 4) {
-                            Text(lane.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            Text(lane.name).futureFont(13, weight: .medium).lineLimit(1)
                             if let drift = lane.drift {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 10))
+                                    .futureFont(10)
                                     .foregroundStyle(Theme.warning)
                                     .help(drift)
                                     .accessibilityLabel("Drift: " + drift)
                             }
                         }
                         if let reads = lane.reads {
-                            Text(reads).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                            Text(reads).futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
                         }
                     }
                     Spacer(minLength: 0)
@@ -791,7 +807,7 @@ struct LaneRow: View {
                 // Picked out while the slot is drawn over the graph, as a selected file is in Finder.
                 .background {
                     if lane.overlaid {
-                        RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)).padding(-4)
+                        RoundedRectangle(cornerRadius: 6).fill(Theme.ink.opacity(0.08)).padding(-4)
                     }
                 }
             }
@@ -835,14 +851,15 @@ struct LaneRow: View {
 /// A lane's sparkline, on its range part-way through any change of scale. On its own so only it
 /// redraws on each frame of a change.
 struct LanePlot: View {
+    @Environment(\.futureStyle) private var style
     let lane: LaneState
     let timeline: TimelineState
     let scales: ScaleEasing?
 
     var body: some View {
         PlotCanvas(frame: timeline.frame, domain: lane.easedDomain(by: scales), now: timeline.now,
-                   series: [PlotSeries(samples: lane.samples, color: lane.color, lineWidth: 1.6)],
-                   rules: [PlotRule(date: timeline.now, color: Theme.nowLine)], modelStart: timeline.start)
+                   series: [PlotSeries(samples: lane.samples, color: Color(lane.color), lineWidth: 1.6)],
+                   rules: [PlotRule(date: timeline.now, color: style[Theme.nowLine])], modelStart: timeline.start)
     }
 }
 
@@ -857,13 +874,13 @@ struct PausedNote: View {
         let title = stopped ? "Stopped" : "Paused"
         HStack(spacing: 8) {
             Image(systemName: stopped ? "exclamationmark.octagon" : "pause.circle")
-                .font(.system(size: large ? 15 : 12))
+                .futureFont(large ? 15 : 12)
             Text(large ? title : title + " · " + reason)
-                .font(.system(size: large ? 15 : 12, weight: .semibold))
+                .futureFont(large ? 15 : 12, weight: .semibold)
                 .lineLimit(1)
             if large {
                 Text(reason)
-                    .font(.system(size: 13))
+                    .futureFont(13)
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(2)
             }
@@ -884,7 +901,7 @@ struct LaneValue: View {
 
     var body: some View {
         Text(cursor.state.laneValues[slotIndex] ?? "—")
-            .font(.system(size: 13))
+            .futureFont(13)
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.7)

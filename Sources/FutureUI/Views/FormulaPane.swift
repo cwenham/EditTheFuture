@@ -2,6 +2,7 @@
 import SwiftUI
 import FutureFormula
 import FutureScript
+import FutureKit
 
 /// The side pane's Formula tab (docs/UI.md, 5.7): the focused slot's formula, checked as you
 /// type, with fixes for its mistakes and a palette of functions and other slots' values.
@@ -27,17 +28,17 @@ struct FormulaPane: View {
         let current = check?.text == text ? check : nil
         let drafted = store.hasFormulaDraft(forSlotAt: index)
         let summaries = store.formulaSlotSummaries(excludingSlotAt: index)
-        let titles = Dictionary(uniqueKeysWithValues: store.slots.map { ($0.name, ($0.title, $0.color, $0.key)) })
+        let titles = Dictionary(uniqueKeysWithValues: store.slots.map { ($0.name, ($0.title, Color($0.color), $0.key)) })
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 10, height: 10)
-                Text(slot.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(slot.summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
+                Text(slot.title).futureFont(14, weight: .semibold).lineLimit(1)
+                Text(slot.summary).futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
                 Spacer(minLength: 4)
                 if drafted {
                     Text("Not applied")
-                        .font(.system(size: 11, weight: .medium))
+                        .futureFont(11, weight: .medium)
                         .foregroundStyle(Theme.proposal)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -65,7 +66,7 @@ struct FormulaPane: View {
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.proposal.opacity(0.85))
-                    .foregroundStyle(Color(hex: "#14161B"))
+                    .foregroundStyle(Theme.onAccent)
                     .disabled(!drafted || current?.compiles == false)
                     .help("Use this \(slot.noun) (Command-Return). Undo puts the old one back.")
             }
@@ -126,7 +127,7 @@ struct FormulaPane: View {
             Text(drafted
                  ? (check?.compiles == true ? "No mistakes. The dashed line shows the new \(slot.noun); ⌘↩ applies it." : "Checking…")
                  : "Type to change the \(slot.noun). The graph previews it as you go, and nothing changes until you apply it.")
-                .font(.system(size: 11))
+                .futureFont(11)
                 .foregroundStyle(drafted && check?.compiles == true ? Theme.success : Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
@@ -135,7 +136,7 @@ struct FormulaPane: View {
                     ProblemBox(diagnosis: diagnosis) { fix in act(slot.id) { store.useFormulaFix(fix, forSlotAt: $0) } }
                 }
                 if diagnoses.count > 3 {
-                    Text("And \(diagnoses.count - 3) more").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                    Text("And \(diagnoses.count - 3) more").futureFont(11).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -153,18 +154,18 @@ private struct ProblemBox: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: isError ? "exclamationmark.circle" : "exclamationmark.triangle")
-                    .font(.system(size: 13))
+                    .futureFont(13)
                     .foregroundStyle(tint)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(diagnosis.title).font(.system(size: 12, weight: .semibold))
+                    Text(diagnosis.title).futureFont(12, weight: .semibold)
                     if let detail = diagnosis.detail {
-                        Text(detail).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                        Text(detail).futureFont(11).foregroundStyle(Theme.secondary)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if let line = diagnosis.line {
-                    Text("Line \(line)").font(.system(size: 11)).monospacedDigit().foregroundStyle(tint)
+                    Text("Line \(line)").futureFont(11).monospacedDigit().foregroundStyle(tint)
                 }
             }
             if !diagnosis.fixes.isEmpty {
@@ -189,6 +190,8 @@ private struct ProblemBox: View {
 
 /// Functions, values, and other slots' values, each a click away from the caret.
 private struct InsertPalette: View {
+    @Environment(\.futureStyle) private var style
+    private var codeColors: FormulaColors { FormulaColors(style.colors.code) }
     let text: String
     let slots: [FormulaSlotSummary]
     let titles: [String: (title: String, color: Color, key: Int)]
@@ -200,20 +203,20 @@ private struct InsertPalette: View {
             VStack(alignment: .leading, spacing: 12) {
                 section("Functions") {
                     ForEach(FormulaVocabulary.functions) { entry in
-                        chip(entry.name, color: FormulaColors.color(.function), help: "\(entry.usage): \(entry.summary)") {
+                        chip(entry.name, color: codeColors.color(.function), help: "\(entry.usage): \(entry.summary)") {
                             insert(entry.name + "()", 1)
                         }
                     }
                 }
                 section("Time and constants") {
                     ForEach(FormulaVocabulary.builtins) { entry in
-                        chip(entry.name, color: FormulaColors.color(.builtin), help: entry.summary) { insert(entry.name, 0) }
+                        chip(entry.name, color: codeColors.color(.builtin), help: entry.summary) { insert(entry.name, 0) }
                     }
                 }
                 if !declared.parameters.isEmpty || !declared.variables.isEmpty {
                     section("This formula") {
                         ForEach(declared.parameters + declared.variables, id: \.self) { name in
-                            chip(name, color: FormulaColors.plain,
+                            chip(name, color: codeColors.plain,
                                  help: declared.parameters.contains(name) ? "Parameter" : "Value in this formula") { insert(name, 0) }
                         }
                     }
@@ -222,13 +225,13 @@ private struct InsertPalette: View {
                     let info = titles[slot.name]
                     section(info.map { "\($0.title) · slot \($0.key)" } ?? slot.name, color: info?.color) {
                         ForEach(slot.values, id: \.name) { value in
-                            chip(value.name, color: FormulaColors.color(.reference),
+                            chip(value.name, color: codeColors.color(.reference),
                                  help: "\(slot.name).\(value.name): \(value.label). Same step; add [t-1] for the step before.") {
                                 insert("\(slot.name).\(value.name)", 0)
                             }
                         }
                         ForEach(slot.events, id: \.self) { event in
-                            chip(event, color: FormulaColors.color(.keyword), help: "An event \(slot.name) sends. Use it in on \(slot.name).\(event): …") {
+                            chip(event, color: codeColors.color(.keyword), help: "An event \(slot.name) sends. Use it in on \(slot.name).\(event): …") {
                                 insert("\(slot.name).\(event)", 0)
                             }
                         }
@@ -244,7 +247,7 @@ private struct InsertPalette: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 if let color { Circle().fill(color).frame(width: 7, height: 7) }
-                Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             }
             FlowLayout(spacing: 4) { content() }
         }
@@ -253,11 +256,11 @@ private struct InsertPalette: View {
     private func chip(_ label: String, color: NSColor, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 11.5, design: .monospaced))
+                .futureFont(11.5, design: .monospaced)
                 .foregroundStyle(Color(nsColor: color))
                 .padding(.horizontal, 7)
                 .frame(height: 22)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.hairline))
                 .contentShape(Rectangle())
         }
@@ -269,6 +272,8 @@ private struct InsertPalette: View {
 
 /// The script API, the time, the script's own values and other slots' values, each a click away.
 private struct ScriptPalette: View {
+    @Environment(\.futureStyle) private var style
+    private var codeColors: FormulaColors { FormulaColors(style.colors.code) }
     let text: String
     let language: ScriptLanguage
     let slots: [FormulaSlotSummary]
@@ -281,7 +286,7 @@ private struct ScriptPalette: View {
             VStack(alignment: .leading, spacing: 12) {
                 section("Script") {
                     ForEach(ScriptVocabulary.declarations) { entry in
-                        chip(entry.name, color: FormulaColors.scriptColor(ScriptTokenKind.api), help: entry.summary) {
+                        chip(entry.name, color: codeColors.scriptColor(ScriptTokenKind.api), help: entry.summary) {
                             let insertion = entry.insertion(language)
                             insert(insertion.text, insertion.caretBack)
                         }
@@ -289,7 +294,7 @@ private struct ScriptPalette: View {
                 }
                 section("Time: t") {
                     ForEach(ScriptVocabulary.time, id: \.name) { field in
-                        chip("t." + field.name, color: FormulaColors.scriptColor(ScriptTokenKind.field), help: field.summary) {
+                        chip("t." + field.name, color: codeColors.scriptColor(ScriptTokenKind.field), help: field.summary) {
                             let call = ["random", "normal", "emit"].contains(field.name)
                             insert("t." + field.name + (call ? "()" : ""), call ? 1 : 0)
                         }
@@ -301,7 +306,7 @@ private struct ScriptPalette: View {
                         ForEach(own, id: \.self) { name in
                             let help = declared.parameters.contains(name) ? "Parameter"
                                 : declared.inputs.contains(name) ? "Input from another slot" : "Value in this script"
-                            chip("s." + name, color: FormulaColors.plain, help: help) { insert("s." + name, 0) }
+                            chip("s." + name, color: codeColors.plain, help: help) { insert("s." + name, 0) }
                         }
                     }
                 }
@@ -309,13 +314,13 @@ private struct ScriptPalette: View {
                     let info = titles[slot.name]
                     section(info.map { "\($0.title) · slot \($0.key)" } ?? slot.name, color: info?.color) {
                         ForEach(slot.values, id: \.name) { value in
-                            chip(value.name, color: FormulaColors.scriptColor(ScriptTokenKind.reference),
+                            chip(value.name, color: codeColors.scriptColor(ScriptTokenKind.reference),
                                  help: "\(slot.name).\(value.name): \(value.label). Read it with input(\"name\", \"\(slot.name).\(value.name)\"); add [t-1] for the step before.") {
                                 insert("\(slot.name).\(value.name)", 0)
                             }
                         }
                         ForEach(slot.events, id: \.self) { event in
-                            chip(event, color: FormulaColors.scriptColor(ScriptTokenKind.keyword),
+                            chip(event, color: codeColors.scriptColor(ScriptTokenKind.keyword),
                                  help: "An event \(slot.name) sends. Listen with on(\"\(slot.name).\(event)\", …)") {
                                 insert("\(slot.name).\(event)", 0)
                             }
@@ -332,7 +337,7 @@ private struct ScriptPalette: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 if let color { Circle().fill(color).frame(width: 7, height: 7) }
-                Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             }
             FlowLayout(spacing: 4) { content() }
         }
@@ -341,11 +346,11 @@ private struct ScriptPalette: View {
     private func chip(_ label: String, color: NSColor, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 11.5, design: .monospaced))
+                .futureFont(11.5, design: .monospaced)
                 .foregroundStyle(Color(nsColor: color))
                 .padding(.horizontal, 7)
                 .frame(height: 22)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.hairline))
                 .contentShape(Rectangle())
         }
@@ -399,15 +404,15 @@ struct ModuleNote: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(slot.color).frame(width: 10, height: 10)
-                Text(slot.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text(slot.summary).font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                Circle().fill(Color(slot.color)).frame(width: 10, height: 10)
+                Text(slot.title).futureFont(14, weight: .semibold).lineLimit(1)
+                Text(slot.summary).futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
             }
             Text("\(slot.model) is a simulation built into the app in Swift, so it has no formula to edit.")
-                .font(.system(size: 12))
+                .futureFont(12)
             Text("Its values are in the Slot tab, and events change it as they do any slot. "
                  + "To write a model of your own instead, choose Change model… and a blank formula or script.")
-                .font(.system(size: 12))
+                .futureFont(12)
                 .foregroundStyle(Theme.secondary)
             Spacer()
         }

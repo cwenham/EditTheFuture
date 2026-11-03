@@ -6,6 +6,7 @@ import FutureFormula
 import FutureSimulation
 import FutureUI
 import SimulationCatalog
+import FutureKit
 
 // Measures the engine, the panel state and real SwiftUI frames while scrolling, zooming
 // and moving the cursor. Run with: swift run -c release etf-bench [section]

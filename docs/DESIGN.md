@@ -24,6 +24,56 @@ Consequences:
 - The Mac app must not depend on macOS 26-only APIs (Foundation Models, Liquid Glass). Use them only behind availability checks.
 - macOS 26 is the last macOS release that supports Intel Macs. Plan for Apple silicon-only features to arrive on Mac over time, and use capability borrowing (section 7) to bridge the gap.
 
+### 2.1 Packages and embedding
+
+Begun in November 2026. The engine and the graph are meant to be used by other apps that link the package, not only by Edit The Future. The package's libraries are layered so an app takes only what it needs:
+
+| Library | What it is | Draws? |
+|---|---|---|
+| `FutureEngine`, `FutureFormula`, `FutureScript`, `FutureSimulation` | The engine, the formula language, scripts and simulation modules. | No |
+| `FutureVisuals` | What backdrops show (9.6): `BackdropKind`, `BackdropInput`, the world's countries, the bright stars, and `RGBA`, a colour as plain numbers. | No |
+| `FutureKit` | A scenario to run, edit and read: `ScenarioStore`, with `ScenarioEngine` computing off the main thread (4.8), undo, editing slots, events and formulas, Predict, Refit, Drag the future and drift alerts, and the value types views draw (`TimelineState`, `CursorState`). It imports no SwiftUI, AppKit or UIKit. | No |
+| `FutureFiles` | Scenarios kept as `.etf` folders (15): `ScenarioDocument`, the Scenarios folder (`ScenarioLibrary`), and keeping feeds and exchange rates up to date (`FeedCenter`, `RateCenter`). Optional. | No |
+| `FutureUI` | The views: the graph, the side pane and its tabs, the model picker, the formula editor, the whole panel (`PanelView`), and the backdrops' drawings. | Yes |
+
+**A scenario without files.** `ScenarioStore(definition:configuration:)` runs a `ScenarioDefinition` held in memory. An app that keeps scenarios its own way saves by turning `scenarioFile()` into text with `ScenarioFormat.text(for:)`, whenever `onScenarioChange` fires, and never needs `FutureFiles`.
+
+**What an app can give a scenario:** a `ScenarioConfiguration`, with the simulation modules slots may run (a `ModuleCatalog`, with the data those modules need), the backdrops they may draw (`BackdropCatalog`), the models the picker offers and Predict with tries (`templates`), and where feed sign-ins are kept and how feeds are fetched. `.standard` is the app's. Everything that builds a model, offers a template or picks a backdrop reads the store's configuration, not a global: `SlotConfig.model` and `ScenarioStore.assemble` take the module catalog, and `ScenarioDocument.open` passes its configuration on.
+
+**What's public.** Inside the package, the views and the app reach the store through `package` access; only what an app that embeds the package needs is `public`. The store's panel plumbing (the pointer, the panel's opacity, focus requests) is `package`. The rest of the public surface is still wider than an embedding app needs, and will be trimmed as the views an app can place on their own are made public.
+
+**The views an app can place** (`FutureUI`), each filling the frame it's given:
+
+| View | What it is |
+|---|---|
+| `ScenarioGraph(store:parts:interactive:wheel:drawsBackground:)` | The focused graph with its time axis, and optionally its title, the events strip and the lanes (`Parts`). The cursor follows the pointer. Interactive, clicks pick dates and events, set targets and select slots; read-only, they don't. |
+| `ScenarioEditor(store:)` | The side pane's tabs (Event, Slot, Formula) and what they show, with Drag the future's card while a target is set. |
+| `EventEditor`, `SlotEditor`, `FormulaEditorPane` (Mac) | One tab each, with its own popovers and sheets. Each has a `minimumWidth`. |
+| `PanelView(store:actions:wheel:)` | The whole panel, as the app shows it. |
+
+**Moving through time.** A graph takes the wheel, the trackpad and pinches over itself, wherever it's placed: a view behind it watches the window's events and takes those inside its bounds (SwiftUI has no wheel events on macOS 14), and never takes clicks. Elsewhere the wheel scrolls what's under the pointer, as before. `TimelineWheel` holds whether the mouse has a horizontal wheel; graphs given the same one agree, and the app's remembers it in its defaults and lets the menu change it. `TimelineKeys.handle(_:store:)` answers the graph's keys (docs/UI.md, 4.1) for an app to call from its own key handling, as the panel does for keys no text field took.
+
+**Settings the views keep.** The panel remembers its side pane's side and widths under names of its own (`PanelView.sideKey` and the like, `EditTheFuture.panel.…`), so an app embedding it keeps them apart from its own. The Mac app moves the old, plain names across when it starts.
+
+**How the views look.** A `FutureStyle` sets the views' colours, fonts and appearance, through the environment: `.futureStyle(style)` on the views or anything around them. `.standard` is the panel's look (UI.md, section 2) and the default; `.light` is the same views on a light background. An app starts from either and changes what it wants:
+
+| Part | What it sets |
+|---|---|
+| `colors` | The panel colour behind everything (`.clear` lets what's behind show), text and secondary text, `ink` (white on dark, black on light: faint fills, borders and selections are it at a low opacity), the text on filled buttons, hairlines, the graph's grid, tints and lines, proposals, warnings, errors, successes and readings, and the formula editor's colours (`code`). Slots keep their own colours, which come from the scenario. |
+| `fonts` | A `scale` for every size, a `family` in place of the system font (code stays monospaced), or the system font's `design`. |
+| `colorScheme` | Light or dark, for the controls inside: buttons, menus, text fields. |
+| `panePadding`, `cornerRadius` | Inside the editing panes. |
+
+How the views follow it:
+
+- `Theme.text` and the other colours are `ThemeColor`s: a `ShapeStyle` that looks its colour up in the style where it's drawn, so `.foregroundStyle(Theme.secondary)` needs nothing else. Canvases draw them with `.style(_:)`. Code that needs a plain `Color`, such as the values a plot is built from, reads the style from the environment and asks it: `style[Theme.proposal]`.
+- Fixed sizes go through `.futureFont(size, weight:design:)`, which reads the style's fonts. Text drawn in a canvas uses `context.environment.futureStyle.fonts`. The events strip's labels keep the system font at 11 points, because they're measured with CoreText to stop them overlapping.
+- The formula editor's `NSTextView` gets its colours and font size from the style when SwiftUI updates it (`FormulaColors`), and colours its text again when they change.
+- Views never use fixed colours such as `Color.white`; the clipboard image is always drawn in the standard style.
+- The graph's columns (the label and value columns, lane heights) don't grow with the font scale, so a large scale can cut labels short.
+
+**Still to do:** an example app built only on the public API, and trimming the rest of the public surface. On iOS, the graph has no touch gestures for moving through time yet.
+
 ## 3. Glossary
 
 | Term | Meaning | FMI / SSP equivalent |
@@ -234,7 +284,7 @@ The engine borrows FMI 3.0 and SSP vocabulary (see the glossary) so it can impor
 
 ### 5.11 Currencies and exchange rates
 
-Built in October 2026. The code is `Currency`, `NumberStyle` and `ExchangeRates` in `FutureEngine`, `RateCopy` in `FutureDocument`, the rate sources in `FutureFeeds` (`Rates.swift`), and `Money.swift` and `RateCenter` in `FutureUI`.
+Built in October 2026. The code is `Currency`, `NumberStyle` and `ExchangeRates` in `FutureEngine`, `RateCopy` in `FutureDocument`, the rate sources in `FutureFeeds` (`Rates.swift`), `Money.swift` in `FutureKit`, and `RateCenter` in `FutureFiles`.
 
 **Currencies.** A scenario has a currency (`currency: GBP` in its heading, US dollars when it doesn't say), and a slot can have one of its own (15.2). Formulas and scripts mark money with `as currency`, and it's in the slot's currency. A currency is an ISO 4217 code; about 40 have names, symbols and styles of their own (`Currency.common`), and any other code is written with its code.
 
@@ -649,7 +699,7 @@ Built in November 2026 (UI.md, 5.2), apart from sketching. `Scenario.solve` (`Fu
 
 When real readings leave the range the model projected for them, the app says so: a pill on the graph, and a notification when the panel is hidden (UI.md, 5.6). It offers Refit (8.4), which fits the model's values to the new readings.
 
-Built in November 2026, in `FutureEngine/Drift.swift` (`SlotCopy.drift`) and `FutureUI/Drifting.swift`.
+Built in November 2026, in `FutureEngine/Drift.swift` (`SlotCopy.drift`) and `FutureKit/Drifting.swift`.
 
 - **The projection:** the latest stretch of readings is hidden from the model, which is projected from the slot's point before it, with the slot's own values and only the readings up to there, as the automatic pick's projections are (8.4). The stretch is the last year, or the last fifth of the readings' span when they span less than five years, and always holds at least the last three readings.
 - **The range:** most models have no randomness, so there's no ensemble to draw bands from (4.6). Instead, earlier stretches of the same length, back to back before the latest one (up to 20), are each projected from the point before them, and their misses size the range: the typical miss (root mean square) at each quarter of the way through a stretch, never narrower further ahead, times 1.28, which holds the middle 80% (10–90%) of misses that spread normally. A projection that carries on from the latest reading starts close and wanders, so its range widens; a trend line's stays about the same. A steady bias, such as a held value under a rising series, counts in the typical miss, so it doesn't drift on its own.
@@ -666,7 +716,7 @@ Type or say "what if rates drop to 3% next June?" and get a structured event pre
 
 ### 8.4 Predict with: choosing and fitting the model behind a projection
 
-Designed in October 2026, and built: fit parameters, misses, the solver and Refit (`FutureEngine/Fitting.swift`), the Forecast models (`FutureUI/ForecastModels.swift`), the automatic pick, and Refit and Predict with in the panel (`FutureUI/Refitting.swift`, `Predicting.swift`; UI.md, 5.11). Tests cover formulas, Lua and Python.
+Designed in October 2026, and built: fit parameters, misses, the solver and Refit (`FutureEngine/Fitting.swift`), the Forecast models (`FutureKit/ForecastModels.swift`), the automatic pick, and Refit and Predict with in the panel (`FutureKit/Refitting.swift`, `Predicting.swift`; UI.md, 5.11). Tests cover formulas, Lua and Python.
 
 A slot's model already makes its projection, and readings correct it up to now (4.6). So choosing how to predict a slot's future means choosing its model, and fitting the model to the readings means choosing its parameter values. This section adds four things:
 
@@ -829,12 +879,13 @@ iOS apps can't float over other apps. Equivalents:
 
 Begun in November 2026. A backdrop is an infographic drawn faintly behind the focused graph, showing the slot's state at the cursor: a world map shaded by each country's share infected, where everyone is in an outbreak, a ship's position. As the cursor moves through time, the backdrop follows it.
 
-**Backdrops only draw.** They live in `FutureVisuals`, which knows nothing of slots, the store or files. The app works out what a backdrop shows and hands it over in a `BackdropInput`: a field at the cursor (4.10) with its label, quantity and names for its keys, or a point (`GeoPoint`), in the slot's colour.
+**Backdrops only draw.** What a backdrop is and shows lives in `FutureVisuals`, which knows nothing of slots, the store, files or SwiftUI. Its drawing lives in `FutureUI/Backdrops`. The store works out what a backdrop shows and hands it over in a `BackdropInput`: a field at the cursor (4.10) with its label, quantity and names for its keys, or a point (`GeoPoint`), in the slot's colour (`RGBA`).
 
 | Part | What it is |
 |---|---|
-| `Backdrop` | `id` (written in scenario.md), `name` (the Slot tab's menu), the field `geometries` it draws (`world/countries`, `groups`), whether it `drawsPoints`, `drawBase(color:in:size:)` for what doesn't follow the cursor, and `draw(_:in:size:)` for what does. |
-| `BackdropCatalog` | The backdrops the app offers, found by id or by the geometry they draw. A new one is a type and a line in `BackdropCatalog.builtIn`. |
+| `BackdropKind` (`FutureVisuals`) | `id` (written in scenario.md), `name` (the Slot tab's menu), the field `geometries` it draws (`world/countries`, `groups`), whether it `drawsPoints`, and the two values it places a point from (`pointNames`). |
+| `BackdropCatalog` (`FutureVisuals`) | The backdrop kinds a scenario offers, found by id or by the geometry they draw. The store reads its configuration's (2.1). |
+| `Backdrop` (`FutureUI`) | Draws a kind: `drawBase(color:in:size:)` for what doesn't follow the cursor, and `draw(_:in:size:)` for what does. `BackdropDrawings.builtIn` has one for each built-in kind. A new backdrop is a kind and a type that draws it. |
 | `BackdropInput.intensities()` | Each key's value as 0–1 for shading: as it is for shares, else against the largest. |
 
 **Built in:**
@@ -847,7 +898,7 @@ Begun in November 2026. A backdrop is an infographic drawn faintly behind the fo
 
 **Speed:** `etf-bench cursor-loop parts` and `cursor-loop map` sweep the cursor over a panel with each. On a busy iMac Pro, drawing every country's outline in each frame added about 9 ms a frame; with the base layer apart and the outlines as one path, the map adds about 2 ms and the ring about 1.6 ms, against about 15 ms for the panel.
 
-- **Sky map** (`sky-map`): the 2,887 stars brighter than magnitude 5.5 from the Yale Bright Star Catalogue (5th revised edition, public, from NASA's HEASARC) on the Hammer projection: an oval twice as wide as high, every part at its true size, north up, right ascension increasing to the left as the sky is seen, 0h in the middle. Each star is a dot sized by its magnitude and tinted by its B−V colour index, with the celestial equator and the ecliptic. It brightens stars by a `sky/stars` field keyed by Harvard Revised number ("HR 2491" is Sirius), and draws a point from a slot's declination and right ascension (`dec` and `ra`, in degrees), such as a comet a formula moves. `scripts/make-bright-stars.py` turns the catalogue into `BrightStarsData.swift` (87 KB). Backdrops say which two values they place a point from (`Backdrop.pointNames`).
+- **Sky map** (`sky-map`): the 2,887 stars brighter than magnitude 5.5 from the Yale Bright Star Catalogue (5th revised edition, public, from NASA's HEASARC) on the Hammer projection: an oval twice as wide as high, every part at its true size, north up, right ascension increasing to the left as the sky is seen, 0h in the middle. Each star is a dot sized by its magnitude and tinted by its B−V colour index, with the celestial equator and the ecliptic. It brightens stars by a `sky/stars` field keyed by Harvard Revised number ("HR 2491" is Sirius), and draws a point from a slot's declination and right ascension (`dec` and `ra`, in degrees), such as a comet a formula moves. `scripts/make-bright-stars.py` turns the catalogue into `BrightStarsData.swift` (87 KB). Backdrops say which two values they place a point from (`BackdropKind.pointNames`).
 
 **Later:** constellation lines (the free sets need their licences checked), a globe, a network of links (for worms between networks), easing between shadings, and showing the backdrop of an overlaid slot.
 
@@ -1024,7 +1075,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 
 ## 15. Persistence and sync
 
-Decided and built in October 2026, on the Mac. The code is `FutureDocument` (reading and writing the folder), `FutureFeeds` (fetching feeds, 15.8) and `ScenarioDocument` in `FutureUI` (saving, reloading, feeds and the cache). Not built yet: sync, iOS and branches.
+Decided and built in October 2026, on the Mac. The code is `FutureDocument` (reading and writing the folder), `FutureFeeds` (fetching feeds, 15.8) and `ScenarioDocument` in `FutureFiles` (saving, reloading, feeds and the cache). Not built yet: sync, iOS and branches.
 
 A scenario is saved as plain text that people can read, edit in any editor and keep in git, the way [KeybowNotes](https://github.com/cwenham/KeybowNotes) keeps its key trees in a Markdown outline. Values the models computed are saved beside it, so slow models don't have to run again.
 
@@ -1250,7 +1301,7 @@ CloudKit across Mac, iPad and iPhone (M5). Not designed yet. Readings linked fro
 
 ### 15.8 Readings from feeds
 
-Built in October 2026. A feed fetches readings from a public source: market closes, Treasury yields and auction prices, the national debt, consumer prices, temperatures, migration, disease. The app fetches the history once, then checks for new readings as the source updates. The code is `FutureFeeds` (sources, sign-ins, fetching), `FeedSpec` and `FeedCopy` in `FutureDocument`, and `FeedCenter` in `FutureUI`.
+Built in October 2026. A feed fetches readings from a public source: market closes, Treasury yields and auction prices, the national debt, consumer prices, temperatures, migration, disease. The app fetches the history once, then checks for new readings as the source updates. The code is `FutureFeeds` (sources, sign-ins, fetching), `FeedSpec` and `FeedCopy` in `FutureDocument`, `FeedEditing` in `FutureKit`, and `FeedCenter` in `FutureFiles`.
 
 **In `scenario.md`**, a feed is one line under `### Readings`: its title, then its settings in brackets, starting with `feed:` and the source.
 
@@ -1365,7 +1416,7 @@ Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, fields, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
-  FutureVisuals/     backdrops (9.6): the Backdrop contract and catalog, the world map (Equal Earth, Natural Earth's countries in WorldCountriesData.swift), the sky map (Hammer, the Bright Star Catalogue in BrightStarsData.swift) and parts of a whole
+  FutureVisuals/     what backdrops show (9.6), without SwiftUI: BackdropKind and the catalog, BackdropInput, RGBA, Natural Earth's countries (WorldCountriesData.swift) on Equal Earth, the Bright Star Catalogue (BrightStarsData.swift) on Hammer
   FutureSimulation/  the contract simulation modules are built against (6.5): SimulationModule, ModuleReference, data needs and tables, ModuleCatalog, NumericSimulation and NumericModel
   Simulations/       one folder per simulation module, each its own target seeing only FutureEngine and FutureSimulation
     Epidemic/        the Epidemic module (SEIR)
@@ -1377,7 +1428,9 @@ Sources/
   FutureCommands/    Command vocabulary, questions and replies, DeviceFeedback, etf:// URL scheme, the etf tool's arguments and printing, the local socket and its caller check, MIDI decoding, profile and feedback
   FutureDocument/    saved scenarios (15): scenario.md's reader and writer, numbers and dates, readings from CSV and SQLite, feeds' lines and copies, cache files, the scenario folder
   FutureFeeds/       feeds (15.8): sources (Providers/), ready-made feeds (FeedCatalog), sign-ins and the Keychain, fetching; tables of readings to import (ImportTable)
-  FutureUI/          ScenarioStore, ScenarioEngine (background actor), ScenarioDocument (saving, reloading, the cache) and the Scenarios folder, FeedCenter and feed editing, the feed setup screen, model library, slot and formula editing, panel views, Canvas plots, drift alerts, side pane (Event, Slot and Formula tabs), model picker, formula editor, command bar, snapshots, scroll mapping, answers and edits for the etf tool and Shortcuts (OutsideRequests)
+  FutureKit/         a scenario to run, edit and read, with no UI (2.1): ScenarioStore, ScenarioEngine (background actor), ScenarioConfiguration, model library, slot, event, feed and formula editing, Predict, Refit, Drag the future, drift alerts, command bar parsing, snapshots' data, answers and edits for the etf tool and Shortcuts (OutsideRequests), the value types views draw (PanelState.swift)
+  FutureFiles/       scenarios as .etf folders: ScenarioDocument (saving, reloading, the cache), the Scenarios folder and its scenario menu, FeedCenter and RateCenter
+  FutureUI/          the views: panel, Canvas plots, side pane (Event, Slot and Formula tabs), model picker, formula editor, feed setup, scenario menu and form, the backdrops' drawings (Backdrops/), snapshot exporter, scroll mapping
   EditTheFutureMac/  the menu bar app: floating panel, hot-keys, menu bar item, etf:// links, the command router and the socket server, App Intents, drift notifications
   etf-bench/         performance benchmarks (swift run -c release etf-bench)
   etf-script/        runs a script model without the app and prints CSV
@@ -1387,7 +1440,7 @@ Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (n
 Tests/
   FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares, fields from checkpoints, settled models
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
-  FutureVisualsTests/   the country table, the projection, shading, points, and each backdrop drawn into an image
+  FutureVisualsTests/   the country table, the projections, shading, points, the star table and the catalog
   FutureSimulationTests/ the module contract: NumericModel's events, readings and saved numbers, references, the catalog's checks, tables
   Simulations/Worm/       the Internet worm against the logistic curve, Code Red's and Slammer's numbers, settling, congestion, cleanup, patching, events, conservation
   Simulations/WorldEpidemic/  the World epidemic on small made-up worlds: one country is Epidemic step for step, spread by distance and size, travel bans, imported cases, vaccines, conservation, links
@@ -1396,7 +1449,10 @@ Tests/
   FutureCommandsTests/  URL scheme, confirmation policy, the etf tool's arguments, amounts and printing, the wire format, the socket (round trips, refused callers, stale sockets), MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
   FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts, drift alerts, modules' triggers and easing to a new slot's curve
+  Support/              FutureTestSupport: dates and scenarios the next three share
+  FutureKitTests/       store, configuration, slot editing, formula and script editing, model library, command bar, add-event pane, plot thinning, snapshots' data, requests from the etf tool and Shortcuts, drift alerts, modules' triggers and easing to a new slot's curve
+  FutureFilesTests/     scenario documents, the scenario menu and its folder, feeds fetched into a scenario, exchange rates, currencies written and read, readings imported
+  FutureUITests/        the mounted panel, overlays, the events strip, the side pane, the editor's text view, the model picker, scroll mapping, easing, the clipboard, each backdrop drawn into an image
 scripts/
   build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, the .etf document type, the etf tool and the App Intents metadata
   appintents-protocols.json  the protocols whose constant values the compiler records for App Intents

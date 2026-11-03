@@ -1,7 +1,9 @@
 import Foundation
 import Testing
+import FutureTestSupport
 import AppKit
 import SwiftUI
+@testable import FutureKit
 @testable import FutureUI
 
 /// Drawing other slots over the focused graph (docs/UI.md, 5.12).

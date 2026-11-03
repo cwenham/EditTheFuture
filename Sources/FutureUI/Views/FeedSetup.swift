@@ -2,6 +2,7 @@ import SwiftUI
 import FutureDocument
 import FutureEngine
 import FutureFeeds
+import FutureKit
 
 /// The feed setup screen (docs/UI.md, 5.10): pick a ready-made feed or a source, fill in its
 /// settings and sign-in, test it, and add it to a slot or give it a slot of its own.
@@ -47,9 +48,9 @@ struct FeedSetup: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.secondary)
                 TextField("Search feeds: debt, CPI, rain, flu…", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                    .futureFont(14)
                     .focused($searchFocused)
-                Text(title).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Text(title).futureFont(12).foregroundStyle(Theme.secondary)
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
@@ -65,7 +66,7 @@ struct FeedSetup: View {
         .frame(width: Self.size.width, height: Self.size.height)
         .presentationBackground(Theme.panel)
         .foregroundStyle(Theme.text)
-        .environment(\.colorScheme, .dark)
+        .futureAppearance()
         .onAppear {
             // Editing starts on the feed's own preset, or the source's "any" one.
             if let spec = editing?.spec, let preset = Self.preset(for: spec) {
@@ -93,11 +94,11 @@ struct FeedSetup: View {
                     selection = nil
                 } label: {
                     Text(item.title)
-                        .font(.system(size: 13))
+                        .futureFont(13)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
-                        .background(active ? Color.white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                        .background(active ? Theme.ink.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -105,7 +106,7 @@ struct FeedSetup: View {
             }
             Spacer()
             Text("Most sources are free and need no key.")
-                .font(.system(size: 10))
+                .futureFont(10)
                 .foregroundStyle(Theme.secondary)
                 .padding(.horizontal, 6)
                 .fixedSize(horizontal: false, vertical: true)
@@ -118,7 +119,7 @@ struct FeedSetup: View {
             VStack(alignment: .leading, spacing: 2) {
                 if presets.isEmpty {
                     Text("No feeds match “\(query)”. Any source has FRED, the World Bank, open data portals, and CSV or JSON at any web address.")
-                        .font(.system(size: 12))
+                        .futureFont(12)
                         .foregroundStyle(Theme.secondary)
                         .padding(10)
                         .fixedSize(horizontal: false, vertical: true)
@@ -130,15 +131,15 @@ struct FeedSetup: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
-                                Text(preset.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                Text(preset.title).futureFont(13, weight: .medium).lineLimit(1)
                                 Spacer(minLength: 4)
                                 if preset.provider?.signIn.need == .required {
-                                    Image(systemName: "key.fill").font(.system(size: 9)).foregroundStyle(Theme.secondary)
+                                    Image(systemName: "key.fill").futureFont(9).foregroundStyle(Theme.secondary)
                                         .help("Needs a key")
                                 }
                             }
                             Text(preset.provider?.name ?? preset.spec.provider)
-                                .font(.system(size: 11))
+                                .futureFont(11)
                                 .foregroundStyle(Theme.secondary)
                                 .lineLimit(1)
                         }
@@ -235,16 +236,16 @@ private struct FeedForm: View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 14, weight: .semibold))
+                .futureFont(14, weight: .semibold)
                 .accessibilityLabel("Feed name")
-            Text(preset.summary).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+            Text(preset.summary).futureFont(12).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let provider {
                 HStack(spacing: 6) {
-                    Text("From \(provider.name)").font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
-                    Link("Website", destination: provider.website).font(.system(size: 11)).foregroundStyle(Theme.proposal)
+                    Text("From \(provider.name)").futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
+                    Link("Website", destination: provider.website).futureFont(11).foregroundStyle(Theme.proposal)
                     Spacer(minLength: 8)
-                    Text("Values: \(preset.units)").font(.system(size: 11)).foregroundStyle(Theme.secondary).lineLimit(1)
+                    Text("Values: \(preset.units)").futureFont(11).foregroundStyle(Theme.secondary).lineLimit(1)
                 }
             }
         }
@@ -256,11 +257,11 @@ private struct FeedForm: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(field.label + (field.required ? "" : " (optional)"))
-                            .font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                            .futureFont(12).foregroundStyle(Theme.secondary)
                             .frame(width: 128, alignment: .leading)
                         TextField(field.placeholder, text: binding(field.key))
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: field.key == "url" || field.key == "where" ? .monospaced : .default))
+                            .futureFont(12, design: field.key == "url" || field.key == "where" ? .monospaced : .default)
                             .accessibilityLabel(field.label)
                         if !field.choices.isEmpty {
                             Menu {
@@ -277,7 +278,7 @@ private struct FeedForm: View {
                         }
                     }
                     if let help = field.help {
-                        Text(help).font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                        Text(help).futureFont(10).foregroundStyle(Theme.secondary)
                             .padding(.leading, 134)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -297,7 +298,7 @@ private struct FeedForm: View {
                     .onChange(of: into) { suggestConversion() }
                 }
                 Text("Readings replace this value on their dates. Between and after them, the model carries on.")
-                    .font(.system(size: 10)).foregroundStyle(Theme.secondary).padding(.leading, 134)
+                    .futureFont(10).foregroundStyle(Theme.secondary).padding(.leading, 134)
             }
             row("Convert") {
                 Picker("Convert", selection: $convert) {
@@ -315,10 +316,10 @@ private struct FeedForm: View {
             row("Earliest reading") {
                 TextField("All of them", text: $from)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .futureFont(12)
                     .frame(width: 120)
                     .accessibilityLabel("Earliest reading")
-                Text("like 1990-01-01").font(.system(size: 10)).foregroundStyle(Theme.secondary)
+                Text("like 1990-01-01").futureFont(10).foregroundStyle(Theme.secondary)
             }
         }
     }
@@ -331,24 +332,24 @@ private struct FeedForm: View {
         case .running:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Fetching the last year of readings…").font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                Text("Fetching the last year of readings…").futureFont(12).foregroundStyle(Theme.secondary)
             }
         case .done(let samples):
             VStack(alignment: .leading, spacing: 6) {
                 if let first = samples.first, let last = samples.last {
                     Label("\(samples.count) readings from \(DateText.monthYear(first.time)) to \(DateText.monthYear(last.time)). "
                           + "Latest: \(SlotValue.number(last.value)) on \(DateText.iso(last.time)).", systemImage: "checkmark.circle")
-                        .font(.system(size: 12)).foregroundStyle(Theme.success)
+                        .futureFont(12).foregroundStyle(Theme.success)
                         .fixedSize(horizontal: false, vertical: true)
                     FeedSparkline(samples: samples).frame(height: 56)
                 } else {
                     Label("The source answered, but had no readings for the last year.", systemImage: "exclamationmark.circle")
-                        .font(.system(size: 12)).foregroundStyle(Theme.warning)
+                        .futureFont(12).foregroundStyle(Theme.warning)
                 }
             }
         case .failed(let message):
             Label(message, systemImage: "xmark.octagon")
-                .font(.system(size: 12)).foregroundStyle(Theme.error)
+                .futureFont(12).foregroundStyle(Theme.error)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -359,9 +360,9 @@ private struct FeedForm: View {
                 .disabled(test == .running || missingField != nil)
                 .help("Fetch the last year of readings, without adding anything")
             if let error {
-                Text(error).font(.system(size: 11)).foregroundStyle(Theme.error).lineLimit(2)
+                Text(error).futureFont(11).foregroundStyle(Theme.error).lineLimit(2)
             } else if let missing = missingField {
-                Text("Fill in \(missing).").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text("Fill in \(missing).").futureFont(11).foregroundStyle(Theme.secondary)
             }
             Spacer()
             Button("Cancel") { store.closeFeedSetup() }
@@ -514,14 +515,14 @@ private struct FeedForm: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.system(size: 11)).foregroundStyle(Theme.secondary)
+            Text(title).futureFont(11).foregroundStyle(Theme.secondary)
             content()
         }
     }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary).frame(width: 128, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).frame(width: 128, alignment: .leading)
             content()
             Spacer(minLength: 0)
         }
@@ -567,21 +568,21 @@ private struct SignInSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("Sign-in").font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                Text("Sign-in").futureFont(11).foregroundStyle(Theme.secondary)
                 Text(needText)
-                    .font(.system(size: 10, weight: .medium))
+                    .futureFont(10, weight: .medium)
                     .foregroundStyle(provider.signIn.need == .required ? Theme.warning : Theme.secondary)
                     .padding(.horizontal, 5).padding(.vertical, 1)
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.chipBorder))
                 Spacer()
                 if let signUp = provider.signIn.signUp {
                     Link(provider.signIn.need == .required ? "Get a key" : "Get a free key", destination: signUp)
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.proposal)
                 }
             }
             if let note = provider.signIn.note {
-                Text(note).font(.system(size: 11)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(note).futureFont(11).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if provider.signIn.kinds.count > 1 {
                 labelled("Kind") {
@@ -596,16 +597,16 @@ private struct SignInSection: View {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.seal").foregroundStyle(Theme.success)
                     Text("A sign-in for \(credentialName) is saved. Paste a new one to replace it.")
-                        .font(.system(size: 11)).foregroundStyle(Theme.secondary)
+                        .futureFont(11).foregroundStyle(Theme.secondary)
                     Spacer()
                     Button("Forget") { forget() }.controlSize(.small)
                 }
             }
             Text("Kept in your Keychain, never in the scenario file. Sent only to \(hosts.isEmpty ? "the source's address" : hosts.joined(separator: ", ")), over HTTPS.")
-                .font(.system(size: 10)).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                .futureFont(10).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var needText: String {
@@ -626,21 +627,21 @@ private struct SignInSection: View {
         case .key:
             if provider.signsInByHost {
                 labelled("Parameter") {
-                    TextField("api_key", text: $draft.name).textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
+                    TextField("api_key", text: $draft.name).textFieldStyle(.roundedBorder).futureFont(12, design: .monospaced)
                 }
             }
             labelled("API key") { secretField("Paste your API key") }
         case .header:
             labelled("Header") {
                 TextField(provider.id == "socrata" ? "X-App-Token" : "X-API-Key", text: $draft.name)
-                    .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced))
+                    .textFieldStyle(.roundedBorder).futureFont(12, design: .monospaced)
             }
             labelled("Value") { secretField(provider.id == "socrata" ? "Paste your app token" : "Paste the key") }
         case .bearer:
             labelled("Token") { secretField("Paste your token") }
         case .basic:
             labelled("Username") {
-                TextField("Username", text: $draft.username).textFieldStyle(.roundedBorder).font(.system(size: 12))
+                TextField("Username", text: $draft.username).textFieldStyle(.roundedBorder).futureFont(12)
             }
             labelled("Password") { secretField("Password") }
         }
@@ -657,7 +658,7 @@ private struct SignInSection: View {
                 }
             }
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12, design: .monospaced))
+            .futureFont(12, design: .monospaced)
             .accessibilityLabel(prompt)
             Button {
                 draft.reveal.toggle()
@@ -676,7 +677,7 @@ private struct SignInSection: View {
 
     private func labelled<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.secondary).frame(width: 72, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).frame(width: 72, alignment: .leading)
             content()
         }
     }
@@ -708,8 +709,8 @@ struct FeedSparkline: View {
                 let y = (1 - CGFloat((sample.value - low) / (high - low))) * (size.height - 6) + 3
                 if offset == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
             }
-            context.stroke(path, with: .color(Theme.reading.opacity(0.85)), lineWidth: 1.5)
-            context.fill(Path(CGRect(x: 0, y: size.height - 1, width: size.width, height: 1)), with: .color(Theme.hairline))
+            context.stroke(path, with: .style(Theme.reading.opacity(0.85)), lineWidth: 1.5)
+            context.fill(Path(CGRect(x: 0, y: size.height - 1, width: size.width, height: 1)), with: .style(Theme.hairline))
         }
         .accessibilityLabel("The last year of readings")
     }

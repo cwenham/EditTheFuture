@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import FutureFormula
 import FutureScript
+import FutureKit
 
 /// The formula editor (docs/UI.md, 5.7): an AppKit text view with line numbers, colouring,
 /// underlined mistakes and a completion list that follows the caret.
@@ -32,8 +33,8 @@ struct FormulaEditor: View {
                     }
                 }
         }
-        .background(FormulaColors.background, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.10)))
+        .background(Theme.codeBackground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.ink.opacity(0.10)))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(language == .formula ? "Formula" : "\(language.title) script")
@@ -73,38 +74,65 @@ final class FormulaCompletionState {
     }
 }
 
-enum FormulaColors {
-    static let background = Color(hex: "#111317")
-    static let plain = NSColor(hex: "#ECEEF1")
-    static let lineNumber = NSColor(hex: "#848B95")
-    static let error = NSColor(hex: "#FF6B6B")
-    static let errorText = NSColor(hex: "#FF9C9C")
-    static let warning = NSColor(hex: "#FFC77A")
+/// The formula editor's colours, from the style (`FutureStyle.Code`), as AppKit draws them.
+struct FormulaColors: Equatable {
+    /// The style's font scale, for the editor's text and line numbers.
+    let scale: CGFloat
+    let background: NSColor
+    let plain: NSColor
+    let lineNumber: NSColor
+    let error: NSColor
+    let errorText: NSColor
+    let warning: NSColor
+    let code: FutureStyle.Code
 
-    static func color(_ kind: FormulaTokenKind) -> NSColor {
+    init(_ code: FutureStyle.Code, scale: CGFloat = 1) {
+        self.code = code
+        self.scale = scale.isFinite && scale > 0 ? scale : 1
+        background = NSColor(code.background)
+        plain = NSColor(code.text)
+        lineNumber = NSColor(code.lineNumber)
+        error = NSColor(code.error)
+        errorText = NSColor(code.errorLineNumber)
+        warning = NSColor(code.warning)
+    }
+
+    static let standard = FormulaColors(FutureStyle.standard.colors.code)
+
+    init(_ style: FutureStyle) {
+        self.init(style.colors.code, scale: style.fonts.scale)
+    }
+
+    static func == (a: FormulaColors, b: FormulaColors) -> Bool { a.code == b.code && a.scale == b.scale }
+
+    /// The formula's text, monospaced.
+    var font: NSFont { NSFont.monospacedSystemFont(ofSize: 12.5 * scale, weight: .regular) }
+    var lineNumberFont: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 11 * scale, weight: .regular) }
+
+    func color(_ kind: FormulaTokenKind) -> NSColor {
         switch kind {
-        case .keyword: return NSColor(hex: "#C3A6FF")
-        case .number: return NSColor(hex: "#FFC77A")
-        case .string: return NSColor(hex: "#9FE3C4")
-        case .comment: return NSColor(hex: "#848B95")
-        case .builtin: return NSColor(hex: "#46C8E0")
-        case .function: return NSColor(hex: "#ECEEF1")
-        case .reference, .eventField: return NSColor(hex: "#8CC4FF")
-        case .lag: return NSColor(hex: "#4FD1A5")
+        case .keyword: return NSColor(code.keyword)
+        case .number: return NSColor(code.number)
+        case .string: return NSColor(code.string)
+        case .comment: return NSColor(code.comment)
+        case .builtin: return NSColor(code.builtin)
+        case .function: return plain
+        case .reference, .eventField: return NSColor(code.reference)
+        case .lag: return NSColor(code.lag)
         case .name: return plain
-        case .symbol: return NSColor(hex: "#A3A9B1")
+        case .symbol: return NSColor(code.symbol)
         }
     }
 
     /// Scripts use the formula colours: the API like built-ins, the language's own functions like functions.
-    static func scriptColor(_ kind: ScriptTokenKind) -> NSColor {
+    func scriptColor(_ kind: ScriptTokenKind) -> NSColor {
         switch kind {
         case .keyword: return color(FormulaTokenKind.keyword)
         case .number: return color(FormulaTokenKind.number)
         case .string: return color(FormulaTokenKind.string)
         case .comment: return color(FormulaTokenKind.comment)
         case .api: return color(FormulaTokenKind.builtin)
-        case .library: return NSColor(hex: "#E8A0D0")
+        case .library: return NSColor(code.library)
         case .reference, .field: return color(FormulaTokenKind.reference)
         case .name: return plain
         case .symbol: return color(FormulaTokenKind.symbol)
@@ -124,6 +152,7 @@ extension NSColor {
 /// The completion list under the caret.
 private struct CompletionList: View {
     let state: FormulaCompletionState
+    @Environment(\.futureStyle) private var style
     static let width: CGFloat = 300
     static let rows = 8
 
@@ -136,13 +165,13 @@ private struct CompletionList: View {
                 let selected = offset == state.selected
                 HStack(spacing: 8) {
                     Text(item.label)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(selected ? Theme.text : Color(nsColor: color(item.kind)))
+                        .futureFont(12, design: .monospaced)
+                        .foregroundStyle(selected ? style[Theme.text] : Color(nsColor: color(item.kind)))
                         .lineLimit(1)
                         .layoutPriority(1)
                     Spacer(minLength: 6)
                     Text(item.detail)
-                        .font(.system(size: 11))
+                        .futureFont(11)
                         .foregroundStyle(Theme.secondary)
                         .lineLimit(1)
                 }
@@ -154,7 +183,7 @@ private struct CompletionList: View {
             }
             if items.count > Self.rows {
                 Text("\(items.count) choices · ↑↓ to move")
-                    .font(.system(size: 10))
+                    .futureFont(10)
                     .foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 8)
                     .padding(.top, 3)
@@ -162,21 +191,22 @@ private struct CompletionList: View {
         }
         .padding(4)
         .frame(width: Self.width, alignment: .leading)
-        .background(Color(hex: "#1F2228"), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.14)))
+        .background(Theme.codePopup, in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.ink.opacity(0.14)))
         .shadow(color: .black.opacity(0.45), radius: 12, y: 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Completions")
     }
 
     private func color(_ kind: FormulaCompletion.Kind) -> NSColor {
+        let colors = FormulaColors(style.colors.code)
         switch kind {
-        case .function: return FormulaColors.color(.function)
-        case .builtin: return FormulaColors.color(.builtin)
-        case .slot, .slotValue, .slotEvent, .eventField: return FormulaColors.color(.reference)
-        case .keyword, .unit, .quantity: return FormulaColors.color(.keyword)
-        case .rule: return FormulaColors.color(.lag)
-        case .variable, .parameter: return FormulaColors.plain
+        case .function: return colors.color(.function)
+        case .builtin: return colors.color(.builtin)
+        case .slot, .slotValue, .slotEvent, .eventField: return colors.color(.reference)
+        case .keyword, .unit, .quantity: return colors.color(.keyword)
+        case .rule: return colors.color(.lag)
+        case .variable, .parameter: return colors.plain
         }
     }
 }
@@ -201,6 +231,8 @@ private struct FormulaTextArea: NSViewRepresentable {
         let textView = container.textView
         textView.delegate = context.coordinator
         textView.language = language
+        textView.colors = FormulaColors(context.environment.futureStyle)
+        container.ruler.colors = textView.colors
         textView.string = text
         context.coordinator.attach(container)
         context.coordinator.update(self)
@@ -212,6 +244,12 @@ private struct FormulaTextArea: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.update(self)
         let textView = container.textView
+        let colors = FormulaColors(context.environment.futureStyle)
+        if textView.colors != colors {
+            textView.colors = colors
+            container.ruler.colors = colors
+            container.ruler.needsDisplay = true
+        }
         if textView.string != text {
             // Revert, a fix or apply changed it from outside.
             let selection = textView.selectedRange()
@@ -332,7 +370,6 @@ final class FormulaEditorContainer: NSView {
 /// The text view: plain text in SF Mono, coloured by `FormulaHighlighter`, with its own
 /// completion list.
 final class FormulaTextView: NSTextView {
-    static let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
     static let lineHeight: CGFloat = 20
 
     var completion: FormulaCompletionState?
@@ -371,11 +408,8 @@ final class FormulaTextView: NSTextView {
         allowsUndo = true
         usesFindBar = true
         drawsBackground = false
-        insertionPointColor = .white
-        font = Self.font
-        textColor = FormulaColors.plain
         defaultParagraphStyle = Self.paragraphStyle
-        typingAttributes = [.font: Self.font, .foregroundColor: FormulaColors.plain, .paragraphStyle: Self.paragraphStyle]
+        useColors()
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextReplacementEnabled = false
@@ -390,26 +424,42 @@ final class FormulaTextView: NSTextView {
         didSet { needsHighlight = true }
     }
 
+    /// The style's code colours. A change colours the text again.
+    var colors = FormulaColors.standard {
+        didSet {
+            guard colors != oldValue else { return }
+            useColors()
+            needsHighlight = true
+        }
+    }
+
+    private func useColors() {
+        font = colors.font
+        insertionPointColor = colors.plain
+        textColor = colors.plain
+        typingAttributes = [.font: colors.font, .foregroundColor: colors.plain, .paragraphStyle: Self.paragraphStyle]
+    }
+
     /// Colours the text and underlines the mistakes.
     func highlight(diagnoses: [FormulaDiagnosis]) {
         guard let storage = textStorage else { return }
         needsHighlight = false
         let full = NSRange(location: 0, length: storage.length)
         storage.beginEditing()
-        storage.setAttributes([.font: Self.font, .foregroundColor: FormulaColors.plain, .paragraphStyle: Self.paragraphStyle], range: full)
+        storage.setAttributes([.font: colors.font, .foregroundColor: colors.plain, .paragraphStyle: Self.paragraphStyle], range: full)
         switch language {
         case .script(let script):
             for token in ScriptHighlighter.tokens(in: storage.string, language: script) where NSMaxRange(token.range) <= storage.length {
-                storage.addAttribute(.foregroundColor, value: FormulaColors.scriptColor(token.kind), range: token.range)
+                storage.addAttribute(.foregroundColor, value: colors.scriptColor(token.kind), range: token.range)
             }
         default:
             for token in FormulaHighlighter.tokens(in: storage.string) where NSMaxRange(token.range) <= storage.length {
-                storage.addAttribute(.foregroundColor, value: FormulaColors.color(token.kind), range: token.range)
+                storage.addAttribute(.foregroundColor, value: colors.color(token.kind), range: token.range)
             }
         }
         for diagnosis in diagnoses {
             guard let range = diagnosis.range, range.length > 0, NSMaxRange(range) <= storage.length else { continue }
-            let color = diagnosis.severity == .error ? FormulaColors.error : FormulaColors.warning
+            let color = diagnosis.severity == .error ? colors.error : colors.warning
             storage.addAttributes([.underlineStyle: NSUnderlineStyle.thick.union(.patternDot).rawValue, .underlineColor: color], range: range)
         }
         storage.endEditing()
@@ -419,7 +469,7 @@ final class FormulaTextView: NSTextView {
             let lines = FormulaDiagnoser.lineRanges(storage.string)
             for diagnosis in diagnoses where diagnosis.severity == .error {
                 guard let line = diagnosis.line, line >= 1, line <= lines.count else { continue }
-                layoutManager.addTemporaryAttribute(.backgroundColor, value: FormulaColors.error.withAlphaComponent(0.10),
+                layoutManager.addTemporaryAttribute(.backgroundColor, value: colors.error.withAlphaComponent(0.10),
                                                     forCharacterRange: lines[line - 1])
             }
         }
@@ -526,6 +576,9 @@ final class FormulaTextView: NSTextView {
 /// Line numbers beside the formula, red on lines with a mistake.
 final class LineNumberRuler: NSRulerView {
     var errorLines: Set<Int> = []
+    var colors = FormulaColors.standard {
+        didSet { if colors.scale != oldValue.scale { ruleThickness = requiredThickness } }
+    }
     private weak var textView: NSTextView?
 
     init(textView: NSTextView) {
@@ -536,10 +589,10 @@ final class LineNumberRuler: NSRulerView {
 
     required init(coder: NSCoder) { fatalError("Not used") }
 
-    override var requiredThickness: CGFloat { 34 }
+    override var requiredThickness: CGFloat { (34 * colors.scale).rounded() }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor(hex: "#111317").setFill()
+        colors.background.setFill()
         bounds.fill()
         drawHashMarksAndLabels(in: dirtyRect)
     }
@@ -559,10 +612,10 @@ final class LineNumberRuler: NSRulerView {
             if index <= characters.location { line += 1 }
         }
         index = string.lineRange(for: NSRange(location: min(characters.location, string.length), length: 0)).location
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        let font = colors.lineNumberFont
         func draw(_ number: Int, lineRect: NSRect) {
             let y = convert(NSPoint(x: 0, y: lineRect.minY + textView.textContainerOrigin.y), from: textView).y
-            let color = errorLines.contains(number) ? FormulaColors.errorText : FormulaColors.lineNumber
+            let color = errorLines.contains(number) ? colors.errorText : colors.lineNumber
             let label = NSAttributedString(string: "\(number)", attributes: [.font: font, .foregroundColor: color])
             let size = label.size()
             label.draw(at: NSPoint(x: ruleThickness - size.width - 8, y: y + (lineRect.height - size.height) / 2))

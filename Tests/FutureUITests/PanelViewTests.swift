@@ -1,8 +1,11 @@
 import Foundation
 import Testing
+import FutureTestSupport
 import AppKit
 import SwiftUI
 import FutureDocument
+@testable import FutureKit
+@testable import FutureFiles
 @testable import FutureUI
 
 /// Mounts the real panel in a window and drives it, to catch SwiftUI update crashes.
@@ -192,21 +195,39 @@ struct PanelViewTests {
         defer { window.close() }
         await store.waitUntilIdle()
         settle(view)
-        // The app places the pointer in the hosting view's coordinates, which are top-left like SwiftUI's.
+        // The graph catches the wheel over itself: under the header, through the lanes, beside the side pane.
         #expect(view.isFlipped)
-        let frame = store.timelineFrame
+        let catcher = try #require(Self.gestureView(in: view))
+        let frame = catcher.convert(catcher.bounds, to: view)
         #expect(abs(frame.minY - 110) < 6)  // below the header (56), padding (14) and slot title (40)
         #expect(frame.maxY > 600)           // down through the lanes
         #expect(frame.maxY < 820 - 52)      // above the command bar
         #expect(frame.width > 700 && frame.width < 1400 - 300)  // not the side pane
-        #expect(store.isOverTimeline(CGPoint(x: frame.midX, y: frame.midY)))
-        #expect(!store.isOverTimeline(CGPoint(x: 5, y: 400)) || !store.isOverTimeline(CGPoint(x: 1395, y: 400)))
-        #expect(!store.isOverTimeline(CGPoint(x: frame.midX, y: 30)))
+        #expect(catcher.hitTest(NSPoint(x: 10, y: 10)) == nil)  // never takes clicks
+
+        // A wheel turned over it moves time, one way or the other (the view may already be at its earliest).
+        let before = store.frame
+        for lines: Int32 in [-3, 3] where store.frame == before {
+            let wheel = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0))
+            let event = try #require(NSEvent(cgEvent: wheel))
+            #expect(catcher.handler?(event) == true)
+        }
+        #expect(store.frame != before)
 
         // The wider Formula tab leaves less room for the graphs.
         store.showFormulaEditor()
         settle(view)
-        #expect(abs((frame.width - store.timelineFrame.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+        let narrower = catcher.convert(catcher.bounds, to: view)
+        #expect(abs((frame.width - narrower.width) - (SidePane.formulaWidth - SidePane.width)) < 1)
+    }
+
+    /// The view behind a graph that catches its wheel and pinch events.
+    static func gestureView(in view: NSView) -> TimelineGestureView? {
+        if let found = view as? TimelineGestureView { return found }
+        for subview in view.subviews {
+            if let found = gestureView(in: subview) { return found }
+        }
+        return nil
     }
 
     @Test("The scenario menu lists the scenarios, and its items switch, edit, add and duplicate without crashing")
@@ -317,7 +338,7 @@ struct PanelViewTests {
 
     @Test("Scrolling back before the start, with readings there, draws without crashing")
     func beforeTheStart() async throws {
-        let tests = BeforeStartTests()
+        let tests = HistoryScenario()
         let store = try await tests.makeStore()
         let (window, view) = mount(store)
         defer { window.close() }
@@ -336,37 +357,4 @@ struct PanelViewTests {
         }
         #expect(store.frame.start >= tests.firstReading)
     }
-}
-
-extension ScenarioDefinition {
-    /// Slots that outgrow every number: ×10 a month (overflows to infinity in 2047), ×−3 a month,
-    /// one that turns into NaN once it overflows, and one that starts near the largest Double.
-    static let runaway = ScenarioDefinition(
-        name: "Runaway",
-        start: utc(2022, 1),
-        slots: [
-            SlotSpec(name: "Rocket", formula: """
-                step 1 month
-                param growth = 10
-                init balance = 1000
-                balance[t] = balance[t-1] * growth
-                on deposit: balance += event.amount
-                """, variable: "balance", format: .currency),
-            SlotSpec(name: "Sinker", formula: """
-                step 1 month
-                init n = -1
-                n[t] = n[t-1] * 3
-                """, variable: "n", format: .number),
-            SlotSpec(name: "Furnace", formula: """
-                step 1 month
-                init temp = 1
-                temp[t] = temp[t-1] * 100 - temp[t-1] * 90
-                """, variable: "temp", format: .temperature),
-            // Every value it ever shows is beyond the ±1e300 plots are clamped to.
-            SlotSpec(name: "Giant", formula: """
-                step 1 month
-                init size = 1e301
-                size[t] = size[t-1] * 1.001
-                """, variable: "size", format: .currency),
-        ])
 }

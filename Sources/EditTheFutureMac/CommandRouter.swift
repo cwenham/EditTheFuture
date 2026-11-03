@@ -2,6 +2,7 @@
 import AppKit
 import FutureCommands
 import FutureUI
+import FutureKit
 
 /// Runs commands from any source (links, the etf tool, Shortcuts; hardware later) against the
 /// panel, asking first when the source isn't trusted for that kind of command (DESIGN.md, section 13).
