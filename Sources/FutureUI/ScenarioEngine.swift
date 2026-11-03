@@ -96,6 +96,21 @@ actor ScenarioEngine {
         let failures: [SlotFailure?]
     }
 
+    /// Fields to work out at a date (docs/DESIGN.md, 4.10), such as at the cursor.
+    struct FieldRequest: Sendable {
+        let version: Int
+        let at: Date
+        /// The fields wanted, by slot index.
+        let wanted: [Int: [String]]
+    }
+
+    struct FieldResult: Sendable {
+        let version: Int
+        let at: Date
+        /// By slot index, then name. Fields a slot hasn't got, or that failed, are left out.
+        let fields: [Int: [String: FieldSample]]
+    }
+
     /// What a preview tries out.
     enum PreviewChange: Sendable {
         /// The add-event pane's draft.
@@ -176,6 +191,15 @@ actor ScenarioEngine {
     private var ids: [SlotID?]
     /// Errors slots raised while computing, by slot name. Edits clear them; computing again finds them again.
     private var failures: [String: SlotFailure] = [:]
+    /// Fields already worked out, by slot index, name and point, so a cursor resting on one step
+    /// doesn't work it out again. Edits clear it.
+    private var fieldCache: [FieldKey: FieldSample] = [:]
+
+    private struct FieldKey: Hashable {
+        let slot: Int
+        let name: String
+        let time: Date
+    }
     nonisolated let latestGeneration = Generation()
 
     /// How far each chunk of a fetch computes before checking whether it's been superseded.
@@ -208,6 +232,7 @@ actor ScenarioEngine {
 
     func apply(_ mutation: Mutation) {
         failures.removeAll()
+        fieldCache.removeAll()
         switch mutation {
         case .addEvent(let slot, let event): if let id = ids[slot] { scenario.add(event, to: id) }
         case .removeEvent(let slot, let eventID): if let id = ids[slot] { scenario.removeEvent(id: eventID, from: id) }
@@ -363,6 +388,33 @@ actor ScenarioEngine {
                            computedThrough: running.compactMap { scenario.computedThrough($0) }.min(),
                            parameters: parameters, parameterDate: request.parameterDate,
                            failures: setups.map { $0.flatMap { failures[$0.name] } })
+    }
+
+    /// Works out fields at a date, each from the nearest checkpoint (docs/DESIGN.md, 4.10).
+    func fields(_ request: FieldRequest) -> FieldResult {
+        var result: [Int: [String: FieldSample]] = [:]
+        for (index, names) in request.wanted {
+            guard ids.indices.contains(index), let id = ids[index], let setup = setups[index], failures[setup.name] == nil,
+                  request.at >= scenario.start else { continue }
+            let available = Set(scenario.descriptor(of: id).fields.map(\.name))
+            for name in names where available.contains(name) {
+                do {
+                    guard let time = try scenario.pointTime(of: id, atOrBefore: request.at) else { continue }
+                    let key = FieldKey(slot: index, name: name, time: time)
+                    if let cached = fieldCache[key] {
+                        result[index, default: [:]][name] = cached
+                    } else if let sample = try scenario.field(name, of: id, at: request.at) {
+                        // A cursor sweeping across years leaves many; keep the cache small.
+                        if fieldCache.count >= 1024 { fieldCache.removeAll() }
+                        fieldCache[key] = sample
+                        result[index, default: [:]][name] = sample
+                    }
+                } catch {
+                    record(error)
+                }
+            }
+        }
+        return FieldResult(version: request.version, at: request.at, fields: result)
     }
 
     /// Remembers which slot failed and why.

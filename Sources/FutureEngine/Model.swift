@@ -123,6 +123,27 @@ public enum Capability: String, Hashable, Sendable, Codable {
     case assimilatesReadings
 }
 
+/// A field: one value for each of a set of keys, such as each country's share infected
+/// (docs/DESIGN.md, 4.10). A model works it out from its state when asked, so it isn't stored for
+/// every step as variables are.
+public struct FieldDescriptor: Hashable, Sendable, Codable {
+    public var name: String
+    public var label: String?
+    /// What the keys are, so a visual knows how to draw them: `world/countries` for ISO 3166
+    /// alpha-3 codes, `groups` for named parts of a whole.
+    public var geometry: String
+    public var keys: [String]
+    public var quantity: Quantity?
+
+    public init(name: String, label: String? = nil, geometry: String, keys: [String], quantity: Quantity? = nil) {
+        self.name = name
+        self.label = label
+        self.geometry = geometry
+        self.keys = keys
+        self.quantity = quantity
+    }
+}
+
 /// What a model tells the engine about itself (the `describe` message).
 public struct ModelDescriptor: Hashable, Sendable, Codable {
     public var name: String
@@ -131,15 +152,38 @@ public struct ModelDescriptor: Hashable, Sendable, Codable {
     public var emits: [String]
     public var subscriptions: [EventSubscription]
     public var capabilities: Set<Capability>
+    /// Values per key it can work out at any point (docs/DESIGN.md, 4.10).
+    public var fields: [FieldDescriptor]
 
     public init(name: String, stepRate: StepRate, variables: [Variable], emits: [String] = [],
-                subscriptions: [EventSubscription] = [], capabilities: Set<Capability> = []) {
+                subscriptions: [EventSubscription] = [], capabilities: Set<Capability> = [], fields: [FieldDescriptor] = []) {
         self.name = name
         self.stepRate = stepRate
         self.variables = variables
         self.emits = emits
         self.subscriptions = subscriptions
         self.capabilities = capabilities
+        self.fields = fields
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, stepRate, variables, emits, subscriptions, capabilities, fields
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        stepRate = try container.decode(StepRate.self, forKey: .stepRate)
+        variables = try container.decode([Variable].self, forKey: .variables)
+        emits = try container.decode([String].self, forKey: .emits)
+        subscriptions = try container.decode([EventSubscription].self, forKey: .subscriptions)
+        capabilities = try container.decode(Set<Capability>.self, forKey: .capabilities)
+        // Descriptors written before fields existed have none.
+        fields = try container.decodeIfPresent([FieldDescriptor].self, forKey: .fields) ?? []
+    }
+
+    public func field(named name: String) -> FieldDescriptor? {
+        fields.first { $0.name == name }
     }
 
     public var inputs: [Variable] { variables.filter { $0.causality == .input } }
@@ -250,6 +294,10 @@ public protocol TimelineModel: Sendable {
 
     /// The state from `savedNumbers(of:)`, or nil when the numbers don't fit this model.
     func restoredState(from numbers: [Double]) -> State?
+
+    /// A field from `descriptor.fields`, worked out from the state: one value for each of its keys,
+    /// in order (docs/DESIGN.md, 4.10). nil when the model has no such field, which is the default.
+    func field(_ name: String, of state: State) -> [Double]?
 }
 
 extension TimelineModel {
@@ -265,6 +313,8 @@ extension TimelineModel {
     public func savedNumbers(of state: State) -> [Double]? { nil }
 
     public func restoredState(from numbers: [Double]) -> State? { nil }
+
+    public func field(_ name: String, of state: State) -> [Double]? { nil }
 }
 
 /// A small, fast random generator (SplitMix64) seeded per slot and step.

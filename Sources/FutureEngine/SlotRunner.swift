@@ -29,6 +29,11 @@ protocol AnySlotRunner: AnyObject {
     /// Replaces what's computed with a saved history. False, changing nothing, when it doesn't
     /// fit this model.
     func restore(_ history: SlotHistory) -> Bool
+
+    /// A field at a computed point (docs/DESIGN.md, 4.10): from the current state at the last
+    /// point, else from a copy of the newest checkpoint at or before it, stepped forward with the
+    /// contexts the steps had. nil when the model has no such field or the point isn't computed.
+    func field(_ name: String, at index: Int, contexts: (Int) throws -> StepContext) throws -> [Double]?
 }
 
 extension AnySlotRunner {
@@ -132,6 +137,26 @@ final class SlotRunner<Model: TimelineModel>: AnySlotRunner {
         times.removeSubrange((checkpoint.index + 1)...)
         values.removeSubrange(((checkpoint.index + 1) * width)...)
         return times.last
+    }
+
+    func field(_ name: String, at index: Int, contexts: (Int) throws -> StepContext) throws -> [Double]? {
+        guard index >= 0, index < times.count else { return nil }
+        if index == times.count - 1, let current { return model.field(name, of: current) }
+        // Checkpoints are in index order; the newest at or before the point.
+        var low = 0, high = checkpoints.count - 1, found: Int?
+        while low <= high {
+            let mid = (low + high) / 2
+            if checkpoints[mid].index <= index { found = mid; low = mid + 1 } else { high = mid - 1 }
+        }
+        guard let found else { return nil }
+        var state = checkpoints[found].state
+        var ignored: [Prediction] = []
+        var step = checkpoints[found].index + 1
+        while step <= index {
+            _ = try model.doStep(&state, contexts(step), replaced: &ignored)
+            step += 1
+        }
+        return model.field(name, of: state)
     }
 
     func history() -> SlotHistory? {
