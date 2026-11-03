@@ -12,6 +12,9 @@ struct OutputTests {
 
     func makeStore() async throws -> ScenarioStore {
         let store = try ScenarioStore(definition: .homeAndMoney, now: now)
+        // A module's trigger eases the view to its curve over a second of real time, which
+        // `waitUntilIdle` doesn't wait for: jump there instead, so the tests don't race the clock.
+        store.glideDuration = 0
         await store.waitUntilIdle()
         return store
     }
@@ -73,7 +76,9 @@ struct OutputTests {
 
         // Asking for none stops them coming with later results.
         store.want(outputs: [], ofSlot: id)
-        store.show(utc(2060, 1))
+        // Go past what the results cover, so a later fetch must come.
+        let beyond = try #require(store.computed?.through).addingTimeInterval(10 * 365.2425 * 86_400)
+        store.show(beyond)
         await store.waitUntilIdle()
         #expect(store.computed?.outputs[index].isEmpty == true)
     }
