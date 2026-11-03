@@ -37,13 +37,17 @@ public struct ModuleInfo: Sendable, Equatable {
     public var slotName: String
     /// The value the graph shows at first.
     public var shows: String
+    /// What a new slot draws behind its graph, as scenario.md writes it (`world-map of infectious`),
+    /// or nil for nothing (docs/DESIGN.md, 9.6).
+    public var backdrop: String?
 
-    public init(name: String, summary: String, category: String, slotName: String, shows: String) {
+    public init(name: String, summary: String, category: String, slotName: String, shows: String, backdrop: String? = nil) {
         self.name = name
         self.summary = summary
         self.category = category
         self.slotName = slotName
         self.shows = shows
+        self.backdrop = backdrop
     }
 }
 

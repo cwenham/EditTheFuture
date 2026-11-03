@@ -1722,6 +1722,7 @@ public final class ScenarioStore {
             input.field = fieldsAtCursor[slot.id]?[field.name]
             input.label = field.label
             input.quantity = field.quantity
+            input.scale = field.scale
             for variable in descriptor.variables where field.keys.contains(variable.name) {
                 if let label = variable.label { input.keyLabels[variable.name] = label }
             }

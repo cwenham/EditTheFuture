@@ -39,10 +39,13 @@ struct BackdropTests {
         #expect(paris.y < sydney.y && paris.x < sydney.x)
     }
 
-    @Test("Shading: shares as they are, other values against the largest, and what isn't finite left out")
+    @Test("Shading: percents as they are, other values against the largest, and what isn't finite left out")
     func intensities() {
-        let shares = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B"], values: [0.2, 0.9]), color: .blue)
+        let shares = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B"], values: [0.2, 0.9]),
+                                   quantity: .percent, color: .blue)
         #expect(shares.intensities() == ["A": 0.2, "B": 0.9])
+        let small = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B"], values: [0.001, 0.004]), color: .blue)
+        #expect(small.intensities() == ["A": 0.25, "B": 1])
         let counts = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B", "C"], values: [50, 200, .nan]), color: .blue)
         #expect(counts.intensities() == ["A": 0.25, "B": 1])
         let percent = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A"], values: [1.5]), quantity: .percent, color: .blue)
@@ -50,6 +53,16 @@ struct BackdropTests {
         let huge = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B"], values: [.infinity, 3]), color: .blue)
         #expect(huge.intensities() == ["B": 1])
         #expect(BackdropInput(color: .blue).intensities().isEmpty)
+        // Logarithmic: a millionth is nothing, a thousandth is half way, a tenth and more are full.
+        let log = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B", "C", "D"], values: [1e-6, 1e-3, 0.1, 0.5]),
+                                scale: .logarithmic(faintest: 1e-6, full: 0.1), color: .blue)
+        let shaded = log.intensities()
+        #expect(shaded["A"] == 0 && shaded["C"] == 1 && shaded["D"] == 1)
+        #expect(abs(shaded["B"]! - 0.6) < 1e-9)
+        // A relative scale on percents, when the field asks for it.
+        let relative = BackdropInput(field: FieldSample(name: "f", time: .now, keys: ["A", "B"], values: [0.1, 0.4]),
+                                     quantity: .percent, scale: .relative, color: .blue)
+        #expect(relative.intensities() == ["A": 0.25, "B": 1])
     }
 
     @Test("Points must be on the globe; longitudes wrap round")

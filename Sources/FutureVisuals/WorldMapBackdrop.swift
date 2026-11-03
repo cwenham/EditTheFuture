@@ -11,6 +11,9 @@ public struct WorldMapBackdrop: Backdrop {
     public init() {}
 
     /// The map's place in a graph: as large as fits, centred, keeping its shape.
+    /// Countries shaded less than this aren't filled.
+    static let faintest = 0.005
+
     public static func mapRect(in size: CGSize) -> CGRect {
         let height = max(0, min(size.height * 0.94, size.width / EqualEarth.aspect * 0.98))
         let width = height * EqualEarth.aspect
@@ -33,8 +36,9 @@ public struct WorldMapBackdrop: Backdrop {
         let shades = input.intensities()
         if !shades.isEmpty {
             for country in Self.cache.paths(in: rect).countries {
-                guard let intensity = shades[country.code] else { continue }
-                context.fill(country.path, with: .color(input.color.opacity(0.06 + 0.5 * intensity)))
+                // Too faint to see, so not worth a fill: most countries, most of the time.
+                guard let intensity = shades[country.code], intensity >= Self.faintest else { continue }
+                context.fill(country.path, with: .color(input.color.opacity(0.05 + 0.35 * intensity)))
             }
         }
         if let point = input.point {

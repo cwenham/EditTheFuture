@@ -52,8 +52,10 @@ let package = Package(
         .target(name: "FutureSimulation", dependencies: ["FutureEngine"]),
         // Each module has a folder of its own under Sources/Simulations.
         .target(name: "EpidemicSimulation", dependencies: ["FutureSimulation", "FutureEngine"], path: "Sources/Simulations/Epidemic"),
+        .target(name: "WorldEpidemicSimulation", dependencies: ["FutureSimulation", "FutureEngine"],
+                path: "Sources/Simulations/WorldEpidemic"),
         // The modules that come with the app.
-        .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation"],
+        .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation", "WorldEpidemicSimulation"],
                 path: "Sources/Simulations/Catalog"),
         // Backdrops: visuals drawn faintly behind the focused graph, such as the world map (docs/DESIGN.md, 9.6).
         .target(name: "FutureVisuals", dependencies: ["FutureEngine"]),
@@ -86,6 +88,8 @@ let package = Package(
         // A module's tests see only the module, the contract and the engine, as the module does.
         .testTarget(name: "EpidemicSimulationTests", dependencies: ["EpidemicSimulation", "FutureSimulation", "FutureEngine"],
                     path: "Tests/Simulations/Epidemic"),
+        .testTarget(name: "WorldEpidemicSimulationTests", dependencies: ["WorldEpidemicSimulation", "FutureSimulation", "FutureEngine"],
+                    path: "Tests/Simulations/WorldEpidemic"),
         .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
                                                           "FutureDocument", "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
     ] + pythonTargets

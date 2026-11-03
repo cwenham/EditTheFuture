@@ -71,10 +71,33 @@ func benchEngine() throws {
     // The Epidemic module (docs/DESIGN.md, 6.5): SEIR in Swift, a step a day.
     for years in [10, 100] {
         let scenario = Scenario(start: utc(2026))
-        let model = try ModuleCatalog.builtIn.makeModel(ModuleReference(id: "epidemic", version: 1), name: "Outbreak", values: [:])
+        let model = try ModuleCatalog.app.makeModel(ModuleReference(id: "epidemic", version: 1), name: "Outbreak", values: [:])
         let id = try scenario.addSlot("Outbreak", model: model)
         let ms = try time { try scenario.ensure(id, through: utc(2026 + years)) }
         report("engine: epidemic module (daily SEIR), \(years) years", ms, String(format: "%.1f µs/step", ms * 1000 / Double(years * 365)))
+    }
+    // The World epidemic module: SEIR in each of the world's countries, joined by travel.
+    for years in [10, 100] {
+        let scenario = Scenario(start: utc(2026))
+        let model = try ModuleCatalog.app.makeModel(ModuleReference(id: "world-epidemic", version: 1), name: "Pandemic", values: [:])
+        let id = try scenario.addSlot("Pandemic", model: model)
+        let ms = try time { try scenario.ensure(id, through: utc(2026 + years)) }
+        report("engine: world epidemic module, \(years) years", ms, String(format: "%.1f µs/step", ms * 1000 / Double(years * 365)))
+    }
+    do {
+        // A field at the cursor, from the nearest checkpoint, as the map asks for it.
+        let scenario = Scenario(start: utc(2026))
+        let model = try ModuleCatalog.app.makeModel(ModuleReference(id: "world-epidemic", version: 1), name: "Pandemic", values: [:])
+        let id = try scenario.addSlot("Pandemic", model: model)
+        try scenario.ensure(id, through: utc(2036))
+        var day = 0
+        let ms = try time {
+            for _ in 0..<200 {
+                day += 17
+                _ = try scenario.field("infectious", of: id, at: utc(2026).addingTimeInterval(Double(day) * 86_400))
+            }
+        }
+        report("engine: world epidemic field at a cursor, 200 times", ms, String(format: "%.0f µs each", ms * 1000 / 200))
     }
 
     // Several independent slots: sequential versus spread across cores.
@@ -278,7 +301,7 @@ MainActor.assumeIsolated {
             print("engine runs: \(runs)")
         }
         if section == "cursor-loop" {
-            // `parts` and `map` draw a backdrop behind the focused graph (docs/DESIGN.md, 9.6).
+            // `parts`, `map` and `world` draw a backdrop behind the focused graph (docs/DESIGN.md, 9.6).
             let variant = CommandLine.arguments.dropFirst(2).first
             var definition = ScenarioDefinition.homeAndMoney
             if variant == "map" {
@@ -292,6 +315,12 @@ MainActor.assumeIsolated {
                 store.addModel(ModelLibrary.epidemic, atPosition: 6)
                 store.setBackdrop(BackdropBinding(id: "parts", field: "groups"), inSlotAt: store.focusedIndex)
                 store.show(utc(2026, 4))
+            }
+            if variant == "world", let world = ModelLibrary.template(id: "world-epidemic") {
+                // The world map shaded country by country while the pandemic spreads.
+                store.addModel(world, atPosition: 6)
+                store.show(utc(2022, 9))
+                store.zoom(by: 0.25)
             }
             if variant == "map", let index = store.slots.firstIndex(where: { $0.name == "Ship" }) { store.focus(index: index) }
             let view = NSHostingView(rootView: PanelView(store: store, actions: PanelActions(hide: {}, copySnapshot: {})))

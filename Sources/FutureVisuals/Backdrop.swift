@@ -38,32 +38,44 @@ public struct BackdropInput: Sendable, Equatable {
     /// The field's label, such as "Where everyone is".
     public var label: String?
     public var quantity: Quantity?
+    /// How the field says to shade it; see `intensities()`.
+    public var scale: FieldScale?
     /// How to write each key, such as "Can still catch it" for `susceptible`. Keys without one are
     /// written as they are.
     public var keyLabels: [String: String]
     public var point: GeoPoint?
     public var color: Color
 
-    public init(field: FieldSample? = nil, label: String? = nil, quantity: Quantity? = nil, keyLabels: [String: String] = [:],
-                point: GeoPoint? = nil, color: Color) {
+    public init(field: FieldSample? = nil, label: String? = nil, quantity: Quantity? = nil, scale: FieldScale? = nil,
+                keyLabels: [String: String] = [:], point: GeoPoint? = nil, color: Color) {
         self.field = field
         self.label = label
         self.quantity = quantity
+        self.scale = scale
         self.keyLabels = keyLabels
         self.point = point
         self.color = color
     }
 
-    /// The field's values as 0...1 for shading: as they are when they're shares (a percent field,
-    /// or all between 0 and 1), else each over the largest. Values that aren't finite are left out.
+    /// The field's values as 0...1 for shading, by its scale: shares as they are, values against the
+    /// largest, or a logarithmic range. Without a scale, percents are shares and anything else is
+    /// against the largest. Values that aren't finite are left out.
     public func intensities() -> [String: Double] {
         guard let field else { return [:] }
-        let finite = field.values.filter(\.isFinite)
-        let largest = finite.map(abs).max() ?? 0
-        let shares = quantity == .percent || finite.allSatisfy { $0 >= 0 && $0 <= 1 }
+        let scale = self.scale ?? (quantity == .percent ? .share : .relative)
+        var largest = 0.0
+        if case .relative = scale { largest = field.values.filter(\.isFinite).map(abs).max() ?? 0 }
         var result: [String: Double] = [:]
         for (key, value) in zip(field.keys, field.values) where value.isFinite {
-            let intensity = shares ? value : (largest > 0 ? abs(value) / largest : 0)
+            let intensity: Double
+            switch scale {
+            case .share:
+                intensity = value
+            case .relative:
+                intensity = largest > 0 ? abs(value) / largest : 0
+            case .logarithmic(let faintest, let full):
+                intensity = value > faintest && full > faintest && faintest > 0 ? log(value / faintest) / log(full / faintest) : 0
+            }
             result[key] = min(1, max(0, intensity))
         }
         return result

@@ -79,9 +79,10 @@ extension ScenarioStore {
             return false
         }
         let blank = template.category == .blank
-        let config = SlotConfig(position: position, name: uniqueName(template.slotName), model: template.slotModelName,
+        var config = SlotConfig(position: position, name: uniqueName(template.slotName), model: template.slotModelName,
                                 kind: template.kind, formula: template.formula, variable: template.variable,
                                 format: template.format)
+        config.backdrop = template.backdrop
         closePicker()
         applySlotChange(configs + [config], focus: config.id)
         if blank { showFormulaEditor() } else { showSlotSettings() }
@@ -101,6 +102,8 @@ extension ScenarioStore {
         config.variable = template.variable
         config.format = template.format
         config.values = config.values.filter { declared.contains($0.key) }
+        // A backdrop the new model suggests, unless the slot has one of its own.
+        if config.backdrop == nil { config.backdrop = template.backdrop }
         closePicker()
         applySlotChange(configs.replacing(index, with: config), focus: config.id)
         say("\(slots[focusedIndex].title) now uses \(template.name)")

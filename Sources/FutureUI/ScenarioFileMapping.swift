@@ -73,7 +73,7 @@ extension ModelKind {
     var customModelName: String {
         switch self {
         case .script(let language): return "Custom \(language.title) script"
-        case .module(let reference): return ModuleCatalog.builtIn.module(id: reference.id)?.info.name ?? reference.id
+        case .module(let reference): return ModuleCatalog.app.module(id: reference.id)?.info.name ?? reference.id
         default: return "Custom formula"
         }
     }
@@ -81,7 +81,7 @@ extension ModelKind {
     /// What the graph shows when scenario.md doesn't say: the value a module names, else the model's
     /// first output.
     func usualVariable(of descriptor: ModelDescriptor) -> String {
-        if case .module(let reference) = self, let shows = ModuleCatalog.builtIn.module(id: reference.id)?.info.shows,
+        if case .module(let reference) = self, let shows = ModuleCatalog.app.module(id: reference.id)?.info.shows,
            descriptor.variable(named: shows) != nil {
             return shows
         }
