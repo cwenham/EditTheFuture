@@ -71,6 +71,18 @@ public struct RecurringEvent: Hashable, Sendable, Codable, Identifiable {
         self.count = count
     }
 
+    /// The first occurrence after `date`, or at it too when `including`; nil when there are no more.
+    public func firstOccurrence(after date: Date, including: Bool, calendar: Calendar = .utcGregorian) -> Date? {
+        guard every.isValid else { return nil }
+        let grid = TimeGrid(start: first, rate: every, calendar: calendar)
+        var index = grid.firstIndex(atOrAfter: date)
+        if !including, grid.point(index) == date { index += 1 }
+        if let count, index >= count { return nil }
+        let time = grid.point(index)
+        if let until, time > until { return nil }
+        return time
+    }
+
     /// The occurrences that fall inside `window`.
     public func occurrences(in window: StepWindow, calendar: Calendar = .utcGregorian) -> [Event] {
         guard every.isValid, window.upper >= first else { return [] }

@@ -207,9 +207,18 @@ extension ScenarioStore {
     /// Sets the draft's date from a click on the graph, and its slot when a lane was clicked.
     public func pickEventDate(_ date: Date, slotIndex: Int? = nil) {
         if let slotIndex { focus(index: slotIndex) }
-        // Never before the start, so clicking left of it picks the start. West of UTC, the start of
-        // the start's own day in the Mac's time zone is before it.
-        eventDraft.date = max(start, Calendar.current.startOfDay(for: date))
+        eventDraft.date = eventDate(near: date)
+    }
+
+    /// Where a click or the cursor puts an event: at the start of its day, or at its minute when the
+    /// view is zoomed in to a few days or less (docs/UI.md, 2.5). Never before the start, so clicking
+    /// left of it picks the start. West of UTC, the start of the start's own day in the Mac's time
+    /// zone is before it.
+    func eventDate(near date: Date) -> Date {
+        if frame.span < 4 * 86_400 {
+            return max(start, Date(timeIntervalSinceReferenceDate: (date.timeIntervalSinceReferenceDate / 60).rounded(.down) * 60))
+        }
+        return max(start, Calendar.current.startOfDay(for: date))
     }
 
     /// Picks a date and puts the keyboard in the pane's amount field.

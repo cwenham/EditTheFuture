@@ -147,6 +147,16 @@ Added in November 2026. Some models have values for each of many things: each co
 - **In the panel:** `ScenarioStore.watch(fields:ofSlot:)` names the fields to work out at the cursor, by slot id. The store asks the engine for them whenever the cursor moves or new results arrive (which covers edits), and a request still waiting is replaced by the newer one, so a sweeping cursor never queues up work. The engine keeps the fields it worked out by slot, name and point until the next edit, so a cursor resting within one step costs nothing. `fieldsAtCursor` holds the results, and `field(_:ofSlotAt:)` reads one; only views that draw fields read them, so nothing else redraws. Nothing in the panel watches one yet: backdrops (6.5) will.
 - **Epidemic** has one: `groups`, where everyone is, the share of the population in each group (susceptible, exposed, infectious, recovered, vaccinated), which adds up to 1.
 
+### 4.11 Settled models
+
+Added in November 2026, for models with short steps on an endless timeline. A worm that's stepped every minute would otherwise take 525,600 steps a year, for ever, after it has stopped changing.
+
+- **Saying so:** a model whose descriptor has the `settles` capability is asked after each step whether it has settled (`TimelineModel.isSettled`): whether a step with no events, readings or inputs would change nothing, emit nothing and leave every value as it is. Models without the capability are never asked, so ordinary models pay nothing (the engine benchmarks were checked against the previous commit). Modules say it in their shape (`SimulationShape.settles`, `NumericSimulation.isSettled`); the Internet worm does.
+- **Skipping:** when a settled slot is about to compute its next step, the engine finds the next step with one of the slot's own events, repeating events' occurrences or readings in it, and holds the slot's last point until just before it, or for ever when there's none. Held points aren't stored: a value at one is the last stored value, a field at one is worked out from the state the slot settled in, and `series` gives each held stretch as its first and last points, which draws the same flat line. Only slots that don't read other slots, receive their events or have inputs can skip, since anything else could change what a step gets. Slots that read a held slot see its held values.
+- **Edits:** an event added inside a held stretch shortens it, and the slot carries on from where it settled, so adding an event decades ahead costs one step and what follows. The runner keeps a checkpoint where it settled for this.
+- **Storage:** a slot's points are kept densely, row by index, until something is held; only then does the runner keep each stored point's index (`SlotRunner.sparse`). Held results aren't saved to the cache (15.5), since a settled slot is quick to compute again.
+- **Seen from outside:** `computedThrough` is `Date.distantFuture` for a slot that holds for ever.
+
 ## 5. Multiple models (co-simulation)
 
 ### 5.1 The spreadsheet analogy
@@ -558,7 +568,8 @@ Begun in November 2026. A simulation too heavy for a formula or script, such as 
 
 | Part | What it is |
 |---|---|
-| `SimulationModule` | `id` (written in scenario.md, so it never changes), `version` (goes up when the model's meaning changes), `info` (name, summary, picker category, the slot's name, what the graph shows first), `needs` (data it asks for) and `makeModel(name:values:data:)`, which returns an `AuthoredModel`. |
+| `SimulationModule` | `id` (written in scenario.md, so it never changes), `version` (goes up when the model's meaning changes), `info` (name, summary, picker category, the slot's name, what the graph shows first, the backdrop it suggests, and its trigger), `needs` (data it asks for) and `makeModel(name:values:data:)`, which returns an `AuthoredModel`. |
+| `ModuleTrigger` | The event that sets a module off, such as `infect` with an amount of 10, and the starting values that keep it quiet until then (`infected: 0`). A new slot gets the event at the cursor and those values, so it begins where the person is looking rather than at the scenario's start (UI.md, 5.7). Without one, a module starts at the scenario's start with its defaults. |
 | `ModuleReference` | `epidemic@1`: a module and the version a scenario was made with. |
 | `DataNeed`, `DataTable`, `ModuleData` | What a module asks the app for by name ("countries"), and the tables the app hands over: rows with a key each, such as a country code, and columns of numbers. The module never knows where they came from. |
 | `ModuleDataSource` | Where the app gets modules' data: bundled with the app, a feed or a cache. The app supplies one, and tests supply their own. None of the modules so far needs data. |
@@ -576,6 +587,8 @@ Begun in November 2026. A simulation too heavy for a formula or script, such as 
 
 A slot that names a module the app hasn't got, or a newer version than the app has, is paused with the reason (5.9).
 
+**Beginning at the cursor:** all three modules have triggers. The Epidemic's is `imported` 10 with `exposed: 0`, the World epidemic's `imported` 10 (in the country where it starts) with `firstCases: 0`, and the Internet worm's `infect` 10 with `infected: 0`. So a scenario that starts in 2000 no longer has its outbreak over in the first minutes of 2000, out of sight. The trigger and the emptied values are written in scenario.md like any slot's own, and a module's defaults are unchanged, so older scenarios run as they did. A test checks every built-in module's trigger is an event it handles, and that nothing happens before it.
+
 **Epidemic** (`Sources/Simulations/Epidemic`) is the first module: an outbreak in one population (SEIR), from R₀, the incubation, the days a case is infectious and the population, a step a day. Each day 1/days of the incubating and infectious move on, and new cases are those who can still catch it times 1 − e^(−R₀ × infectious ÷ (illness × population)). So each case infects R₀ people, everyone is counted once, and an unchecked outbreak reaches the share the final-size equation gives. `imported` events add cases, `vaccinate` events make people immune, and `set` events change R₀ (a lockdown). It emits Peak and HerdImmunity. It began as a formula; written as a module it runs about 3× faster than a one-line daily formula.
 
 **World epidemic** (`Sources/Simulations/WorldEpidemic`, `world-epidemic@1`) is the second: Epidemic's model in each of the world's countries (177, Antarctica's research stations included), joined by travel. It's the first module that needs data: a `countries` table of ISO 3166 alpha-3 codes with each one's population, latitude and longitude. The app supplies it (`AppModuleData`, from the world map's table, 9.6) through `ModuleCatalog.app`, the built-in modules with the app's data, which all app code uses; `ModuleCatalog.builtIn` has none.
@@ -587,11 +600,20 @@ A slot that names a module the app hasn't got, or a newer version than the app h
 - **Speed:** about 4,000 multiply-adds a day while it spreads. Two things keep a century quick: counts below a trillionth of a person are none, since numbers near 10⁻³⁰⁸, which a dying outbreak reaches, are very slow on Intel chips; and once nobody anywhere is incubating or infectious, a step does nothing until an event. 100 years took 3.5 seconds before them and 0.36 after, on a busy iMac Pro; a field at the cursor takes about 0.3 ms.
 - **Later:** real air-traffic flows instead of the gravity model (they're sold, not free), travel bans and lockdowns for single countries, and inputs from other slots.
 
+**Internet worm** (`Sources/Simulations/Worm`, `worm@1`) is the third: a worm spreading by scanning random IPv4 addresses, as Code Red (2001) and Slammer (2003) did, after the two-factor model (Zou, Gong and Towsley, 2002). It steps every minute, worked out in one-second steps inside it.
+
+- **Spreading:** each second, a vulnerable host is hit by one of the infected hosts' scans with chance 1 − e^(−scans × infected ÷ 2³²), which stays right however fast a worm scans. Each infected host scans at its scan rate times (1 − infected ÷ vulnerable)^congestion, so the network filling up slows it (Slammer did).
+- **Fighting back:** a share of infected hosts are cleaned up each hour, and still-vulnerable hosts are patched at a rate that grows with the share of hosts already hit, people's awareness. `infect`, `patch` and `clean` events add infected hosts, patch vulnerable ones, and clean infected ones; `set` events change any of it, such as the scan rate when networks start filtering. It emits Peak.
+- **Defaults** are Code Red's: 360,000 vulnerable hosts scanning 6 times a second, which gives the 1.8-an-hour growth fitted to its spread (Staniford, Paxson and Weaver, 2002). Slammer's numbers (75,000 hosts, 4,000 scans a second) double in about ten seconds and fill the Internet in minutes.
+- **Settling** (4.11): once nobody is infected or nobody is left to infect, and nothing is being cleaned or patched, it has settled; fewer than a millionth of a host counts as none, so it does. A century then costs nothing. The timeline zooms in to an hour to watch it (UI.md, 2.5).
+- **What it shows:** infected, still vulnerable, cleaned up, patched, ever infected, and scans a second from all hosts, which is the load it puts on the network; the field `groups` for parts of a whole, which a new slot draws.
+- **Later:** worms that follow networks rather than scanning at random (topological, email and local-network worms), on a map of the Internet's links; the free maps of it (CAIDA's, TeleGeography's cables) have terms to check first.
+
 **Next** (each its own branch):
 1. **Fields** are done (4.10): values per key, worked out at the cursor from the nearest checkpoint.
 2. **Backdrops** are begun (9.6): a world map and parts of a whole behind the focused graph, driven by a module's field or a formula's position.
 3. **World travel** is done: the World epidemic, above.
-4. **A sky map**, and **computer worms** (scanning worms, then ones that follow networks), which need the engine to stop computing a model once nothing changes.
+4. **A sky map** and **the Internet worm** are done (9.6, above), with settled models (4.11), zooming in to an hour (UI.md, 2.5), and new slots beginning at the cursor (triggers, above). Worms that follow networks are later.
 5. Moving scripts' own file lookups (the Libraries folder, Python's home) behind the same kind of interface.
 
 ## 7. Capability borrowing (paired devices)
@@ -825,7 +847,9 @@ Begun in November 2026. A backdrop is an infographic drawn faintly behind the fo
 
 **Speed:** `etf-bench cursor-loop parts` and `cursor-loop map` sweep the cursor over a panel with each. On a busy iMac Pro, drawing every country's outline in each frame added about 9 ms a frame; with the base layer apart and the outlines as one path, the map adds about 2 ms and the ring about 1.6 ms, against about 15 ms for the panel.
 
-**Later:** a sky map, a globe, a network of links (for worms between networks), easing between shadings, and showing the backdrop of an overlaid slot.
+- **Sky map** (`sky-map`): the 2,887 stars brighter than magnitude 5.5 from the Yale Bright Star Catalogue (5th revised edition, public, from NASA's HEASARC) on the Hammer projection: an oval twice as wide as high, every part at its true size, north up, right ascension increasing to the left as the sky is seen, 0h in the middle. Each star is a dot sized by its magnitude and tinted by its B−V colour index, with the celestial equator and the ecliptic. It brightens stars by a `sky/stars` field keyed by Harvard Revised number ("HR 2491" is Sirius), and draws a point from a slot's declination and right ascension (`dec` and `ra`, in degrees), such as a comet a formula moves. `scripts/make-bright-stars.py` turns the catalogue into `BrightStarsData.swift` (87 KB). Backdrops say which two values they place a point from (`Backdrop.pointNames`).
+
+**Later:** constellation lines (the free sets need their licences checked), a globe, a network of links (for worms between networks), easing between shadings, and showing the backdrop of an overlaid slot.
 
 ## 10. Commands and integrations
 
@@ -1341,11 +1365,12 @@ Sources/
   FutureEngine/      time grids, CivilDate, events, variables, TimelineModel, fields, Scenario (coordinator, parallel groups), wiring checks, goal seek, fitting (misses, slot copies, least squares, Refit), drift checks
   FutureFormula/     formula language: lexer, parser, analysis, resolution to arrays, evaluator, FormulaModel; editing tools (colouring, completion, diagnoses with fixes)
   FutureScript/      Lua and Python scripts (6.4): ScriptModel, ScriptPrograms (loading and sharing), the two runtimes and their preludes (the script API), editing tools
-  FutureVisuals/     backdrops (9.6): the Backdrop contract and catalog, the world map (Equal Earth, Natural Earth's countries in WorldCountriesData.swift) and parts of a whole
+  FutureVisuals/     backdrops (9.6): the Backdrop contract and catalog, the world map (Equal Earth, Natural Earth's countries in WorldCountriesData.swift), the sky map (Hammer, the Bright Star Catalogue in BrightStarsData.swift) and parts of a whole
   FutureSimulation/  the contract simulation modules are built against (6.5): SimulationModule, ModuleReference, data needs and tables, ModuleCatalog, NumericSimulation and NumericModel
   Simulations/       one folder per simulation module, each its own target seeing only FutureEngine and FutureSimulation
     Epidemic/        the Epidemic module (SEIR)
     WorldEpidemic/   the World epidemic module: SEIR in each country, joined by travel
+    Worm/            the Internet worm module: random scanning, two-factor, settles
     Catalog/         SimulationCatalog: the modules that come with the app
   CLua/              Lua 5.5.1 from lua.org, without os, io, package and debug, plus etf_lua.c (memory cap, time limit, require)
   CPythonBridge/     etf_python.c: starting CPython, audit hooks, the watchdog for time limits. Built only when Vendor/Python exists.
@@ -1360,22 +1385,24 @@ Sources/
   etf-feed/          fetches a feed without the app and prints CSV
 Vendor/Python/       CPython from BeeWare, fetched by scripts/fetch-python.sh (not in git)
 Tests/
-  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares, fields from checkpoints
+  FutureEngineTests/    grids, recurrence, lazy evaluation, invalidation, coupling, loops, event routes, fast paths, parallel groups, least squares, fields from checkpoints, settled models
   FutureFormulaTests/   parsing, parameter options and slot values, wiring checks, editing tools, savings maths, ODEs, coupled scenarios, goal seek, determinism, readings as corrections, fit and Refit, drift
   FutureVisualsTests/   the country table, the projection, shading, points, and each backdrop drawn into an image
   FutureSimulationTests/ the module contract: NumericModel's events, readings and saved numbers, references, the catalog's checks, tables
+  Simulations/Worm/       the Internet worm against the logistic curve, Code Red's and Slammer's numbers, settling, congestion, cleanup, patching, events, conservation
   Simulations/WorldEpidemic/  the World epidemic on small made-up worlds: one country is Epidemic step for step, spread by distance and size, travel bans, imported cases, vaccines, conservation, links
   Simulations/Epidemic/  the Epidemic module against the final-size equation, early growth, R₀ below 1, vaccination, imported cases, events, extremes and conservation
   FutureScriptTests/    both languages side by side: results, readings as corrections, declarations, events, inputs, randomness, errors and lines, time and memory limits, libraries, Python's audit hooks, fit and Refit; colouring and completion
   FutureCommandsTests/  URL scheme, confirmation policy, the etf tool's arguments, amounts and printing, the wire format, the socket (round trips, refused callers, stale sockets), MIDI parsing and mapping, feedback encoding
   FutureDocumentTests/  scenario.md read and written back, mistakes, numbers and dates; CSV and SQLite readings and their guards; feeds' lines, copies and merging; cache files; restored results
   FutureFeedsTests/     each source's requests and answers (from fixtures), dates and numbers, sign-ins and their hosts, paging, errors, the ready-made feeds
-  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts, drift alerts
+  FutureUITests/        store, slot editing, formula and script editing and the editor's text view, model library, command bar, add-event pane, scroll mapping, plot thinning, snapshots, the mounted panel, scenario documents, feeds fetched into a scenario, requests from the etf tool and Shortcuts, drift alerts, modules' triggers and easing to a new slot's curve
 scripts/
   build-app.sh       builds .build/EditTheFuture.app, with Python.framework in it when it's fetched, the .etf document type, the etf tool and the App Intents metadata
   appintents-protocols.json  the protocols whose constant values the compiler records for App Intents
   fetch-python.sh    downloads and checks CPython for the Mac and iOS into Vendor/Python
   make-world-countries.py  turns Natural Earth's 1:110m countries (GeoJSON) into the world map's table
+  make-bright-stars.py     turns the Yale Bright Star Catalogue into the sky map's table
 ```
 
 Run the tests with `swift test`.

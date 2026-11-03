@@ -13,7 +13,7 @@ struct FieldStoreTests {
     func makeStore() async throws -> (ScenarioStore, UUID) {
         let store = try ScenarioStore(definition: .homeAndMoney, now: now)
         await store.waitUntilIdle()
-        store.addModel(ModelLibrary.epidemic, atPosition: 6)
+        store.addModel(ModelLibrary.epidemic.startingAtStart, atPosition: 6)
         await store.waitUntilIdle()
         return (store, store.focused.id)
     }

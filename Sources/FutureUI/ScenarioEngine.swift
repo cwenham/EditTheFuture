@@ -465,6 +465,74 @@ actor ScenarioEngine {
         return FindResult(request: request, startValue: startValue, found: nil)
     }
 
+    struct CurveRequest: Sendable {
+        let slot: Int
+        /// Where the slot's trigger is, from where the line is looked at.
+        let from: Date
+    }
+
+    struct CurveResult: Sendable {
+        let request: CurveRequest
+        /// By when the line has made 99% of the moves it makes, or nil if it doesn't move.
+        let end: Date?
+    }
+
+    /// How far ahead the curve search looks at most, and how long it may take, in seconds.
+    static let curveHorizon: TimeInterval = 200 * 365.2425 * 86_400
+    static let curveBudget: TimeInterval = 1
+
+    /// Where a slot's line does its changing after `from`, for the view to zoom to when a model is
+    /// added (docs/UI.md, 5.7). It looks ahead an hour, then four times as far each time, until a
+    /// longer look adds less than 1% to how far the line moves, or the next look would take too
+    /// long. Then it finds when the line had made 99% of its moves.
+    func curve(_ request: CurveRequest) -> CurveResult {
+        guard let id = ids[request.slot], let variable = setups[request.slot]?.variable else {
+            return CurveResult(request: request, end: nil)
+        }
+        let began = Date()
+        var window: TimeInterval = 3_600
+        var best: [Sample] = []
+        var bestMoves = 0.0
+        while window <= Self.curveHorizon {
+            guard let samples = try? scenario.series(variable, of: id, from: request.from,
+                                                     through: request.from.addingTimeInterval(window)) else { break }
+            let moves = Self.moves(samples)
+            // Looking four times as far found almost nothing more: the last look had it all.
+            if moves > 0, moves <= bestMoves * 1.01 { break }
+            best = samples
+            bestMoves = moves
+            // Each look takes about four times as long as the last, though a model that has settled
+            // (4.11) costs nothing more.
+            if Date().timeIntervalSince(began) * 5 > Self.curveBudget { break }
+            window *= 4
+        }
+        return CurveResult(request: request, end: Self.end(ofMoves: best, share: 0.99))
+    }
+
+    /// How far a line moves up and down in all: the sum of the changes between its points. Changes
+    /// to or from values that aren't finite don't count.
+    nonisolated static func moves(_ samples: [Sample]) -> Double {
+        var total = 0.0
+        for (a, b) in zip(samples, samples.dropFirst()) {
+            let change = abs(b.value - a.value)
+            if change.isFinite { total += change }
+        }
+        return total
+    }
+
+    /// The first point by which a line has made `share` of its moves, or nil if it doesn't move.
+    nonisolated static func end(ofMoves samples: [Sample], share: Double) -> Date? {
+        let total = moves(samples)
+        guard total > 0, total.isFinite else { return nil }
+        var sum = 0.0
+        for (a, b) in zip(samples, samples.dropFirst()) {
+            let change = abs(b.value - a.value)
+            if change.isFinite { sum += change }
+            if sum >= share * total { return b.time }
+        }
+        return samples.last?.time
+    }
+
     /// Drag the future (docs/UI.md, 5.2): the changes to try, each solved for the value that brings
     /// the slot's line to the target.
     struct GoalRequest: Sendable {

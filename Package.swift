@@ -54,8 +54,10 @@ let package = Package(
         .target(name: "EpidemicSimulation", dependencies: ["FutureSimulation", "FutureEngine"], path: "Sources/Simulations/Epidemic"),
         .target(name: "WorldEpidemicSimulation", dependencies: ["FutureSimulation", "FutureEngine"],
                 path: "Sources/Simulations/WorldEpidemic"),
+        .target(name: "WormSimulation", dependencies: ["FutureSimulation", "FutureEngine"], path: "Sources/Simulations/Worm"),
         // The modules that come with the app.
-        .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation", "WorldEpidemicSimulation"],
+        .target(name: "SimulationCatalog", dependencies: ["FutureSimulation", "EpidemicSimulation", "WorldEpidemicSimulation",
+                                                          "WormSimulation"],
                 path: "Sources/Simulations/Catalog"),
         // Backdrops: visuals drawn faintly behind the focused graph, such as the world map (docs/DESIGN.md, 9.6).
         .target(name: "FutureVisuals", dependencies: ["FutureEngine"]),
@@ -90,6 +92,8 @@ let package = Package(
                     path: "Tests/Simulations/Epidemic"),
         .testTarget(name: "WorldEpidemicSimulationTests", dependencies: ["WorldEpidemicSimulation", "FutureSimulation", "FutureEngine"],
                     path: "Tests/Simulations/WorldEpidemic"),
+        .testTarget(name: "WormSimulationTests", dependencies: ["WormSimulation", "FutureSimulation", "FutureEngine"],
+                    path: "Tests/Simulations/Worm"),
         .testTarget(name: "FutureUITests", dependencies: ["FutureUI", "FutureEngine", "FutureFormula", "FutureScript", "FutureCommands",
                                                           "FutureDocument", "FutureFeeds", "FutureSimulation", "FutureVisuals"]),
     ] + pythonTargets

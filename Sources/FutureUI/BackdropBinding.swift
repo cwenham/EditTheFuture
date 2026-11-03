@@ -27,8 +27,9 @@ public struct BackdropChoice: Hashable, Sendable, Identifiable {
 }
 
 extension ScenarioStore {
-    /// What the slot can draw behind its graph: each backdrop with each field it draws, and the world
-    /// map with a position when the slot has values called latitude and longitude (or lat and lon).
+    /// What the slot can draw behind its graph: each backdrop with each field it draws, and a position
+    /// on any that draws points when the slot has the two values it looks for: latitude and longitude
+    /// (or lat and lon) on the world map, declination and right ascension (or dec and ra) on the sky.
     public func backdropChoices(forSlotAt index: Int) -> [BackdropChoice] {
         guard descriptors.indices.contains(index), let descriptor = descriptors[index] else { return [] }
         var choices: [BackdropChoice] = []
@@ -39,12 +40,12 @@ extension ScenarioStore {
             }
         }
         let names = Set(descriptor.readable.map(\.name))
-        if let (latitude, longitude) = [("latitude", "longitude"), ("lat", "lon")]
-            .first(where: { names.contains($0.0) && names.contains($0.1) }) {
-            for backdrop in BackdropCatalog.builtIn.backdrops where backdrop.drawsPoints {
-                choices.append(BackdropChoice(binding: BackdropBinding(id: backdrop.id, latitude: latitude, longitude: longitude),
-                                              title: "\(backdrop.name): Position"))
+        for backdrop in BackdropCatalog.builtIn.backdrops where backdrop.drawsPoints {
+            guard let (latitude, longitude) = backdrop.pointNames.first(where: { names.contains($0.0) && names.contains($0.1) }) else {
+                continue
             }
+            choices.append(BackdropChoice(binding: BackdropBinding(id: backdrop.id, latitude: latitude, longitude: longitude),
+                                          title: "\(backdrop.name): Position"))
         }
         return choices
     }

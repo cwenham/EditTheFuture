@@ -16,7 +16,7 @@ struct WorldEpidemicSlotTests {
         let store = try ScenarioStore(definition: .homeAndMoney, now: now)
         await store.waitUntilIdle()
         let template = try #require(ModelLibrary.template(id: "world-epidemic"))
-        #expect(store.addModel(template, atPosition: 6))
+        #expect(store.addModel(template.startingAtStart, atPosition: 6))
         await store.waitUntilIdle()
         return (store, store.focusedIndex)
     }

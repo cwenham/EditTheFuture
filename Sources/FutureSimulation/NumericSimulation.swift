@@ -18,10 +18,16 @@ public protocol NumericSimulation: Sendable {
     /// A field from `shape.fields`, worked out from the numbers: one value per key, in order
     /// (docs/DESIGN.md, 4.10). The default has none.
     func field(_ name: String, of s: Numbers) -> [Double]?
+
+    /// Whether a step with no events or readings would change nothing (docs/DESIGN.md, 4.11), so the
+    /// engine can skip ahead. Asked only when `shape.settles`. The default is never.
+    func isSettled(_ s: Numbers) -> Bool
 }
 
 extension NumericSimulation {
     public func field(_ name: String, of s: Numbers) -> [Double]? { nil }
+
+    public func isSettled(_ s: Numbers) -> Bool { false }
 }
 
 /// What a numeric simulation declares: the order of its numbers, and what it handles and emits.
@@ -43,10 +49,12 @@ public struct SimulationShape: Sendable {
     public var stochastic: Bool
     /// Values per key it works out when asked, such as each country's share infected (docs/DESIGN.md, 4.10).
     public var fields: [FieldDescriptor]
+    /// Whether it can settle (`NumericSimulation.isSettled`, docs/DESIGN.md 4.11).
+    public var settles: Bool
 
     public init(step: StepRate, timeUnit: StepRate? = nil, parameters: [Variable], state: [Variable], outputs: [Variable] = [],
                 hidden: [String] = [], handles: [String] = [], emits: [String] = [], stochastic: Bool = false,
-                fields: [FieldDescriptor] = []) {
+                fields: [FieldDescriptor] = [], settles: Bool = false) {
         self.step = step
         self.timeUnit = timeUnit ?? step
         self.parameters = parameters.map { var v = $0; v.causality = .parameter; return v }
@@ -57,6 +65,7 @@ public struct SimulationShape: Sendable {
         self.emits = emits
         self.stochastic = stochastic
         self.fields = fields
+        self.settles = settles
     }
 
     /// Every number's name, in the order of `Numbers`.
@@ -178,8 +187,11 @@ public struct NumericModel<Simulation: NumericSimulation>: AuthoredModel {
         initial = readable.map { overrides[$0.name] ?? $0.start } + shape.hidden.map { _ in 0 }
         parameterIndex = Dictionary(shape.parameters.enumerated().map { ($0.element.name, $0.offset) }) { first, _ in first }
         readableIndex = Dictionary(readableNames.enumerated().map { ($0.element, $0.offset) }) { first, _ in first }
+        var capabilities: Set<Capability> = []
+        if shape.stochastic { capabilities.insert(.stochastic) }
+        if shape.settles { capabilities.insert(.settles) }
         descriptor = ModelDescriptor(name: name, stepRate: shape.step, variables: readable, emits: shape.emits,
-                                     capabilities: shape.stochastic ? [.stochastic] : [], fields: shape.fields)
+                                     capabilities: capabilities, fields: shape.fields)
     }
 
     public func start(_ context: StepContext) throws -> State {
@@ -236,6 +248,10 @@ public struct NumericModel<Simulation: NumericSimulation>: AuthoredModel {
 
     public func field(_ name: String, of state: State) -> [Double]? {
         simulation.field(name, of: state.numbers)
+    }
+
+    public func isSettled(_ state: State) -> Bool {
+        simulation.isSettled(state.numbers)
     }
 
     /// Readings correct the model, as they do for formulas and scripts (docs/DESIGN.md, 4.6): a

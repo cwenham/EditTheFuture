@@ -90,7 +90,7 @@ struct ScenarioStoreTests {
         store.pan(by: -10)
         #expect(store.frame.start == store.start)
         let span = store.frame.span
-        store.zoom(by: 0.0001)
+        store.zoom(by: 1e-12)
         #expect(store.frame.span == ScenarioStore.minimumSpan)
         store.zoom(by: 1e6)
         #expect(store.frame.span == ScenarioStore.maximumSpan)

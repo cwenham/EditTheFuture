@@ -119,7 +119,8 @@ public struct OverlayState: Identifiable, Sendable {
     public let ownScale: Bool
 }
 
-public struct YearTick: Identifiable, Hashable, Sendable {
+/// A mark on the time axis: a year, month, day, hour or minute, depending on the zoom (docs/UI.md, 2.5).
+public struct TimeTick: Identifiable, Hashable, Sendable {
     public var id: Date { date }
     public let date: Date
     public let label: String
@@ -136,7 +137,7 @@ public struct TimelineState: Sendable {
     public let start: Date
     public var focus: FocusedSlotState
     public var lanes: [LaneState]
-    public let yearTicks: [YearTick]
+    public let timeTicks: [TimeTick]
     /// Other slots drawn over the focused graph, in the order they were added.
     public var overlays: [OverlayState] = []
 
@@ -188,17 +189,81 @@ public struct EventPreviewState: Sendable, Equatable {
 }
 
 extension TimelineState {
-    static func yearTicks(for frame: TimeFrame) -> [YearTick] {
+    /// Marks for the time axis, about ten at most: years over years, then months, days, hours and
+    /// minutes as the view narrows (docs/UI.md, 2.5).
+    static func timeTicks(for frame: TimeFrame) -> [TimeTick] {
+        let span = frame.span, day = 86_400.0
+        if span > 730 * day { return yearTicks(for: frame) }
+        if span > 60 * day { return monthTicks(for: frame) }
+        if span > 4 * day { return dayTicks(for: frame) }
+        return clockTicks(for: frame)
+    }
+
+    static func yearTicks(for frame: TimeFrame) -> [TimeTick] {
         let years = frame.span / (365.2425 * 86_400)
         let step = years <= 6 ? 1 : years <= 15 ? 2 : years <= 30 ? 5 : 10
         var year = DateText.year(frame.start)
         year = Int((Double(year) / Double(step)).rounded(.up)) * step
-        var ticks: [YearTick] = []
+        var ticks: [TimeTick] = []
         while true {
             let date = DateText.startOfYear(year)
             if date > frame.end { break }
-            if date >= frame.start { ticks.append(YearTick(date: date, label: String(year))) }
+            if date >= frame.start { ticks.append(TimeTick(date: date, label: String(year))) }
             year += step
+        }
+        return ticks
+    }
+
+    /// Every 1, 2, 3 or 6 months from January. January says its year, as does the first mark.
+    static func monthTicks(for frame: TimeFrame) -> [TimeTick] {
+        let months = frame.span / (30.44 * 86_400)
+        let step = [1, 2, 3, 6].first { months / Double($0) <= 10 } ?? 6
+        let first = CivilDate(frame.start)
+        var year = first.year, month = first.month
+        var ticks: [TimeTick] = []
+        while true {
+            let date = CivilDate.date(year: year, month: month, day: 1)
+            if date > frame.end { break }
+            if date >= frame.start, (month - 1) % step == 0 {
+                let label = month == 1 || ticks.isEmpty ? DateText.monthYear(date) : DateText.monthNames[month - 1]
+                ticks.append(TimeTick(date: date, label: label))
+            }
+            month += 1
+            if month > 12 { month = 1; year += 1 }
+        }
+        return ticks
+    }
+
+    /// Every day, every other day, or each Monday: "15 Mar".
+    static func dayTicks(for frame: TimeFrame) -> [TimeTick] {
+        let days = frame.span / 86_400
+        let step = [1, 2, 7].first { days / Double($0) <= 10 } ?? 7
+        let first = CivilDate(frame.start)
+        var date = CivilDate.date(year: first.year, month: first.month, day: first.day)
+        if date < frame.start { date = date.addingTimeInterval(86_400) }
+        var ticks: [TimeTick] = []
+        while date <= frame.end {
+            // Days since 1 Jan 1970, a Thursday: Mondays are 4 days on, in sevens.
+            let dayNumber = Int((date.timeIntervalSince1970 / 86_400).rounded())
+            let wanted = step == 7 ? (dayNumber - 4) % 7 == 0 : dayNumber % step == 0
+            if wanted { ticks.append(TimeTick(date: date, label: DateText.dayMonth(date))) }
+            date = date.addingTimeInterval(86_400)
+        }
+        return ticks
+    }
+
+    /// Hours or minutes, from midnight: "09:00", and "15 Mar" at midnight.
+    static func clockTicks(for frame: TimeFrame) -> [TimeTick] {
+        let minutes = [5.0, 10, 15, 30, 60, 120, 180, 360, 720]
+        let step = (minutes.first { frame.span / ($0 * 60) <= 10 } ?? 720) * 60
+        let first = CivilDate(frame.start)
+        let midnight = CivilDate.date(year: first.year, month: first.month, day: first.day)
+        var date = midnight.addingTimeInterval((frame.start.timeIntervalSince(midnight) / step).rounded(.up) * step)
+        var ticks: [TimeTick] = []
+        while date <= frame.end {
+            let atMidnight = CivilDate(date).secondsIntoDay < 1
+            ticks.append(TimeTick(date: date, label: atMidnight ? DateText.dayMonth(date) : DateText.time(date)))
+            date = date.addingTimeInterval(step)
         }
         return ticks
     }

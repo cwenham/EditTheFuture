@@ -1,6 +1,8 @@
 import Foundation
+import FutureDocument
 import FutureEngine
 import FutureFormula
+import FutureSimulation
 
 /// Adding, changing, moving and removing slots, and setting their values (docs/UI.md, 5.7).
 /// Every change here can be undone.
@@ -71,7 +73,8 @@ extension ScenarioStore {
     // MARK: Adding and changing models
 
     /// Adds a library model with its defaults at a 0-based position (the first free one by
-    /// default), focuses it and shows the Slot tab.
+    /// default), focuses it and shows the Slot tab. A module with a trigger begins at the cursor,
+    /// and the view zooms to where its line does its changing.
     @discardableResult
     public func addModel(_ template: ModelTemplate, atPosition position: Int? = nil) -> Bool {
         guard let position = position ?? freePositions.first, freePositions.contains(position) else {
@@ -83,11 +86,34 @@ extension ScenarioStore {
                                 kind: template.kind, formula: template.formula, variable: template.variable,
                                 format: template.format)
         config.backdrop = template.backdrop
+        let begins = template.trigger.map { begin(&config, with: $0) }
         closePicker()
         applySlotChange(configs + [config], focus: config.id)
         if blank { showFormulaEditor() } else { showSlotSettings() }
-        say("Added \(template.name) to slot \(position + 1) as \(displayName(config.name))")
+        let added = "Added \(template.name) to slot \(position + 1) as \(displayName(config.name))"
+        if let begins, let trigger = template.trigger {
+            say(added + ", starting with its \(trigger.kind) event on \(Self.triggerText(begins))")
+            showCurve(ofSlot: config.id, from: begins)
+        } else {
+            say(added)
+        }
         return true
+    }
+
+    /// Sets a slot off with a module's trigger at the cursor: the event, and the starting values
+    /// that keep it quiet until then. Returns when the event is.
+    private func begin(_ config: inout SlotConfig, with trigger: ModuleTrigger) -> Date {
+        let date = eventDate(near: cursor)
+        var event = Event(time: date, kind: trigger.kind, values: trigger.values)
+        event.id = EventIdentity.newID(slot: config.name, key: EventIdentity.key(event), taken: Set(config.events.map(\.id)))
+        config.values.merge(trigger.emptied) { _, emptied in emptied }
+        config.events.append(event)
+        return date
+    }
+
+    /// "3 Nov 2026", or "3 Nov 2026, 14:07" when it isn't midnight.
+    static func triggerText(_ date: Date) -> String {
+        DateText.calendar.startOfDay(for: date) == date ? DateText.dayMonthYear(date) : DateText.precise(date, span: 0)
     }
 
     /// Gives a slot a different library model. Its name, color, events and readings stay, and so
@@ -104,9 +130,16 @@ extension ScenarioStore {
         config.values = config.values.filter { declared.contains($0.key) }
         // A backdrop the new model suggests, unless the slot has one of its own.
         if config.backdrop == nil { config.backdrop = template.backdrop }
+        // A module with a trigger begins at the cursor, unless the slot already has that kind of event.
+        var begins: Date?
+        if let trigger = template.trigger,
+           !config.events.contains(where: { $0.kind == trigger.kind }), !config.rules.contains(where: { $0.kind == trigger.kind }) {
+            begins = begin(&config, with: trigger)
+        }
         closePicker()
         applySlotChange(configs.replacing(index, with: config), focus: config.id)
         say("\(slots[focusedIndex].title) now uses \(template.name)")
+        if let begins { showCurve(ofSlot: config.id, from: begins) }
     }
 
     /// Says how many of a slot's events a different model wouldn't handle, or nil when they all apply.
