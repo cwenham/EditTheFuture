@@ -304,6 +304,7 @@ Problems known to be in the app now are in [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 - The engine keeps every step from the scenario's start. Memory grows with distance: about 100 MB at the year 31,000, engine only.
 - Each fetch filters all of a slot's generated events from the start. That's fine at today's sizes.
 - DESIGN.md 4.8 lists engine work not done yet: pipelining inside a slot group, and remote and WebAssembly models off the main actor.
+- Under heavy load (load average about 40), "Checks wait for typing to pause" in `FormulaEditingTests` sometimes misses its 10-second wait for the formula check. Tests that add a module with a trigger should set `glideDuration = 0`, since `waitUntilIdle` doesn't wait for the view's glide.
 - **Scripts:**
   - Not checked by hand in the app: typing a script, its completion list and palette clicks. The panel was rendered offscreen with Lua and Python scripts in the Formula tab, and the app was checked to load the bundled Python.
   - Building a slot's model loads its script on the main thread, as compiling a formula does. That's well under a millisecond for Lua, but Python's first start takes a moment. The Mac app starts Python on a background thread at launch to hide it.
