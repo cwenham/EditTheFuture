@@ -110,12 +110,13 @@ struct SidePane: View {
 /// The side pane's tabs: Event, Slot and Formula.
 struct SidePaneTabs: View {
     @Bindable var store: ScenarioStore
+    @Environment(\.shortcutLabels) private var keys
 
     var body: some View {
         HStack(spacing: 2) {
-            tab(.event, "Event", help: "Add an event  E")
-            tab(.slot, "Slot", help: "The focused slot's model and values  ⌘I")
-            tab(.formula, "Formula", help: "Edit the focused slot's formula  ⌥⌘I")
+            tab(.event, "Event", help: keys.help("Add an event", keys.addEvent))
+            tab(.slot, "Slot", help: keys.help("The focused slot's model and values", keys.slotTab))
+            tab(.formula, "Formula", help: keys.help("Edit the focused slot's formula", keys.formulaTab))
         }
         .padding(2)
         .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))

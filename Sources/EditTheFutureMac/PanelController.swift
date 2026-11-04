@@ -19,11 +19,15 @@ final class PanelController {
     /// What's behind the panel, blurred; hidden when the panel is set to clear.
     private weak var blur: NSVisualEffectView?
     private let appearance: AppearanceSettings
+    /// The keys the panel and its graph answer to.
+    private let shortcuts: ShortcutSettings
 
     var isVisible: Bool { panel.isVisible }
 
-    init(store: ScenarioStore, appearance: AppearanceSettings, wheel: TimelineWheel, scenarios: ScenarioMenuActions? = nil) {
+    init(store: ScenarioStore, appearance: AppearanceSettings, wheel: TimelineWheel, shortcuts: ShortcutSettings,
+         scenarios: ScenarioMenuActions? = nil) {
         self.store = store
+        self.shortcuts = shortcuts
         self.wheel = wheel
         self.appearance = appearance
         PanelView.restoreLook(of: store)
@@ -48,7 +52,7 @@ final class PanelController {
             copySnapshot: { [weak self] in self?.copy(.everything) },
             scenarios: scenarios
         )
-        let hosting = NSHostingView(rootView: StyledPanel(appearance: appearance,
+        let hosting = NSHostingView(rootView: StyledPanel(appearance: appearance, shortcuts: shortcuts,
                                                           panel: PanelView(store: store, actions: actions, wheel: wheel),
                                                           onScheme: { [weak blur] scheme in
             // The HUD material is dark whatever the appearance; a light panel blurs with a light one.
@@ -69,21 +73,16 @@ final class PanelController {
         panel.setFrameAutosaveName("EditTheFuturePanel")
         if !panel.setFrameUsingName("EditTheFuturePanel") { panel.center() }
 
+        panel.shortcuts = shortcuts
+        panel.onAction = { [weak self] action in self?.perform(action) }
+        panel.onHide = { [weak self] in self?.hide() }
         panel.onCopySnapshot = { [weak self] in self?.copy(.everything) }
-        panel.onCopyData = { [weak self] in self?.copy(.dataOnly) }
-        panel.onFocusCommandBar = { [weak self] in self?.store.requestCommandBarFocus() }
         panel.onUndo = { [weak self] in self?.store.undo() }
         panel.onRedo = { [weak self] in self?.store.redo() }
-        panel.onToggleSlotSettings = { [weak self] in self?.store.toggleSlotSettings() }
-        panel.onShowFormula = { [weak self] in self?.store.showFormulaEditor() }
-        panel.onHide = { [weak self] in self?.hide() }
-        panel.onTextSize = { [weak self] steps in
-            guard let self else { return }
-            let size = self.appearance.stepTextSize(steps)
-            self.store.say("Text size \(Int(size)) pt" + (size == AppearanceSettings.standardTextSize ? " (standard)" : ""))
-        }
         panel.onShowSettings = { [weak self] in self?.onShowSettings?() }
-        panel.onKey = { [weak self] event in self.map { TimelineKeys.handle(event, store: $0.store) } ?? false }
+        panel.onKey = { [weak self] event in
+            self.map { TimelineKeys.handle(event, store: $0.store, shortcuts: $0.shortcuts) } ?? false
+        }
         panel.onEscape = { [weak self] in
             guard let store = self?.store, store.goal != nil else { return false }
             store.cancelGoal()
@@ -105,6 +104,26 @@ final class PanelController {
 
         followBlurSetting()
         followTheme()
+    }
+
+    /// Does what a panel shortcut asks for (docs/UI.md, 4.1).
+    private func perform(_ action: ShortcutSettings.Action) {
+        switch action {
+        case .commandBar: store.requestCommandBarFocus()
+        case .slotTab: store.toggleSlotSettings()
+        case .formulaTab: store.showFormulaEditor()
+        case .copyData: copy(.dataOnly)
+        case .largerText: stepTextSize(1)
+        case .smallerText: stepTextSize(-1)
+        case .standardText: stepTextSize(0)
+        default: break
+        }
+    }
+
+    /// ⌘+ and ⌘− make the text a point larger or smaller, and ⌘0 puts it back (docs/UI.md, 7).
+    private func stepTextSize(_ steps: Int) {
+        let size = appearance.stepTextSize(steps)
+        store.say("Text size \(Int(size)) pt" + (size == AppearanceSettings.standardTextSize ? " (standard)" : ""))
     }
 
     /// Gives the window the theme's appearance, so what AppKit draws in it (the formula editor,
@@ -204,6 +223,7 @@ final class PanelController {
 /// between light and dark or turns Increase Contrast on.
 struct StyledPanel: View {
     let appearance: AppearanceSettings
+    let shortcuts: ShortcutSettings
     let panel: PanelView
     /// Told whether the panel is light or dark, for what's behind it.
     var onScheme: (ColorScheme) -> Void = { _ in }
@@ -213,6 +233,7 @@ struct StyledPanel: View {
     var body: some View {
         let style = appearance.style(colorScheme: systemScheme, increasedContrast: contrast == .increased)
         panel.futureStyle(style)
+            .environment(\.shortcutLabels, shortcuts.labels)
             .onChange(of: style.colorScheme, initial: true) { onScheme(style.colorScheme) }
     }
 }

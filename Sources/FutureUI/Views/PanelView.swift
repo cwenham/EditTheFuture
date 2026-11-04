@@ -398,6 +398,7 @@ struct EmptySlotChip: View {
 /// Puts the cursor on now and scrolls back to it if it's out of view.
 struct NowButton: View {
     let action: () -> Void
+    @Environment(\.shortcutLabels) private var keys
 
     var body: some View {
         Button(action: action) {
@@ -413,7 +414,7 @@ struct NowButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Jump to now")
-        .help("Jump to now  T")
+        .help(keys.help("Jump to now", keys.jumpToNow))
     }
 }
 
@@ -487,6 +488,7 @@ struct OverlayLegend: View {
 struct PanelFooter: View {
     @Bindable var store: ScenarioStore
     var commandFocused: FocusState<Bool>.Binding
+    @Environment(\.shortcutLabels) private var keys
 
     var body: some View {
         HStack(spacing: 14) {
@@ -498,12 +500,14 @@ struct PanelFooter: View {
                     .focused(commandFocused)
                     .onSubmit { store.runCommandFromPanel() }
                     .accessibilityLabel("Command")
-                Text("⌘K")
+                if let key = keys.commandBar {
+                Text(key)
                     .futureFont(11)
                     .foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.ink.opacity(0.16)))
+                }
             }
             .padding(.horizontal, 12)
             .scaledFrame(height: 34)
