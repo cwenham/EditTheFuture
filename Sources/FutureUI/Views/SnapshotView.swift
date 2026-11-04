@@ -3,6 +3,7 @@ import FutureKit
 
 /// What the clipboard image shows: the timeline without any controls.
 public struct SnapshotView: View {
+    @Environment(\.timelineLayout) private var layout
     let state: PanelState
     public static let width: CGFloat = 1120
 
@@ -11,7 +12,7 @@ public struct SnapshotView: View {
     }
 
     public var body: some View {
-        let plotWidth = TimelineLayout.plotWidth(forTotal: Self.width - 40)
+        let plotWidth = layout.plotWidth(forTotal: Self.width - 40)
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(state.scenarioName).futureFont(13, weight: .semibold).foregroundStyle(Theme.secondary)

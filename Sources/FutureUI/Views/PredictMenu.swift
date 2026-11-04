@@ -22,14 +22,14 @@ struct PredictMenu: View {
             header
             Divider()
             HStack(spacing: 0) {
-                list.frame(width: 340)
+                list.scaledFrame(width: 340)
                 Divider()
                 card.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             Divider()
             footer
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .scaledFrame(width: Self.size.width, height: Self.size.height)
         .presentationBackground(Theme.panel)
         .foregroundStyle(Theme.text)
         .futureAppearance()
@@ -51,20 +51,19 @@ struct PredictMenu: View {
         HStack(spacing: 10) {
             Text("Predict \(title) with").futureFont(15, weight: .semibold)
             Spacer()
-            Picker("Which readings", selection: Binding(get: { state.window }, set: { store.setPredictWindow($0) })) {
+            FuturePicker("Which readings", selection: Binding(get: { state.window }, set: { store.setPredictWindow($0) }),
+                         current: state.window.title) {
                 ForEach(ReadingsWindow.allCases) { Text($0.title).tag($0) }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
             .fixedSize()
             .help("Which readings the models are fitted to and compared on")
             Button("Use the best") { store.usePredictBest() }
                 .disabled(state.best == nil)
                 .help(state.best == nil ? "Waiting for every score" : "Choose the model tagged Best")
         }
-        .controlSize(.small)
+        .futureControlSize(.small)
         .padding(.horizontal, 14)
-        .frame(height: 44)
+        .scaledFrame(height: 44)
     }
 
     private var groups: [(title: String, rows: [PredictState.Row])] {
@@ -126,7 +125,7 @@ struct PredictMenu: View {
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
+                            ProgressView().futureControlSize(.small)
                             Text("Fitting and scoring…").futureFont(12).foregroundStyle(Theme.secondary)
                         }
                     }
@@ -166,7 +165,7 @@ struct PredictMenu: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(isFailed(row))
                 }
-                .controlSize(.small)
+                .futureControlSize(.small)
             }
             .padding(14)
         } else {
@@ -179,7 +178,7 @@ struct PredictMenu: View {
                     Spacer()
                     Button("Cancel") { store.closePredict() }
                         .keyboardShortcut(.cancelAction)
-                        .controlSize(.small)
+                        .futureControlSize(.small)
                 }
             }
             .padding(14)
@@ -193,7 +192,7 @@ struct PredictMenu: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if state.isComparing { ProgressView().controlSize(.mini) }
+            if state.isComparing { ProgressView().futureControlSize(.mini) }
             Text(state.status ?? "Lowest miss wins; within a tenth of it, the model that fits fewer values.")
                 .futureFont(11)
                 .foregroundStyle(state.problem == nil ? Theme.secondary : Theme.warning)
@@ -214,7 +213,7 @@ struct PredictMenu: View {
         }
         .futureFont(11)
         .padding(.horizontal, 14)
-        .frame(height: 34)
+        .scaledFrame(height: 34)
     }
 }
 

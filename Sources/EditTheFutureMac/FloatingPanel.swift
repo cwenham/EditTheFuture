@@ -17,6 +17,9 @@ final class FloatingPanel: NSPanel {
     var onEscape: (() -> Bool)?
     /// ⌘↩: true when it was used.
     var onCommandReturn: (() -> Bool)?
+    /// ⌘+ and ⌘− make the text a point larger or smaller, and ⌘0 puts it back (docs/UI.md, 7).
+    var onTextSize: ((Int) -> Void)?
+    var onShowSettings: (() -> Void)?
 
     init(contentRect: NSRect) {
         super.init(contentRect: contentRect,
@@ -61,6 +64,13 @@ final class FloatingPanel: NSPanel {
         if flags == [.command, .option] && key == "i" {
             onShowFormula?()
             return true
+        }
+        switch (flags.subtracting(.shift), key) {
+        case (.command, "="), (.command, "+"): onTextSize?(1); return true
+        case (.command, "-"): onTextSize?(-1); return true
+        case (.command, "0") where !flags.contains(.shift): onTextSize?(0); return true
+        case (.command, ",") where !flags.contains(.shift): onShowSettings?(); return true
+        default: break
         }
         if !isEditingText {
             switch (flags, key) {

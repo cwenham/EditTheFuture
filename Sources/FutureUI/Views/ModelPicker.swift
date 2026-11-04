@@ -54,17 +54,17 @@ struct ModelPicker: View {
                 Text(title).futureFont(12).foregroundStyle(Theme.secondary)
             }
             .padding(.horizontal, 14)
-            .frame(height: 44)
+            .scaledFrame(height: 44)
             Divider()
             HStack(spacing: 0) {
-                categories.frame(width: 128)
+                categories.scaledFrame(width: 128)
                 Divider()
-                list.frame(width: 250)
+                list.scaledFrame(width: 250)
                 Divider()
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .scaledFrame(width: Self.size.width, height: Self.size.height)
         .presentationBackground(Theme.panel)
         .foregroundStyle(Theme.text)
         .onAppear {
@@ -91,7 +91,7 @@ struct ModelPicker: View {
                         .futureFont(13)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
-                        .frame(height: 28)
+                        .scaledFrame(height: 28)
                         .background(active ? Theme.ink.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                 }
@@ -109,7 +109,7 @@ struct ModelPicker: View {
                         .futureFont(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
-                        .frame(height: 28)
+                        .scaledFrame(height: 28)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -250,10 +250,10 @@ private struct TemplateDetail: View {
                 } else if let preview {
                     Sparkline(samples: preview, color: color)
                 } else {
-                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 64)
+                    ProgressView().futureControlSize(.small).frame(maxWidth: .infinity, minHeight: 64)
                 }
             }
-            .frame(height: 64)
+            .scaledFrame(height: 64)
             .accessibilityLabel("Preview of \(template.name) over 20 years")
             Text("20 years from \(DateText.monthYear(start)), with its defaults")
                 .futureFont(10).foregroundStyle(Theme.secondary)

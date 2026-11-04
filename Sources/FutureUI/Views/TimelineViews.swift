@@ -92,7 +92,7 @@ struct TimelineRows: View {
     let cursor: CursorSource
     var backdrop: BackdropSource = .fixed(nil)
     let plotWidth: CGFloat
-    var focusHeight: CGFloat = TimelineLayout.focusHeight
+    var focusHeight: CGFloat = TimelineLayout.standard.focusHeight
     var interactions: TimelineInteractions?
     /// Whether the events strip and the lanes show under the focused graph.
     var showsEvents = true
@@ -128,24 +128,26 @@ struct TimelineRows: View {
 /// The focused graph, time axis, events strip and lanes, laid out in aligned columns, with the
 /// cursor drawn on top by its own small views.
 struct TimelineRowsContent: View {
+    @Environment(\.timelineLayout) private var layout
+    @Environment(\.futureStyle.fonts) private var fonts
     let timeline: TimelineState
     /// Where each graph's range is part-way through a change of scale; read only inside `Eased`.
     var scales: ScaleEasing?
     let cursor: CursorSource
     var backdrop: BackdropSource = .fixed(nil)
     let plotWidth: CGFloat
-    var focusHeight: CGFloat = TimelineLayout.focusHeight
+    var focusHeight: CGFloat = TimelineLayout.standard.focusHeight
     var interactions: TimelineInteractions?
     var showsEvents = true
     var showsLanes = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: TimelineLayout.gap) {
+            HStack(alignment: .top, spacing: layout.gap) {
                 Eased(timeline: timeline, scales: scales) { shown in
                     YAxisLabels(ticks: shown.focus.yTicks, domain: shown.focus.yDomain, style: shown.focus.style)
                 }
-                .frame(width: TimelineLayout.labelWidth, height: focusHeight)
+                .frame(width: layout.labelWidth, height: focusHeight)
                 Eased(timeline: timeline, scales: scales) { FocusChart(timeline: $0) }
                     .frame(width: plotWidth, height: focusHeight)
                     .background { BackdropLayer(source: backdrop) }
@@ -183,14 +185,14 @@ struct TimelineRowsContent: View {
                         interactions?.pickDate(Double(location.x / plotWidth))
                     }
                 Readout(cursor: cursor)
-                    .frame(width: TimelineLayout.valueWidth, alignment: .topLeading)
+                    .frame(width: layout.valueWidth, alignment: .topLeading)
             }
 
-            HStack(spacing: TimelineLayout.gap) {
-                Color.clear.frame(width: TimelineLayout.labelWidth)
+            HStack(spacing: layout.gap) {
+                Color.clear.frame(width: layout.labelWidth)
                 TimeAxis(timeline: timeline)
-                    .frame(width: plotWidth, height: TimelineLayout.axisHeight)
-                Color.clear.frame(width: TimelineLayout.valueWidth)
+                    .frame(width: plotWidth, height: layout.axisHeight)
+                Color.clear.frame(width: layout.valueWidth)
             }
 
             if showsEvents { events }
@@ -207,27 +209,28 @@ struct TimelineRowsContent: View {
 
     /// The events strip under the time axis.
     private var events: some View {
-        HStack(alignment: .top, spacing: TimelineLayout.gap) {
+        HStack(alignment: .top, spacing: layout.gap) {
             VStack(alignment: .trailing, spacing: 1) {
                 Text("Events").futureFont(12).foregroundStyle(Theme.secondary)
                 if interactions != nil {
                     Text("click a date or an event").futureFont(10).foregroundStyle(Theme.secondary)
                 }
             }
-            .frame(width: TimelineLayout.labelWidth - 8, alignment: .trailing)
+            .frame(width: layout.labelWidth - 8, alignment: .trailing)
             .padding(.trailing, 8)
             .padding(.top, 2)
             let strip = EventsStrip.layout(markers: timeline.focus.events, frame: timeline.frame, width: plotWidth,
-                                           editingID: timeline.focus.editingEventID)
+                                           editingID: timeline.focus.editingEventID, scale: layout.scale,
+                                           measure: EventsStrip.measure(in: fonts))
             EventsStrip(markers: timeline.focus.events, frame: timeline.frame, color: Color(timeline.focus.color),
                         draftDate: timeline.focus.draftDate, editingID: timeline.focus.editingEventID)
-                .frame(width: plotWidth, height: TimelineLayout.eventsHeight)
+                .frame(width: plotWidth, height: layout.eventsHeight)
                 .overlay(alignment: .topLeading) {
                     if interactions != nil { EventHotspots(items: strip) }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 1, coordinateSpace: .local) { location in
-                    if let id = EventsStrip.editableEvent(at: location, in: strip) {
+                    if let id = EventsStrip.editableEvent(at: location, in: strip, scale: layout.scale) {
                         interactions?.editEvent(id)
                     } else {
                         interactions?.pickDate(Double(location.x / plotWidth))
@@ -240,16 +243,16 @@ struct TimelineRowsContent: View {
                         }
                     }
                 }
-            Color.clear.frame(width: TimelineLayout.valueWidth)
+            Color.clear.frame(width: layout.valueWidth)
         }
-        .frame(height: TimelineLayout.eventsHeight)
+        .frame(height: layout.eventsHeight)
     }
 
     /// The other slots' lanes, under a hairline.
     @ViewBuilder private var lanes: some View {
         Rectangle().fill(Theme.hairline).frame(height: 1).padding(.top, 10)
 
-        VStack(spacing: TimelineLayout.laneSpacing) {
+        VStack(spacing: layout.laneSpacing) {
             ForEach(timeline.lanes) { lane in
                 LaneRow(lane: lane, timeline: timeline, scales: scales, cursor: cursor, plotWidth: plotWidth, interactions: interactions)
             }
@@ -347,6 +350,7 @@ struct FocusChart: View {
 /// views rather than a Canvas: moving a 1-point line is a cheap layer move, while a full-height
 /// Canvas had to be redrawn pixel by pixel on every pointer move.
 struct CursorOverlay: View {
+    @Environment(\.timelineLayout) private var layout
     let cursor: CursorSource
     let frame: TimeFrame
     let plotWidth: CGFloat
@@ -357,7 +361,7 @@ struct CursorOverlay: View {
 
     var body: some View {
         let state = cursor.state
-        let x = TimelineLayout.plotLeading + frame.x(state.date, width: plotWidth)
+        let x = layout.plotLeading + frame.x(state.date, width: plotWidth)
         GeometryReader { geometry in
             if frame.contains(state.date) {
                 Rectangle()
@@ -385,7 +389,7 @@ struct CursorOverlay: View {
                     .padding(.vertical, 2)
                     .background(Theme.text, in: RoundedRectangle(cornerRadius: 4))
                     .fixedSize()
-                    .position(x: x, y: focusHeight + TimelineLayout.axisHeight / 2)
+                    .position(x: x, y: focusHeight + layout.axisHeight / 2)
             }
         }
     }
@@ -552,7 +556,8 @@ struct EventsStrip: View {
     /// Repeating events that overlap in time get rows of their own, up to three.
     static let barRows = 3
 
-    nonisolated static func barY(row: Int) -> CGFloat { 22 + CGFloat(row) * 5 }
+    /// The middle of a repeating event's bar in `row`, at the standard size times `scale`.
+    nonisolated static func barY(row: Int, scale: CGFloat = 1) -> CGFloat { (22 + CGFloat(row) * 5) * scale }
 
     /// A marker in view, where it's drawn, and where its label went.
     struct Item: Identifiable, Equatable {
@@ -573,8 +578,10 @@ struct EventsStrip: View {
     /// that never cover each other. Labels go in order of importance: the event being edited, then
     /// one-off events, repeating events and generated ones, each from the left. One that would touch
     /// a label already placed is left out (docs/UI.md, 5.4). Drawing and clicks use the same layout.
+    /// Its heights are the standard ones times `scale`, the style's `layoutScale`; `measure` should
+    /// measure labels in the style's fonts (`measure(in:)`).
     nonisolated static func layout(markers: [EventMarker], frame: TimeFrame, width: CGFloat, editingID: UUID? = nil,
-                       measure: (String, Bool) -> CGFloat = EventsStrip.labelWidth) -> [Item] {
+                       scale: CGFloat = 1, measure: (String, Bool) -> CGFloat = EventsStrip.labelWidth) -> [Item] {
         var items: [Item] = []
         var rowEnds = [CGFloat](repeating: -.infinity, count: barRows)
         for marker in markers {
@@ -612,9 +619,9 @@ struct EventsStrip: View {
             guard labelWidth <= width else { continue }
             // Repeating events' labels start at their bar; the others are centred on their marker.
             let left = item.kind == .recurring ? item.x : item.x - labelWidth / 2
-            let rect = CGRect(x: min(max(0, left), width - labelWidth), y: labelY - labelHeight / 2,
-                              width: labelWidth, height: labelHeight)
-            let clearance = rect.insetBy(dx: -labelGap / 2, dy: 0)
+            let rect = CGRect(x: min(max(0, left), width - labelWidth), y: (labelY - labelHeight / 2) * scale,
+                              width: labelWidth, height: labelHeight * scale)
+            let clearance = rect.insetBy(dx: -labelGap * scale / 2, dy: 0)
             guard !placed.contains(where: { $0.intersects(clearance) }) else { continue }
             placed.append(clearance)
             items[index].labelRect = rect
@@ -625,30 +632,40 @@ struct EventsStrip: View {
     /// The one-off event or repeating event a click at `point` means: the nearest diamond within
     /// `hitSlop` across, then a label, then a bar. Generated events can't be edited, so a click on
     /// one's circle picks a date.
-    nonisolated static func editableEvent(at point: CGPoint, in items: [Item]) -> UUID? {
+    nonisolated static func editableEvent(at point: CGPoint, in items: [Item], scale: CGFloat = 1) -> UUID? {
         var best: (id: UUID, distance: CGFloat)?
         for item in items where item.kind == .oneOff {
             let distance = abs(item.x - point.x)
-            if distance <= hitSlop, distance < (best?.distance ?? .infinity) { best = (item.id, distance) }
+            if distance <= hitSlop * scale, distance < (best?.distance ?? .infinity) { best = (item.id, distance) }
         }
         if let best { return best.id }
         // A generated event's circle isn't editable, even where it sits on a repeating event's bar.
         let onCircle = items.contains {
-            $0.kind == .generated && abs($0.x - point.x) <= 5 && abs(markerY - point.y) <= 5
+            $0.kind == .generated && abs($0.x - point.x) <= 5 * scale && abs(markerY * scale - point.y) <= 5 * scale
         }
         if onCircle { return nil }
         for item in items where item.kind != .generated {
             if let rect = item.labelRect, rect.insetBy(dx: -2, dy: -2).contains(point) { return item.id }
         }
         let bars = items.filter { $0.kind == .recurring && point.x >= $0.x - 2 && point.x <= $0.barEnd + 2 }
-        return bars.map { (id: $0.id, distance: abs(barY(row: $0.row) - point.y)) }
-            .filter { $0.distance <= 3 }
+        return bars.map { (id: $0.id, distance: abs(barY(row: $0.row, scale: scale) - point.y)) }
+            .filter { $0.distance <= 3 * scale }
             .min { $0.distance < $1.distance }?.id
     }
 
-    /// A label's width in the strip's 11-point font, italic for generated events.
+    /// A label's width in the strip's 11-point system font, italic for generated events.
     nonisolated static func labelWidth(_ text: String, italic: Bool) -> CGFloat {
-        let font = italic ? italicFont : regularFont
+        labelWidth(text, font: italic ? italicFont : regularFont)
+    }
+
+    /// Measures labels as the strip draws them in `fonts`.
+    nonisolated static func measure(in fonts: FutureStyle.Fonts) -> (String, Bool) -> CGFloat {
+        if fonts == FutureStyle.Fonts() { return labelWidth }
+        let regular = fonts.measuringFont(size: 11), italic = fonts.measuringFont(size: 11, italic: true)
+        return { text, isItalic in labelWidth(text, font: isItalic ? italic : regular) }
+    }
+
+    nonisolated private static func labelWidth(_ text: String, font: CTFont) -> CGFloat {
         let line = CTLineCreateWithAttributedString(
             NSAttributedString(string: text, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]))
         return ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
@@ -664,16 +681,19 @@ struct EventsStrip: View {
         Canvas { context, size in
             let width = size.width
             context.clip(to: Path(CGRect(origin: .zero, size: size)))
-            let items = Self.layout(markers: markers, frame: frame, width: width, editingID: editingID)
+            let fonts = context.environment.futureStyle.fonts, scale = fonts.layoutScale
+            let items = Self.layout(markers: markers, frame: frame, width: width, editingID: editingID, scale: scale,
+                                    measure: Self.measure(in: fonts))
             // Bars first, so diamonds and circles sit on top of them.
             for item in items where item.kind == .recurring {
                 let editing = item.id == editingID
-                let thickness: CGFloat = editing ? 3 : 2
-                let bar = CGRect(x: item.x, y: Self.barY(row: item.row) - thickness / 2, width: item.barEnd - item.x, height: thickness)
+                let thickness: CGFloat = (editing ? 3 : 2) * scale
+                let bar = CGRect(x: item.x, y: Self.barY(row: item.row, scale: scale) - thickness / 2, width: item.barEnd - item.x,
+                                 height: thickness)
                 context.fill(Path(bar), with: .color(editing ? context.environment.futureStyle[Theme.proposal] : color.opacity(0.45)))
             }
             for item in items {
-                let center = CGPoint(x: item.x, y: Self.markerY)
+                let center = CGPoint(x: item.x, y: Self.markerY * scale)
                 switch item.kind {
                 case .recurring:
                     break
@@ -681,24 +701,24 @@ struct EventsStrip: View {
                     let editing = item.id == editingID
                     // Being edited: ringed, and faint once the draft moves it to another date.
                     let moved = editing && draftDate != item.date
-                    context.fill(Self.diamond(at: center, size: 9), with: .color(color.opacity(moved ? 0.35 : 1)))
+                    context.fill(Self.diamond(at: center, size: 9 * scale), with: .color(color.opacity(moved ? 0.35 : 1)))
                     if editing {
-                        context.stroke(Self.diamond(at: center, size: 12), with: .style(Theme.proposal), lineWidth: 1.5)
+                        context.stroke(Self.diamond(at: center, size: 12 * scale), with: .style(Theme.proposal), lineWidth: 1.5)
                     }
                 case .generated:
-                    context.stroke(Path(ellipseIn: CGRect(x: item.x - 4, y: Self.markerY - 4, width: 8, height: 8)),
+                    context.stroke(Path(ellipseIn: CGRect(x: item.x - 4 * scale, y: center.y - 4 * scale, width: 8 * scale, height: 8 * scale)),
                                    with: .color(color), lineWidth: 1.5)
                 }
                 if let rect = item.labelRect {
-                    let font: Font = item.kind == .generated ? .system(size: 11).italic() : .system(size: 11)
-                    let label = context.resolve(Text(item.label).font(font)
+                    let font = fonts.font(size: 11)
+                    let label = context.resolve(Text(item.label).font(item.kind == .generated ? font.italic() : font)
                         .foregroundStyle(item.kind == .generated ? Theme.secondary : Theme.text))
-                    context.draw(label, at: CGPoint(x: rect.minX, y: Self.labelY), anchor: .leading)
+                    context.draw(label, at: CGPoint(x: rect.minX, y: rect.midY), anchor: .leading)
                 }
             }
             let editedDate = markers.first { $0.id == editingID }?.date
             if let draftDate, frame.contains(draftDate), draftDate != editedDate {
-                context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: Self.markerY), size: 10),
+                context.stroke(Self.diamond(at: CGPoint(x: frame.x(draftDate, width: width), y: Self.markerY * scale), size: 10 * scale),
                                with: .style(Theme.proposal), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
             }
         }
@@ -721,16 +741,18 @@ struct EventsStrip: View {
 /// Where the pointer turns into a hand over the strip: one-off events' diamonds, and repeating
 /// events' bars and labels. Each says its event in its help, which matters when its label had no room.
 struct EventHotspots: View {
+    @Environment(\.timelineLayout) private var layout
     let items: [EventsStrip.Item]
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ForEach(items.filter { $0.kind != .generated }) { item in
                 if item.kind == .oneOff {
-                    spot(CGRect(x: item.x - EventsStrip.hitSlop, y: 0, width: EventsStrip.hitSlop * 2,
-                                height: TimelineLayout.eventsHeight), help: item.label)
+                    spot(CGRect(x: item.x - EventsStrip.hitSlop * layout.scale, y: 0, width: EventsStrip.hitSlop * 2 * layout.scale,
+                                height: layout.eventsHeight), help: item.label)
                 } else {
-                    spot(CGRect(x: item.x, y: EventsStrip.barY(row: item.row) - 3, width: item.barEnd - item.x, height: 6),
+                    spot(CGRect(x: item.x, y: EventsStrip.barY(row: item.row, scale: layout.scale) - 3 * layout.scale,
+                                width: item.barEnd - item.x, height: 6 * layout.scale),
                          help: item.label)
                     if let rect = item.labelRect { spot(rect, help: item.label) }
                 }
@@ -767,6 +789,7 @@ extension View {
 }
 
 struct LaneRow: View {
+    @Environment(\.timelineLayout) private var layout
     let lane: LaneState
     let timeline: TimelineState
     var scales: ScaleEasing?
@@ -775,7 +798,7 @@ struct LaneRow: View {
     var interactions: TimelineInteractions?
 
     var body: some View {
-        HStack(spacing: TimelineLayout.gap) {
+        HStack(spacing: layout.gap) {
             Button {
                 if let click = SlotClick.current { interactions?.selectSlot(lane.id, click) }
             } label: {
@@ -784,8 +807,8 @@ struct LaneRow: View {
                         .futureFont(11)
                         .monospacedDigit()
                         .foregroundStyle(Theme.secondary)
-                        .frame(width: 10)
-                    RoundedRectangle(cornerRadius: 2).fill(Color(lane.color)).frame(width: 3, height: 22)
+                        .frame(width: 10 * layout.scale)
+                    RoundedRectangle(cornerRadius: 2).fill(Color(lane.color)).frame(width: 3, height: 22 * layout.scale)
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 4) {
                             Text(lane.name).futureFont(13, weight: .medium).lineLimit(1)
@@ -812,7 +835,7 @@ struct LaneRow: View {
                 }
             }
             .buttonStyle(.plain)
-            .frame(width: TimelineLayout.labelWidth)
+            .frame(width: layout.labelWidth)
             .help("Focus \(lane.name). ⌘-click to \(lane.overlaid ? "take it off" : "draw it over") the graph, ⇧-click for a range.")
             .accessibilityLabel("Focus \(lane.name)")
             .accessibilityAddTraits(lane.overlaid ? .isSelected : [])
@@ -821,7 +844,7 @@ struct LaneRow: View {
             }
 
             LanePlot(lane: lane, timeline: timeline, scales: scales)
-                .frame(width: plotWidth, height: 36)
+                .frame(width: plotWidth, height: layout.lanePlotHeight)
                 .overlay(alignment: .leading) {
                     if let reason = lane.pausedReason { PausedNote(reason: reason, large: false) }
                 }
@@ -842,9 +865,9 @@ struct LaneRow: View {
                 .accessibilityHint("Click to pick this date for a new event in \(lane.name)")
 
             LaneValue(cursor: cursor, slotIndex: lane.id)
-                .frame(width: TimelineLayout.valueWidth, alignment: .trailing)
+                .frame(width: layout.valueWidth, alignment: .trailing)
         }
-        .frame(height: TimelineLayout.laneRowHeight)
+        .frame(height: layout.laneRowHeight)
     }
 }
 

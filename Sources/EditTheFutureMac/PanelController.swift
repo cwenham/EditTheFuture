@@ -12,15 +12,21 @@ final class PanelController {
     let panel: FloatingPanel
     private var peekGesture = PeekGesture()
     private(set) var isPeeking = false
-    /// What the wheels do over the graph, remembered between launches. The menu bar item can change it.
-    let wheel = TimelineWheel(rememberingUnder: PanelController.horizontalWheelKey)
+    /// What the wheels do over the graph; the app keeps it, and Settings changes it.
+    let wheel: TimelineWheel
+    /// Opens the Settings window, for ⌘, in the panel.
+    var onShowSettings: (() -> Void)?
     /// What's behind the panel, blurred; hidden when the panel is set to clear.
     private weak var blur: NSVisualEffectView?
+    private let appearance: AppearanceSettings
 
     var isVisible: Bool { panel.isVisible }
 
-    init(store: ScenarioStore, scenarios: ScenarioMenuActions? = nil) {
+    init(store: ScenarioStore, appearance: AppearanceSettings, wheel: TimelineWheel, scenarios: ScenarioMenuActions? = nil) {
         self.store = store
+        self.wheel = wheel
+        self.appearance = appearance
+        PanelView.restoreLook(of: store)
         panel = FloatingPanel(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 820))
 
         // The blur sits behind the content in a rounded container, so it can be turned off and
@@ -42,7 +48,13 @@ final class PanelController {
             copySnapshot: { [weak self] in self?.copy(.everything) },
             scenarios: scenarios
         )
-        let hosting = NSHostingView(rootView: PanelView(store: store, actions: actions, wheel: wheel))
+        let hosting = NSHostingView(rootView: StyledPanel(appearance: appearance,
+                                                          panel: PanelView(store: store, actions: actions, wheel: wheel),
+                                                          onScheme: { [weak blur] scheme in
+            // The HUD material is dark whatever the appearance; a light panel blurs with a light one.
+            let material: NSVisualEffectView.Material = scheme == .light ? .popover : .hudWindow
+            if blur?.material != material { blur?.material = material }
+        }))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hosting)
         for view in [blur, hosting] {
@@ -65,6 +77,12 @@ final class PanelController {
         panel.onToggleSlotSettings = { [weak self] in self?.store.toggleSlotSettings() }
         panel.onShowFormula = { [weak self] in self?.store.showFormulaEditor() }
         panel.onHide = { [weak self] in self?.hide() }
+        panel.onTextSize = { [weak self] steps in
+            guard let self else { return }
+            let size = self.appearance.stepTextSize(steps)
+            self.store.say("Text size \(Int(size)) pt" + (size == AppearanceSettings.standardTextSize ? " (standard)" : ""))
+        }
+        panel.onShowSettings = { [weak self] in self?.onShowSettings?() }
         panel.onKey = { [weak self] event in self.map { TimelineKeys.handle(event, store: $0.store) } ?? false }
         panel.onEscape = { [weak self] in
             guard let store = self?.store, store.goal != nil else { return false }
@@ -86,6 +104,21 @@ final class PanelController {
         }
 
         followBlurSetting()
+        followTheme()
+    }
+
+    /// Gives the window the theme's appearance, so what AppKit draws in it (the formula editor,
+    /// menus, date fields) matches; with Match the Mac it follows the system.
+    private func followTheme() {
+        let theme = withObservationTracking { appearance.theme } onChange: { [weak self] in
+            Task { @MainActor in self?.followTheme() }
+        }
+        let wanted: NSAppearance? = switch theme {
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light: NSAppearance(named: .aqua)
+        case .system: nil
+        }
+        if panel.appearance?.name != wanted?.name { panel.appearance = wanted }
     }
 
     /// Shows or hides the blur to match the store, and again each time the setting changes.
@@ -165,17 +198,22 @@ final class PanelController {
             store.say("Couldn't copy: \(error.localizedDescription)", isError: true)
         }
     }
+}
 
-    // MARK: Mouse wheels
+/// The panel in the look chosen in Settings, redrawn when it changes, or when the Mac changes
+/// between light and dark or turns Increase Contrast on.
+struct StyledPanel: View {
+    let appearance: AppearanceSettings
+    let panel: PanelView
+    /// Told whether the panel is light or dark, for what's behind it.
+    var onScheme: (ColorScheme) -> Void = { _ in }
+    @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
-    static let horizontalWheelKey = "mouse.hasHorizontalWheel"
-
-    var hasHorizontalWheel: Bool { wheel.hasHorizontalWheel }
-
-    /// Records whether the mouse has a horizontal wheel, as set from the menu. The graph finds one
-    /// itself the first time it's used.
-    func rememberHorizontalWheel(_ has: Bool) {
-        wheel.hasHorizontalWheel = has
+    var body: some View {
+        let style = appearance.style(colorScheme: systemScheme, increasedContrast: contrast == .increased)
+        panel.futureStyle(style)
+            .onChange(of: style.colorScheme, initial: true) { onScheme(style.colorScheme) }
     }
 }
 #endif

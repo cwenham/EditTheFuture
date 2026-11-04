@@ -204,6 +204,9 @@ public final class ScenarioStore {
     public private(set) var frame: TimeFrame
     /// Bumped whenever the scenario's data changes, so views refresh.
     public private(set) var revision = 0
+
+    /// Draws every date again, after `DateText.monthFirst` changes.
+    public func redrawDates() { revision += 1 }
     public private(set) var message: String?
     public private(set) var messageIsError = false
     /// How many messages have been said, so a request from outside can tell whether it got one.
@@ -225,6 +228,8 @@ public final class ScenarioStore {
     public var feedSetup: FeedSetupRequest?
     /// The scenario menu's form, while it's open (docs/UI.md, 3).
     public var scenarioForm: ScenarioForm?
+    /// What a new scenario's form starts with, chosen in Settings; by default the open scenario's.
+    public var newScenarioDefaults = NewScenarioDefaults()
     /// Each feed's state, for the Slot tab. `FeedCenter` keeps it (docs/DESIGN.md, 15.8).
     public internal(set) var feedStatuses: [FeedKey: FeedStatus] = [:]
     /// Asks for feeds to be fetched now: one slot's, or every slot's with nil.
@@ -361,6 +366,14 @@ public final class ScenarioStore {
     /// Called whenever the scenario changes in a way its file records: slots, models, values,
     /// events. The scenario's document saves then (docs/DESIGN.md, 15).
     @ObservationIgnored public var onScenarioChange: (() -> Void)?
+    /// Called when the person allows a held scenario's scripts and feeds (`allowHeldScenario`),
+    /// for the app to start its feeds and remember the scenario.
+    @ObservationIgnored public var onAllowHeld: (() -> Void)?
+    /// Whether script slots wait, unbuilt, for the person to allow them: a scenario from someone
+    /// else (docs/UI.md, 7).
+    package internal(set) var holdsScripts: Bool
+    /// What's waiting to be allowed, while the panel asks.
+    public internal(set) var trustRequest: TrustRequest?
 
     /// Every slot with its model, values and events, in position order. `slots` is built from these.
     @ObservationIgnored package var configs: [SlotConfig]
@@ -381,16 +394,19 @@ public final class ScenarioStore {
     ///   checked against the slots' fingerprints. They're put back before anything is computed.
     /// - Parameter configuration: the modules, backdrops and models the scenario may use, and where feed
     ///   sign-ins are kept. The app's unless an app that embeds FutureKit gives its own.
+    /// - Parameter holdsScripts: whether script slots wait for `allowHeldScenario()` before
+    ///   they're built and run, as for a scenario from someone else.
     public init(definition: ScenarioDefinition, now: Date = Date(), savedResults: [String: SlotHistory] = [:],
-                configuration: ScenarioConfiguration = .standard) throws {
+                configuration: ScenarioConfiguration = .standard, holdsScripts: Bool = false) throws {
         self.configuration = configuration
+        self.holdsScripts = holdsScripts
         self.credentials = configuration.credentials
         self.feedTransport = configuration.feedTransport
         let configs = Self.configs(from: definition)
         guard !configs.isEmpty else { throw EngineError.invalidSlotName("") }
         let money = ScenarioMoney(currency: definition.currency ?? .usd, numbers: definition.numbers,
                                   converts: definition.rates != ExchangeRateSource.none, rates: definition.exchangeRates)
-        let assembly = Self.assemble(configs, money: money, modules: configuration.modules)
+        let assembly = Self.assemble(configs, money: money, modules: configuration.modules, holdsScripts: holdsScripts)
 
         self.engine = try ScenarioEngine(start: definition.start, seed: definition.seed ?? Scenario.defaultSeed,
                                          layout: assembly.layout, rates: definition.exchangeRates)
@@ -466,10 +482,17 @@ public final class ScenarioStore {
     /// for the views and the engine. Slots that can't run are paused, not dropped. `money` gives
     /// the scenario's currency, for slots without one of their own, how numbers are written, and
     /// the rates: a slot that reads money in another currency waits until there are rates for it.
-    package nonisolated static func assemble(_ configs: [SlotConfig], money: ScenarioMoney = .plain, modules: ModuleCatalog) -> Assembly {
+    package nonisolated static func assemble(_ configs: [SlotConfig], money: ScenarioMoney = .plain, modules: ModuleCatalog,
+                                             holdsScripts: Bool = false) -> Assembly {
         var models: [(any AuthoredModel)?] = []
         var errors: [Int: String] = [:]
         for (index, config) in configs.enumerated() {
+            // A held script isn't even loaded: loading a script runs its top level.
+            if holdsScripts, case .script = config.kind {
+                models.append(nil)
+                errors[index] = TrustRequest.heldReason
+                continue
+            }
             if let problem = config.problem {
                 models.append(nil)
                 errors[index] = problem
@@ -564,9 +587,12 @@ public final class ScenarioStore {
 
     /// Rebuilds `slots` from `configs` and sends the new layout to the engine. The latest results
     /// follow their slots, so lines stay on screen until the engine has the new ones.
+    /// Builds the slots again as they are, as when held scripts are allowed.
+    func rebuildSlots() { refreshSlots(focus: nil) }
+
     private func refreshSlots(focus: UUID?) {
         let wanted = focus ?? (slots.indices.contains(focusedIndex) ? focused.id : nil)
-        let assembly = Self.assemble(configs, money: money, modules: configuration.modules)
+        let assembly = Self.assemble(configs, money: money, modules: configuration.modules, holdsScripts: holdsScripts)
         let order = assembly.slots.map(\.id)
         if let computed {
             let old = Dictionary(uniqueKeysWithValues: computedSlots.enumerated().map { ($0.element, $0.offset) })
@@ -1131,7 +1157,7 @@ public final class ScenarioStore {
         if currencySetting != new.currency { currencySetting = new.currency }
         if rateSetting != new.rates { rateSetting = new.rates }
         if numberSetting != new.numbers { numberSetting = new.numbers }
-        let assembly = Self.assemble(configs, money: money, modules: configuration.modules)
+        let assembly = Self.assemble(configs, money: money, modules: configuration.modules, holdsScripts: holdsScripts)
         enqueue(.mutate(.rebuild(start: start, seed: seed ?? Scenario.defaultSeed, layout: assembly.layout)))
         refreshSlots(focus: focus)  // which keeps the view and cursor within the new start's reach
     }

@@ -87,6 +87,7 @@ struct PlotCanvas: View {
 
     var body: some View {
         Canvas { context, size in
+            let thickness = context.environment.futureStyle.lineScale
             let x = { (date: Date) in frame.x(date, width: size.width) }
             let y = Self.y(domain: domain, height: size.height)
             context.clip(to: Path(CGRect(origin: .zero, size: size)))
@@ -123,12 +124,12 @@ struct PlotCanvas: View {
                 let path = Self.path(for: line.samples, frame: frame, size: size, x: x,
                                      y: line.domain.map { Self.y(domain: $0, height: size.height) } ?? y)
                 context.stroke(path, with: .color(line.color),
-                               style: StrokeStyle(lineWidth: line.lineWidth, lineCap: .round, lineJoin: .round, dash: line.dash))
+                               style: StrokeStyle(lineWidth: line.lineWidth * thickness, lineCap: .round, lineJoin: .round, dash: line.dash))
             }
             if let readings, !readings.samples.isEmpty {
                 let color = readings.color.opacity(0.85)
                 let path = Self.path(for: readings.samples, frame: frame, size: size, x: x, y: y)
-                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: thickness, lineCap: .round, lineJoin: .round))
                 let low = Self.firstIndex(in: readings.samples, atOrAfter: frame.start)
                 let high = Self.firstIndex(in: readings.samples, atOrAfter: frame.end)
                 // A dot for each reading, while they're at least 6 points apart on average.

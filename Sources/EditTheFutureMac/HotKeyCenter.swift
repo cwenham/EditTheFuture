@@ -62,6 +62,13 @@ final class HotKeyCenter {
         return true
     }
 
+    /// Lets every hot-key go, before registering them again with new shortcuts.
+    func unregisterAll() {
+        for reference in references { UnregisterEventHotKey(reference) }
+        references.removeAll()
+        handlers.removeAll()
+    }
+
     private func handle(id: UInt32, pressed: Bool) {
         guard let handler = handlers[id] else { return }
         if pressed { handler.pressed() } else { handler.released?() }

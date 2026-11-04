@@ -34,37 +34,46 @@ public enum Theme {
 }
 
 /// Column layout shared by the focused graph, the axis rows and every lane,
-/// so all plots line up on the same time axis.
-enum TimelineLayout {
-    static let labelWidth: CGFloat = 150
-    static let valueWidth: CGFloat = 120
-    static let gap: CGFloat = 10
-    static let focusHeight: CGFloat = 300
-    static let laneHeight: CGFloat = 44
-    static let axisHeight: CGFloat = 22
-    static let eventsHeight: CGFloat = 34
+/// so all plots line up on the same time axis. Its sizes grow and shrink with the style's text
+/// (`FutureStyle.Fonts.layoutScale`); views read it from the environment as `\.timelineLayout`.
+struct TimelineLayout: Equatable, Sendable {
+    var scale: CGFloat = 1
 
-    static let laneRowHeight: CGFloat = 40
-    static let laneSpacing: CGFloat = 4
-    static let minimumFocusHeight: CGFloat = 160
+    /// The layout at the standard text size.
+    static let standard = TimelineLayout()
 
-    static func plotWidth(forTotal width: CGFloat) -> CGFloat {
+    private func scaled(_ length: CGFloat) -> CGFloat { (length * scale).rounded() }
+
+    var labelWidth: CGFloat { scaled(150) }
+    var valueWidth: CGFloat { scaled(120) }
+    var gap: CGFloat { 10 }
+    var focusHeight: CGFloat { 300 }
+    var axisHeight: CGFloat { scaled(22) }
+    var eventsHeight: CGFloat { scaled(34) }
+
+    var laneRowHeight: CGFloat { scaled(40) }
+    /// A lane's sparkline, inside its row.
+    var lanePlotHeight: CGFloat { laneRowHeight - 4 }
+    var laneSpacing: CGFloat { 4 }
+    var minimumFocusHeight: CGFloat { 160 }
+
+    func plotWidth(forTotal width: CGFloat) -> CGFloat {
         max(120, width - labelWidth - valueWidth - 2 * gap)
     }
 
     /// Height of everything under the focused graph: axis, events, divider and lanes. A graph
     /// without the events strip or the lanes (`ScenarioGraph.Parts`) leaves them out.
-    static func heightBelowFocus(laneCount: Int, events: Bool = true, lanes showsLanes: Bool = true) -> CGFloat {
+    func heightBelowFocus(laneCount: Int, events: Bool = true, lanes showsLanes: Bool = true) -> CGFloat {
         let lanes = CGFloat(laneCount) * laneRowHeight + CGFloat(max(laneCount - 1, 0)) * laneSpacing
         return axisHeight + (events ? eventsHeight : 0) + (showsLanes ? 11 + 8 + lanes : 0)
     }
 
     /// The focused graph takes whatever height the window leaves after the rows under it.
-    static func focusHeight(forTotal height: CGFloat, laneCount: Int, events: Bool = true, lanes: Bool = true) -> CGFloat {
+    func focusHeight(forTotal height: CGFloat, laneCount: Int, events: Bool = true, lanes: Bool = true) -> CGFloat {
         max(minimumFocusHeight, height - heightBelowFocus(laneCount: laneCount, events: events, lanes: lanes))
     }
 
-    static var plotLeading: CGFloat { labelWidth + gap }
+    var plotLeading: CGFloat { labelWidth + gap }
 }
 
 extension Color {

@@ -24,11 +24,13 @@ public struct PanelView: View {
     @AppStorage(PanelView.sideKey) private var paneSideName = PaneSide.right.rawValue
     @State private var paneOffset = CGSize.zero
     @State private var paneDragLocation: CGPoint?
-    /// The widths the side pane was dragged to (SidePane.width(for:) until it is).
+    /// The widths the side pane was dragged to (SidePane.width(for:) until it is), at the standard
+    /// text size: it's shown wider or narrower with the text, so it keeps its share of the panel.
     @AppStorage(PanelView.widthKey) private var slotPaneWidth = Double(SidePane.width)
     @AppStorage(PanelView.formulaWidthKey) private var formulaPaneWidth = Double(SidePane.formulaWidth)
     /// While its edge is dragged: the width it had when the drag began.
     @State private var resizeStart: CGFloat?
+    @Environment(\.futureStyle.fonts.layoutScale) private var scale
 
     /// Coordinate space of the area under the header, used to drag the add-event pane.
     static let bodySpace = "panelBody"
@@ -41,6 +43,19 @@ public struct PanelView: View {
     public static let sideKey = "EditTheFuture.panel.side"
     public static let widthKey = "EditTheFuture.panel.sidePaneWidth"
     public static let formulaWidthKey = "EditTheFuture.panel.formulaPaneWidth"
+    /// Where the panel's opacity and blur are remembered.
+    public static let opacityKey = "EditTheFuture.panel.opacity"
+    public static let blurKey = "EditTheFuture.panel.blur"
+
+    /// Puts back the opacity and blur the panel had last time, before it's first drawn. The panel
+    /// remembers them itself whenever they change.
+    @MainActor public static func restoreLook(of store: ScenarioStore, from defaults: UserDefaults = .standard) {
+        if let opacity = defaults.object(forKey: opacityKey) as? Double, opacity.isFinite {
+            let kept = min(max(opacity, 0.6), 1)
+            if store.opacity != kept { store.opacity = kept }
+        }
+        if let blurs = defaults.object(forKey: blurKey) as? Bool, store.blursBehind != blurs { store.blursBehind = blurs }
+    }
 
     /// - Parameter wheel: what the wheels do over the graph, shared with the app's menu; nil for the graph's own.
     public init(store: ScenarioStore, actions: PanelActions, wheel: TimelineWheel? = nil) {
@@ -54,6 +69,9 @@ public struct PanelView: View {
         VStack(spacing: 0) {
             PanelHeader(store: store, actions: actions)
             Rectangle().fill(Theme.hairline).frame(height: 1)
+            if let request = store.trustRequest {
+                TrustBanner(request: request, allow: store.allowHeldScenario, dismiss: store.dismissTrustRequest)
+            }
 
             GeometryReader { area in
                 HStack(alignment: .top, spacing: Self.paneGap) {
@@ -80,12 +98,14 @@ public struct PanelView: View {
         .coordinateSpace(name: Self.panelSpace)
         .futureAppearance()
         .onChange(of: store.commandBarFocusRequest) { commandFocused = true }
+        .onChange(of: store.opacity) { UserDefaults.standard.set(store.opacity, forKey: Self.opacityKey) }
+        .onChange(of: store.blursBehind) { UserDefaults.standard.set(store.blursBehind, forKey: Self.blurKey) }
     }
 
     /// The side pane's width for the tab it shows, kept within what fits.
     private func paneWidth(areaWidth: CGFloat) -> CGFloat {
         let stored = store.sidePane == .formula ? formulaPaneWidth : slotPaneWidth
-        return SidePane.clamped(CGFloat(stored), for: store.sidePane, area: areaWidth)
+        return SidePane.clamped(CGFloat(stored) * scale, for: store.sidePane, area: areaWidth, scale: scale)
     }
 
     /// Dragging the pane's inner edge: toward the timeline widens it.
@@ -96,7 +116,8 @@ public struct PanelView: View {
         }
         let start = resizeStart ?? paneWidth(areaWidth: areaWidth)
         if resizeStart == nil { resizeStart = start }
-        let width = Double(SidePane.clamped(start + (side == .right ? -moved : moved), for: store.sidePane, area: areaWidth).rounded())
+        let shown = SidePane.clamped(start + (side == .right ? -moved : moved), for: store.sidePane, area: areaWidth, scale: scale)
+        let width = Double((shown / scale).rounded())
         if store.sidePane == .formula {
             if formulaPaneWidth != width { formulaPaneWidth = width }
         } else if slotPaneWidth != width {
@@ -162,17 +183,18 @@ struct PanelHeader: View {
                     .padding(.trailing, 6)
                 IconButton(systemName: "doc.on.doc", label: "Copy snapshot (Command-C)", action: actions.copySnapshot)
                 HStack(spacing: 6) {
-                    Text("Opacity").futureFont(12).foregroundStyle(Theme.secondary)
+                    Text("Opacity").futureFont(12).foregroundStyle(Theme.secondary).fixedSize()
                     Slider(value: $store.opacity, in: 0.6...1)
-                        .frame(width: 80)
-                        .controlSize(.mini)
+                        .scaledFrame(width: 80)
+                        .futureControlSize(.mini)
                         .accessibilityLabel("Panel opacity")
                     #if os(macOS)
                     Toggle("Blur", isOn: $store.blursBehind)
                         .toggleStyle(.checkbox)
-                        .controlSize(.small)
+                        .futureControlSize(.small)
                         .futureFont(12)
                         .foregroundStyle(Theme.secondary)
+                        .fixedSize()
                         .help("Blur what's behind the panel. Off, the panel is clear, so you can read the windows beneath it.")
                         .accessibilityLabel("Blur behind panel")
                     #endif
@@ -182,7 +204,7 @@ struct PanelHeader: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 56)
+        .scaledFrame(height: 56)
         .background {
             #if os(macOS)
             WindowDragArea()
@@ -192,6 +214,36 @@ struct PanelHeader: View {
 }
 
 #if os(macOS)
+/// Asks before a scenario from elsewhere runs its scripts and fetches its feeds (docs/UI.md, 7).
+struct TrustBanner: View {
+    let request: TrustRequest
+    let allow: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: "hand.raised.fill").futureFont(13).foregroundStyle(Theme.warning)
+            // A floor on its width, or the panel's least height is worked out with the text a word wide.
+            Text(request.text)
+                .futureFont(12)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minWidth: 420, maxWidth: .infinity, alignment: .leading)
+            Button("Not Now", action: dismiss)
+                .help("Keep them waiting. The scenario menu can allow them later.")
+            Button("Allow", action: allow)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.proposal.opacity(0.85))
+                .foregroundStyle(Theme.onAccent)
+                .help("Run its scripts and fetch its feeds, now and whenever it opens")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Theme.warningFill)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+    }
+}
+
 /// Lets the panel be moved by dragging its top bar, and only there.
 struct WindowDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
@@ -235,7 +287,7 @@ struct SlotChip: View {
             }
             .padding(.leading, 8)
             .padding(.trailing, 10)
-            .frame(height: 30)
+            .scaledFrame(height: 30)
             .background(selected ? Theme.ink.opacity(0.10) : overlaid ? Theme.ink.opacity(0.06) : .clear,
                         in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8)
@@ -315,7 +367,7 @@ struct EmptySlotChip: View {
             }
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .scaledFrame(height: 30)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.ink.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
@@ -353,8 +405,9 @@ struct NowButton: View {
                 Image(systemName: "arrow.uturn.backward").futureFont(11, weight: .semibold)
                 Text("Now").futureFont(13, weight: .medium)
             }
+            .fixedSize()
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .scaledFrame(height: 30)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.chipBorder))
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
@@ -373,7 +426,7 @@ struct IconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .futureFont(13)
-                .frame(width: 32, height: 32)
+                .scaledFrame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -396,7 +449,7 @@ struct FocusTitle: View {
                 .layoutPriority(-1)
             Spacer(minLength: 0)
         }
-        .frame(height: 32)
+        .scaledFrame(height: 32)
     }
 }
 
@@ -453,7 +506,7 @@ struct PanelFooter: View {
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(Theme.ink.opacity(0.16)))
             }
             .padding(.horizontal, 12)
-            .frame(height: 34)
+            .scaledFrame(height: 34)
             .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.hairline))
 
@@ -464,7 +517,7 @@ struct PanelFooter: View {
                 .frame(maxWidth: 420, alignment: .trailing)
         }
         .padding(.horizontal, 20)
-        .frame(height: 52)
+        .scaledFrame(height: 52)
         .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
     }
 }

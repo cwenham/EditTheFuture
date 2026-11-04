@@ -12,6 +12,7 @@ import FutureKit
 /// Clicks pick dates and events for the editors (`EventEditor`, `ScenarioEditor`); a graph made with
 /// `interactive: false` only shows the cursor.
 public struct ScenarioGraph: View {
+    @Environment(\.timelineLayout) private var layout
     /// What shows besides the focused graph and its time axis.
     public struct Parts: OptionSet, Sendable {
         public let rawValue: Int
@@ -58,9 +59,9 @@ public struct ScenarioGraph: View {
                 FocusTitle(focus: timeline.focus, overlays: timeline.overlays)
             }
             GeometryReader { geometry in
-                let plotWidth = TimelineLayout.plotWidth(forTotal: geometry.size.width)
+                let plotWidth = layout.plotWidth(forTotal: geometry.size.width)
                 let showsLanes = parts.contains(.lanes), showsEvents = parts.contains(.events)
-                let focusHeight = TimelineLayout.focusHeight(forTotal: geometry.size.height,
+                let focusHeight = layout.focusHeight(forTotal: geometry.size.height,
                                                              laneCount: showsLanes ? timeline.lanes.count : 0,
                                                              events: showsEvents, lanes: showsLanes)
                 TimelineRows(timeline: timeline, cursor: .live(store), backdrop: .live(store), plotWidth: plotWidth,
@@ -69,9 +70,13 @@ public struct ScenarioGraph: View {
                     .contentShape(Rectangle())
                     .onContinuousHover { phase in
                         guard case .active(let location) = phase else { return }
-                        let x = location.x - TimelineLayout.plotLeading
+                        let x = location.x - layout.plotLeading
                         store.pointerHovered(at: Self.pointerOnScreen(else: location), fraction: Double(x / plotWidth))
                     }
+                    // With large text in a small window, the lanes can need more room than there is:
+                    // the last are cut off rather than drawn over what's below.
+                    .frame(height: geometry.size.height, alignment: .top)
+                    .clipped()
             }
             #if os(macOS)
             // The wheel and trackpad move time only over the graphs and lanes; elsewhere they
@@ -115,25 +120,118 @@ public struct ScenarioGraph: View {
 
 /// What the wheels do over a graph (`ScrollMapper`): with a horizontal wheel, the vertical wheel
 /// zooms and the horizontal one moves through time; with one wheel, it moves through time and Shift
-/// zooms. A horizontal wheel is found the first time it's used. Graphs given the same one agree.
+/// zooms. Left to itself (`.automatic`), it finds a horizontal wheel the first time one turns;
+/// Settings can say which the mouse has instead (docs/UI.md, 7). Graphs given the same one agree.
 @MainActor
+@Observable
 public final class TimelineWheel {
-    var mapper: ScrollMapper
-    private let key: String?
+    public enum Mode: String, CaseIterable, Identifiable, Sendable {
+        /// Find a horizontal wheel the first time it turns.
+        case automatic
+        /// The mouse has a horizontal wheel as well as the vertical one.
+        case twoWheels
+        /// The mouse has only a vertical wheel.
+        case oneWheel
 
-    /// - Parameter key: where to remember a horizontal wheel in `UserDefaults.standard`, or nil to
-    ///   find it again each time the app runs.
-    public init(rememberingUnder key: String? = nil) {
-        self.key = key
-        mapper = ScrollMapper(hasHorizontalWheel: key.map { UserDefaults.standard.bool(forKey: $0) } ?? false)
+        public var id: String { rawValue }
     }
 
-    public var hasHorizontalWheel: Bool {
-        get { mapper.hasHorizontalWheel }
-        set {
-            mapper.hasHorizontalWheel = newValue
-            if let key { UserDefaults.standard.set(newValue, forKey: key) }
+    @ObservationIgnored var mapper: ScrollMapper
+    @ObservationIgnored private let key: String?
+    @ObservationIgnored private let defaults: UserDefaults
+
+    /// Which wheels the mouse has, or `.automatic` to find out.
+    public var mode: Mode {
+        didSet {
+            guard mode != oldValue else { return }
+            if let key { defaults.set(mode.rawValue, forKey: Self.modeKey(key)) }
+            updateMapper()
         }
+    }
+
+    /// Whether a horizontal wheel has turned since it was last forgotten, for `.automatic`.
+    public private(set) var foundHorizontalWheel: Bool
+
+    /// The speeds offered, as multiples of the designed ones.
+    public static let speeds: ClosedRange<Double> = 0.25...4
+
+    /// How far a wheel turn or swipe moves through time, as a multiple of the designed speed.
+    public var panSpeed: Double {
+        didSet { speedChanged(panSpeed, oldValue, name: "panSpeed") }
+    }
+
+    /// How much a wheel turn or swipe zooms, as a multiple of the designed speed. Pinches follow the fingers.
+    public var zoomSpeed: Double {
+        didSet { speedChanged(zoomSpeed, oldValue, name: "zoomSpeed") }
+    }
+
+    /// Turns a mouse's horizontal wheel the other way.
+    public var reversesHorizontalWheel: Bool {
+        didSet {
+            guard reversesHorizontalWheel != oldValue else { return }
+            if let key { defaults.set(reversesHorizontalWheel, forKey: key + ".reversesHorizontal") }
+            updateMapper()
+        }
+    }
+
+    private func speedChanged(_ speed: Double, _ old: Double, name: String) {
+        guard speed != old else { return }
+        if let key { defaults.set(speed, forKey: key + "." + name) }
+        updateMapper()
+    }
+
+    /// A stored speed, or 1 when there's none or it's out of range.
+    private static func speed(_ defaults: UserDefaults, _ key: String?, _ name: String) -> Double {
+        guard let key, let value = defaults.object(forKey: key + "." + name) as? Double, speeds.contains(value) else { return 1 }
+        return value
+    }
+
+    /// - Parameters:
+    ///   - key: where to remember what was found and chosen in `defaults`, or nil to find it again
+    ///     each time the app runs. The mode is kept under the key followed by `.mode`.
+    public init(rememberingUnder key: String? = nil, in defaults: UserDefaults = .standard) {
+        self.key = key
+        self.defaults = defaults
+        foundHorizontalWheel = key.map { defaults.bool(forKey: $0) } ?? false
+        mode = key.flatMap { defaults.string(forKey: Self.modeKey($0)) }.flatMap(Mode.init(rawValue:)) ?? .automatic
+        panSpeed = Self.speed(defaults, key, "panSpeed")
+        zoomSpeed = Self.speed(defaults, key, "zoomSpeed")
+        reversesHorizontalWheel = key.map { defaults.bool(forKey: $0 + ".reversesHorizontal") } ?? false
+        mapper = ScrollMapper()
+        updateMapper()
+    }
+
+    static func modeKey(_ key: String) -> String { key + ".mode" }
+
+    /// Whether the vertical wheel zooms because there's a horizontal one to move through time.
+    public var hasHorizontalWheel: Bool {
+        switch mode {
+        case .automatic: foundHorizontalWheel
+        case .twoWheels: true
+        case .oneWheel: false
+        }
+    }
+
+    /// Records that a horizontal wheel turned (or, with false, forgets it), for `.automatic`.
+    public func noteHorizontalWheel(_ found: Bool = true) {
+        if foundHorizontalWheel != found { foundHorizontalWheel = found }
+        if let key { defaults.set(found, forKey: key) }
+        updateMapper()
+    }
+
+    private func updateMapper() {
+        mapper.hasHorizontalWheel = hasHorizontalWheel
+        mapper.findsHorizontalWheel = mode == .automatic
+        mapper.panSpeed = min(max(panSpeed, Self.speeds.lowerBound), Self.speeds.upperBound)
+        mapper.zoomSpeed = min(max(zoomSpeed, Self.speeds.lowerBound), Self.speeds.upperBound)
+        mapper.reversesHorizontalWheel = reversesHorizontalWheel
+    }
+
+    /// The designed speeds, and the horizontal wheel the way macOS turns it.
+    public func resetFeel() {
+        if panSpeed != 1 { panSpeed = 1 }
+        if zoomSpeed != 1 { zoomSpeed = 1 }
+        if reversesHorizontalWheel { reversesHorizontalWheel = false }
     }
 }
 
@@ -190,7 +288,7 @@ enum TimelineGestures {
                 shift: flags.contains(.shift), command: flags.contains(.command),
                 inverted: event.isDirectionInvertedFromDevice))
             if found {
-                wheel.hasHorizontalWheel = true
+                wheel.noteHorizontalWheel()
                 store.say("Horizontal wheel found: the vertical wheel now zooms and the horizontal wheel scrolls through time.")
             }
             switch action {

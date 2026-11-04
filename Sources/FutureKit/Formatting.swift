@@ -178,9 +178,14 @@ package enum DateText {
         return monthNames[civil.month - 1] + " " + String(civil.year)
     }
 
-    /// "15 Mar 2031" in UTC.
-    package static func dayMonthYear(_ date: Date) -> String {
+    /// Whether dates are written month first, "Mar 15, 2031", rather than "15 Mar 2031", as chosen
+    /// in Settings. Set only on the main thread, before what it changes is drawn again.
+    nonisolated(unsafe) package static var monthFirst = false
+
+    /// "15 Mar 2031" in UTC, or "Mar 15, 2031" with `monthFirst`.
+    package static func dayMonthYear(_ date: Date, monthFirst: Bool = DateText.monthFirst) -> String {
         let civil = CivilDate(date)
+        if monthFirst { return monthNames[civil.month - 1] + " \(civil.day), " + String(civil.year) }
         return "\(civil.day) " + monthNames[civil.month - 1] + " " + String(civil.year)
     }
 
@@ -191,9 +196,10 @@ package enum DateText {
         return (hours < 10 ? "0" : "") + String(hours) + ":" + (rest < 10 ? "0" : "") + String(rest)
     }
 
-    /// "15 Mar" in UTC.
-    static func dayMonth(_ date: Date) -> String {
+    /// "15 Mar" in UTC, or "Mar 15" with `monthFirst`.
+    static func dayMonth(_ date: Date, monthFirst: Bool = DateText.monthFirst) -> String {
         let civil = CivilDate(date)
+        if monthFirst { return monthNames[civil.month - 1] + " \(civil.day)" }
         return "\(civil.day) " + monthNames[civil.month - 1]
     }
 

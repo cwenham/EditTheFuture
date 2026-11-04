@@ -47,7 +47,7 @@ Mockups are on the design canvas at https://claude.ai/artifact/PoMFiacRKa3XwhCmE
 | `success` | `#9FE3C4` | Parsed natural language, positive deltas |
 | `reading` | `#ECEEF1` at 85% | Readings: dots on a thin line |
 
-These are `FutureStyle.standard`'s colours (DESIGN.md 2.1). A light style, `FutureStyle.light`, exists for apps that embed the views; the app itself is dark only, and a high-contrast style is an open question (section 13). With Reduce Transparency on, the panel is opaque (α = 1) and the blur is off.
+These are `FutureStyle.standard`'s colours (DESIGN.md 2.1). A light style, `FutureStyle.light`, is offered in Settings as the Light theme, or with Match the Mac, and a stronger-contrast version of either (section 7). With Reduce Transparency on, the panel is opaque (α = 1) and the blur is off.
 
 ### 2.2 Slot palette
 
@@ -63,7 +63,7 @@ The default color comes from the slot's position and matches the hardware LED fo
 - **Formulas:** SF Mono.
 - **Sizes (Mac):** 11 axis and small labels, 12 secondary, 13 body, 15 section titles, 18 focused slot name, 22 cursor readout.
 - **iOS:** the same sizes +2, following Dynamic Type.
-- Sizes are written for the standard style; a style's `fonts.scale` multiplies them, and its `family` replaces SF Pro (not SF Mono) (DESIGN.md 2.1).
+- Sizes are written for the standard style; a style's `fonts.scale` multiplies them, and its `family` replaces SF Pro (not SF Mono) (DESIGN.md 2.1). In the app, Settings sets both: one text size, with 13 points as standard, that everything else is sized against (section 7).
 
 ### 2.4 Marks on the graph
 
@@ -118,7 +118,7 @@ Added in November 2026, so a worm that spreads in minutes can be watched (DESIGN
 
   New, Duplicate and Edit open a small form in a popover that hangs from the name, with Cancel (Esc) and Create, Duplicate or Save (↩). It says what's wrong instead of saving: no name, square brackets in it (the heading's settings use them), a name another scenario's folder already has, or a seed that isn't a whole number. New and Duplicate open what they made. Renaming renames the scenario's folder too (DESIGN.md, 15.1).
 - Eight slot chips: number, color and name. Empty slots are dashed with a "+"; clicking one opens the model picker (5.7). Right-clicking a chip opens its menu, and dragging a chip onto another number moves it. A paused slot's chip shows a pause symbol. ⌘- or ⇧-clicking a chip draws that slot over the focused graph too (5.12); its chip is then outlined in its color.
-- Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider with a Blur checkbox beside it, and Hide.
+- Now (puts the cursor on now, scrolling back to it if needed), Copy snapshot, an opacity slider with a Blur checkbox beside it, and Hide. The opacity and blur are remembered between launches without asking.
 
 **Focus area:**
 - Slot name, the names of any slots drawn over the graph (5.12), and the model summary ("Market model · monthly · median with bands").
@@ -184,11 +184,11 @@ Clicking a lane's name focuses that slot. ⌘- or ⇧-clicking a lane's name or 
 
 **Where the wheel works:** the wheel and trackpad swipes move time only while the pointer is over the graphs and lanes. Anywhere else they scroll what's under the pointer, such as the formula editor, the insert palette or the Slot tab. Pinching zooms time anywhere in the panel.
 
-**Mouse wheels:** macOS doesn't report how many wheels a mouse has, so the app watches for one. The first wheel event with a horizontal movement and no Shift held can only come from a horizontal wheel. From then on the vertical wheel zooms, and the app says so in the status line. (macOS turns Shift + vertical wheel into horizontal movement, so those events don't count.) The finding is remembered, and the menu bar item has a "Mouse Has a Horizontal Wheel" toggle to override it. Zooming centres on the pointer.
+**Mouse wheels:** macOS doesn't report how many wheels a mouse has, so the app watches for one. The first wheel event with a horizontal movement and no Shift held can only come from a horizontal wheel. From then on the vertical wheel zooms, and the app says so in the status line. (macOS turns Shift + vertical wheel into horizontal movement, so those events don't count.) The finding is remembered. Settings can say which wheels the mouse has instead, or forget a wheel it found (section 7). Zooming centres on the pointer.
 
 ### 4.2 Global hot-keys
 
-All of these are configurable. Defaults include Control because sandboxed apps on macOS 15 can't register Option-only shortcuts.
+All of these can be changed or turned off in Settings (section 7). Defaults include Control because sandboxed apps on macOS 15 can't register Option-only shortcuts.
 
 | Hot-key | Does |
 |---|---|
@@ -511,17 +511,49 @@ Other slots can be drawn over the focused graph, each in its own color, to compa
 - **Scripts:** Open Script Libraries Folder (made if it isn't there) and Reload Script Libraries, which loads every script again with the folder's current files.
 - **Feeds:** Refresh Data Feeds checks every feed in the scenario for new readings now (5.10).
 - **Status:** controller and paired-device status lines.
-- **Also:** Settings and Quit.
+- **Also:** Settings… (⌘,, which also works while the panel is in front) and Quit.
 - **Icon:** monochrome, so it works in light and dark menu bars.
 
 ## 7. Settings
 
-Sections:
-- General
-- Shortcuts
-- Controllers and devices
-- Plug-ins
-- Privacy and security
+A window with groups of settings in a list on the left and the chosen group's settings on the right, as in the Mac's System Settings. It opens from the menu bar item's Settings…, ⌘, while the panel is in front, or the link `etf://settings` (`?page=` `general`, `appearance`, `mouse`, `shortcuts`, `notifications`, `feeds` or `privacy` opens a group). It floats with the panel so it isn't hidden behind it, and remembers the group shown last. It's drawn in the Mac's own look, not the panel's, and stays the same size whatever text size is chosen. Every setting takes effect at once and is remembered.
+
+**General**
+- **Open Edit The Future when you log in**, through the Mac's Login Items. When the Mac wants it approved there, a button opens Login Items.
+- **Dates:** "15 Mar 2031" or "Mar 15, 2031", on the graph, in readouts and in messages. Date fields follow the Mac's region settings.
+- **New scenarios:** the currency, number style and exchange rates that New Scenario… starts with, each "The open scenario's" unless chosen. A copy always starts as the scenario it copies.
+
+**Appearance**
+- **Theme:** Dark (the panel's own look), Light, or Match the Mac. The panel window takes the theme's appearance, so the formula editor, menus and date fields match, and a light panel blurs with a light material.
+- **Increase contrast:** secondary text nearer the main text, and stronger hairlines, borders, grid lines and the now line (`FutureStyle.increasingContrast`). The Mac's own Increase Contrast turns it on too, and the setting says so.
+- **Thicker lines on the graphs:** the lines and readings drawn 1.75 times as thick.
+- **Font:** System, System Rounded, System Serif, or any font installed on the Mac. Formulas and scripts stay monospaced. A chosen font that's no longer installed is shown as "(not installed)", and the panel uses the system font.
+- **Text size:** a slider from 10 to 32 points, 13 being standard. Everything in the panel is sized against it, so one setting makes it all larger: names, values, buttons, menus, the graph's columns and rows, and the side pane (DESIGN.md 2.1). The panel changes as the slider moves. In the panel, ⌘+ and ⌘− change it a point at a time and say the new size in the footer, and ⌘0 puts it back.
+- **Use the Standard Look** puts all of these back.
+- **Preview:** a few lines of the panel and a line on a graph, in the chosen theme, font, size, contrast and thickness.
+
+**Mouse and Trackpad**
+- **Mouse wheels over the graph:** Find out automatically (4.1), Vertical and horizontal wheels, or One wheel, each with a line on what the wheels then do. Under Find out automatically, it says whether a horizontal wheel has been found, with Forget It to go back to one wheel until one turns again.
+- **Speed:** sliders for moving through time and for zooming, from a quarter of the designed speed to four times it, for wheels and swipes alike; pinches follow the fingers. **Reverse the horizontal wheel** turns a mouse's horizontal wheel the other way (not with One wheel). Use Standard Speeds puts them back.
+- **Trackpad and Magic Mouse:** how swipes and pinches move through time and zoom.
+
+**Shortcuts**
+- The three shortcuts that work from any app (4.2), each with a button showing it. Click it, then type the new shortcut: it needs ⌃, ⌥ or ⌘, so it doesn't take a key from every app, and Esc leaves it as it was. While one is being typed, the app lets its shortcuts go, so typing the old one records it rather than doing it. ⓧ turns a shortcut off. Giving one action another's shortcut takes it off the other. A shortcut the Mac won't give the app, usually because another app has it, says so in orange. The menu bar item's titles show the shortcuts as they are.
+- **Use Standard Shortcuts**, and a list of the panel's own keys.
+
+**Notifications**
+- **Notify me when readings drift away from a model while the panel is hidden** (5.6), on to start with. The drift pill shows in the panel either way. When the Mac has notifications for the app turned off, it says so, with a button to the Mac's Notifications settings.
+
+**Data Feeds**
+- **Live exchange rates:** how often they're checked, from every 10 minutes to once a day, with what Open Exchange Rates' plans allow: its free plan's 1,000 requests a month covers checking every hour. A new choice applies from the last check.
+- Where each feed's own Check for new is, and Refresh Data Feeds.
+
+**Privacy and Security**
+- **Ask before running their scripts and fetching their data feeds**, for scenarios from elsewhere, on to start with. A scenario counts as from elsewhere when the Mac marks its folder or `scenario.md` as downloaded: from a browser, Mail, Messages or AirDrop. Scenarios made on this Mac never are.
+- Such a scenario opens with its script slots paused ("This scenario came from elsewhere, so its scripts wait until you allow them"), not even loaded, and its feeds not fetched. Formulas and modules run as usual. A banner under the panel's header says what's waiting and why, with Not Now and Allow. Not Now puts the banner away and leaves them waiting; the scenario menu then has Allow Scripts and Feeds. Allowing runs them and remembers the scenario by its folder, which a rename carries along.
+- **Allowed:** the scenarios allowed so far, each with Forget, to ask again the next time it opens.
+
+Groups still to come: Controllers and devices, and Plug-ins.
 
 **Controllers and devices** shows:
 - each connected controller, with its profile, mapping table, encoder format, a LED-colors toggle and Learn controls
@@ -567,7 +599,8 @@ Sections:
   - The cursor moves with the VoiceOver rotor by step or by year.
 - **Keyboard:** everything is reachable; focus rings are visible on the dark material.
 - **Contrast:** the opacity slider stops at 60%. Below 80%, labels get a subtle backing so text stays at 4.5:1 over bright windows.
-- **System settings:** Reduce Transparency makes the panel opaque. Increase Contrast strengthens hairlines and grid lines. Reduce Motion removes the panel and toast animations.
+- **System settings:** Reduce Transparency makes the panel opaque. Increase Contrast strengthens secondary text, hairlines and grid lines, as the Increase contrast setting does (section 7). Reduce Motion removes the panel and toast animations.
+- **Larger text and lines:** one text size grows everything in the panel, ⌘+ and ⌘− step it, and the graphs' lines can be drawn thicker (section 7).
 - **Dynamic Type** on iPad and iPhone; widgets use the system text styles.
 - **Color:** never the only cue (section 1, principle 5).
 
@@ -593,6 +626,15 @@ Sections:
   - The store never computes. It asks `ScenarioEngine` (an actor on its own thread) for the visible range and draws the latest results it has. Past the end of those results, lines stop and readouts show "…" until the rest arrives (DESIGN.md, 4.8).
 - **Easing scales** (2.4): `TimelineRows` keeps a `ScaleEasing`, which holds a motion for each graph's range (`ScaleKey`: the graph and the kind of value). Its body sets the targets from the timeline state. While any range is moving, a `TimelineView` behind the rows advances `ScaleEasing.time` once a frame, and a task stops it when the last motion ends. `time` is the easing's only observed property, and only the views that draw a range read it: those inside `Eased` (the y axis, the focused graph, the target's overlays, the cursor) and `LanePlot`. So, as with the cursor, only they redraw each frame. The store isn't involved: it still says only where each range is going.
   - **Cost:** an eased frame took 3.7 ms of main-thread time in a release build on the 2017 iMac Pro, offscreen, with seven lanes: about a fifth of a core for the second a change lasts, and nothing at rest. Rebuilding every row each frame, as a first version did, took 9.4 ms.
+- **Settings** (7): each group's settings are an `@Observable` object that keeps itself in the app's defaults (`EditTheFuture.settings.…`), with setters that do nothing when the value is unchanged:
+  - in `FutureUI`: `AppearanceSettings` (theme, contrast, lines, font and text size, which make a `FutureStyle`), `TimelineWheel` (the wheels' mode, speeds and reversing) and `ShortcutSettings` (with `GlobalShortcut` and the recorder);
+  - in `FutureFiles`: `ScenarioTrust` (asking first, the allowed folders, and `cameFromElsewhere`, which reads the quarantine mark), given to `ScenarioDocument.open`;
+  - in the app: `AppSettings` (dates, new scenarios, drift notifications, the live rates' interval) and `LoginItem` (`SMAppService.mainApp`).
+
+  The app owns one of each, so every panel and the Settings window share them. `SettingsView` takes a list of `SettingsPage`s: `FutureUI` makes Appearance, Mouse and Shortcuts (`.appearance(_:)` and the like), and the app adds General, Notifications, Data Feeds and Privacy and Security. `StyledPanel` applies the style around `PanelView`, reading the Mac's light or dark and Increase Contrast from the environment, and tells `PanelController` which it is for the blur's material; `PanelController` sets the window's appearance from the theme. The app registers its hot-keys again whenever `ShortcutSettings` changes, lets them go while one is recorded, and records refusals in `unavailable`.
+  - The opacity and blur are kept by the panel itself (`PanelView.opacityKey`, `.blurKey`): it saves them when they change, and `PanelView.restoreLook(of:)` puts them back before it's first drawn.
+  - Dates: `DateText.monthFirst` is set by `AppSettings`, and `ScenarioStore.redrawDates()` draws them again.
+  - Holding: `ScenarioStore(…, holdsScripts:)` leaves script slots unbuilt (`assemble` skips them, since loading a script runs its top level) and paused with `TrustRequest.heldReason`; `requestTrust()` raises the banner, or lets go when there's nothing to hold. `allowHeldScenario()` builds the slots again and calls `onAllowHeld`, where the document remembers the scenario and starts its feeds.
 - **Overlays** (5.12): the store keeps `overlaidIDs`, slot ids in the order they were added, never the focused one. `select(index:click:)` takes a `SlotClick` (`.only`, `.toggle`, `.range`), which views read from the keys held (`SlotClick.current`, from `NSEvent.modifierFlags`). `timelineState()` gives each an `OverlayState` with the range it's drawn over (`ValueStyle.sharesAxis`), and `PlotSeries.domain` lets a line use its own range. `cursorState()` gives their values at the cursor in `overlayValues`, for the dots.
 - **Slots** (5.7):
   - The store keeps each slot as a plain record: its position, name, model source, its own values, display settings, events and rules. Every change to slots replaces the whole list, so undo puts the old list back.

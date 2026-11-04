@@ -70,7 +70,7 @@ struct FormulaPane: View {
                     .disabled(!drafted || current?.compiles == false)
                     .help("Use this \(slot.noun) (Command-Return). Undo puts the old one back.")
             }
-            .controlSize(.small)
+            .futureControlSize(.small)
 
             Group {
                 if case .script(let language) = slot.kind {
@@ -79,7 +79,7 @@ struct FormulaPane: View {
                     InsertPalette(text: text, slots: summaries, titles: titles, insert: insert)
                 }
             }
-            .frame(height: 200)
+            .scaledFrame(height: 200)
         }
         .onAppear { store.updateFormulaCheck(forSlotAt: index) }
         .onChange(of: slot.id) { act(slot.id) { store.updateFormulaCheck(forSlotAt: $0) } }
@@ -172,7 +172,7 @@ private struct ProblemBox: View {
                 HStack(spacing: 6) {
                     ForEach(Array(diagnosis.fixes.enumerated()), id: \.offset) { offset, fix in
                         Button(fix.title) { useFix(fix) }
-                            .controlSize(.small)
+                            .futureControlSize(.small)
                             .buttonStyle(.bordered)
                             .help("Make the change: \(fix.title)")
                     }
@@ -259,7 +259,7 @@ private struct InsertPalette: View {
                 .futureFont(11.5, design: .monospaced)
                 .foregroundStyle(Color(nsColor: color))
                 .padding(.horizontal, 7)
-                .frame(height: 22)
+                .scaledFrame(height: 22)
                 .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.hairline))
                 .contentShape(Rectangle())
@@ -349,7 +349,7 @@ private struct ScriptPalette: View {
                 .futureFont(11.5, design: .monospaced)
                 .foregroundStyle(Color(nsColor: color))
                 .padding(.horizontal, 7)
-                .frame(height: 22)
+                .scaledFrame(height: 22)
                 .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
                 .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.hairline))
                 .contentShape(Rectangle())
