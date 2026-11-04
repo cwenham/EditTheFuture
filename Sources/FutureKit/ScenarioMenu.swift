@@ -92,6 +92,45 @@ public struct ScenarioMenuActions {
 }
 
 /// The scenario menu's form: the open scenario's settings, or a new scenario's.
+/// What a new scenario starts with, chosen in Settings (docs/UI.md, 7). Each nil means the open
+/// scenario's, as a copy has.
+public struct NewScenarioDefaults: Equatable, Sendable {
+    public enum Numbers: Equatable, Sendable {
+        /// Each currency written its own way.
+        case currencysOwn
+        case style(NumberStyle)
+    }
+
+    public var currency: Currency?
+    public var numbers: Numbers?
+    public var rates: ExchangeRateSource?
+
+    public init(currency: Currency? = nil, numbers: Numbers? = nil, rates: ExchangeRateSource? = nil) {
+        self.currency = currency
+        self.numbers = numbers
+        self.rates = rates
+    }
+
+    /// As it's kept in the app's settings: codes and names, with nothing for the open scenario's.
+    public var stored: [String: String] {
+        var stored: [String: String] = [:]
+        stored["currency"] = currency?.code
+        switch numbers {
+        case nil: break
+        case .currencysOwn?: stored["numbers"] = "own"
+        case .style(let style)?: stored["numbers"] = style.rawValue
+        }
+        stored["rates"] = rates?.rawValue
+        return stored
+    }
+
+    public init(stored: [String: String]) {
+        currency = stored["currency"].flatMap { $0.isEmpty ? nil : Currency(code: $0) }
+        numbers = stored["numbers"].flatMap { $0 == "own" ? .currencysOwn : NumberStyle(rawValue: $0).map(Numbers.style) }
+        rates = stored["rates"].flatMap(ExchangeRateSource.init(rawValue:))
+    }
+}
+
 public struct ScenarioForm: Equatable, Sendable {
     public enum Mode: Equatable, Sendable {
         /// The open scenario's name, start and seed.
@@ -172,11 +211,19 @@ extension ScenarioStore {
         case .duplicate: name = ScenarioPackage.uniqueName(self.name + " copy", taken: taken)
         }
         let start = mode == .new ? DateText.startOfYear(DateText.year(now)) : self.start
-        // A new scenario is in this one's currency and style, as a copy is: the ones being worked in.
-        var form = ScenarioForm(mode: mode, name: name, start: start, currency: currency, numbers: numberSetting,
-                                rates: rateSource, seedText: mode == .edit ? ScenarioForm.text(seed: seed) : "", taken: taken)
+        // A new scenario is in this one's currency and style, as a copy is: the ones being worked in,
+        // unless Settings chose others for new scenarios.
+        let defaults = mode == .new ? newScenarioDefaults : NewScenarioDefaults()
+        let numbers: NumberStyle? = switch defaults.numbers {
+        case nil: numberSetting
+        case .currencysOwn?: nil
+        case .style(let style)?: style
+        }
+        let form = ScenarioForm(mode: mode, name: name, start: start, currency: defaults.currency ?? currency, numbers: numbers,
+                                rates: defaults.rates ?? rateSource, seedText: mode == .edit ? ScenarioForm.text(seed: seed) : "",
+                                taken: taken)
         scenarioForm = form
-        if rateSource.isLive { checkForAppID() }
+        if form.rates.isLive { checkForAppID() }
     }
 
     /// Looks in the Keychain for an App ID for live rates, once live rates are chosen in the form.

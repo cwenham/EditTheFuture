@@ -32,11 +32,10 @@ struct RefitSheet: View {
                 }
             }
             section("Which readings") {
-                Picker("Which readings", selection: Binding(get: { state.window }, set: { store.setRefitWindow($0) })) {
+                FuturePicker("Which readings", selection: Binding(get: { state.window }, set: { store.setRefitWindow($0) }),
+                             current: state.window.title) {
                     ForEach(RefitState.Window.allCases) { Text($0.title).tag($0) }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
                 .fixedSize()
             }
             result
@@ -49,7 +48,7 @@ struct RefitSheet: View {
                     .disabled(state.applicable == nil)
                     .help(state.applicable == nil ? "Nothing to apply" : "Make these \(slot.title)'s own values  ⌘↩")
             }
-            .controlSize(.small)
+            .futureControlSize(.small)
         }
         .padding(.trailing, 4)
     }
@@ -60,7 +59,7 @@ struct RefitSheet: View {
             switch state.phase {
             case .fitting:
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
+                    ProgressView().futureControlSize(.small)
                     Text("Fitting…").futureFont(12).foregroundStyle(Theme.secondary)
                 }
             case .nothingTicked:

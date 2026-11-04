@@ -24,7 +24,18 @@ struct AddEventPane: View {
     private var isSetParameter: Bool { draft.kind == .setParameter }
     private var isEditing: Bool { store.editingEvent != nil }
 
+    /// It scrolls when it doesn't fit, as with large text in a small panel; when it does, the hint
+    /// at the end stays at the bottom.
     var body: some View {
+        GeometryReader { area in
+            ScrollView(.vertical) {
+                form.frame(minHeight: area.size.height, alignment: .top)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Circle().fill(Color(slot.color)).frame(width: 9, height: 9)
@@ -42,19 +53,15 @@ struct AddEventPane: View {
             }
 
             if kindOptions.count > 1 {
-                Picker("Kind", selection: $store.eventDraft.kind) {
-                    ForEach(kindOptions, id: \.kind) { Text($0.title).tag($0.kind) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                FutureSegmentedPicker(title: "Kind", selection: $store.eventDraft.kind,
+                                      options: kindOptions.map { ($0.kind, $0.title) })
             }
 
             if isSetParameter {
                 field("Parameter") {
-                    Picker("Parameter", selection: $store.eventDraft.parameter) {
+                    FuturePicker("Parameter", selection: $store.eventDraft.parameter, current: draft.parameter) {
                         ForEach(parameterOptions, id: \.self) { Text($0).tag($0) }
                     }
-                    .labelsHidden()
                 }
                 field("New value") {
                     TextField(currentValueHint, text: $store.eventDraft.valueText)
@@ -70,19 +77,15 @@ struct AddEventPane: View {
                         .onSubmit { store.commitEvent() }
                 }
                 field("Repeats") {
-                    Picker("Repeats", selection: $store.eventDraft.repeats) {
+                    FuturePicker("Repeats", selection: $store.eventDraft.repeats, current: draft.repeats.title) {
                         ForEach(EventDraft.Repeat.allCases) { Text($0.title).tag($0) }
                     }
-                    .labelsHidden()
                 }
             }
 
             field(isSetParameter || draft.repeats == .never ? "When" : "Starting") {
                 HStack(spacing: 8) {
-                    DatePicker("When", selection: $store.eventDraft.date, in: store.start...,
-                               displayedComponents: [.date, .hourAndMinute])
-                        .datePickerStyle(.field)
-                        .labelsHidden()
+                    FutureDatePicker(title: "When", selection: $store.eventDraft.date, earliest: store.start, showsTime: true)
                     Button("Now") { store.resetEventDate() }
                         .disabled(store.eventDateIsNow)
                 }

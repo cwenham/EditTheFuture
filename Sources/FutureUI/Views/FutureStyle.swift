@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 
 /// How the views look (docs/DESIGN.md, 2.1): their colours, fonts and light or dark appearance. An app
 /// that embeds the views sets one with `.futureStyle(_:)` on them or anything around them; without
@@ -18,6 +19,9 @@ public struct FutureStyle: Equatable, Sendable {
     /// The padding inside the editing panes, and the rounding of their corners.
     public var panePadding: CGFloat = 16
     public var cornerRadius: CGFloat = 12
+    /// What the graphs' lines and readings are drawn thicker by: 1 as designed, more for lines
+    /// that are easier to see.
+    public var lineScale: CGFloat = 1
 
     /// One of the style's colours as a plain `Color`, for code that needs one: `style[Theme.grid]`.
     public subscript(_ color: ThemeColor) -> Color { color.color(in: self) }
@@ -137,7 +141,7 @@ public struct FutureStyle: Equatable, Sendable {
     }
 
     /// The views' type. Sizes in the views are for the standard style and are multiplied by `scale`.
-    /// The graph's columns don't grow with it, so a large scale can cut labels short.
+    /// The views' columns, rows, panes and controls grow and shrink with it too (`layoutScale`).
     public struct Fonts: Equatable, Sendable {
         public var scale: CGFloat
         /// A font family by name, such as "Avenir Next"; nil for the system font.
@@ -145,15 +149,51 @@ public struct FutureStyle: Equatable, Sendable {
         /// The system font's design, when there's no family. Code stays monospaced.
         public var design: Font.Design
 
+        /// The size of the views' ordinary text at a scale of 1, in points: a slot's name, a field.
+        /// Other text is sized against it.
+        public static let standardSize: CGFloat = 13
+        /// The scales the views are laid out for. Text can go further, but columns and rows stop here.
+        public static let layoutScales: ClosedRange<CGFloat> = 0.75...2.5
+
         public init(scale: CGFloat = 1, family: String? = nil, design: Font.Design = .default) {
             self.scale = scale
             self.family = family
             self.design = design
         }
 
+        /// The scale, or 1 when it's nonsense (zero, negative, infinite or NaN).
+        var safeScale: CGFloat { scale.isFinite && scale > 0 ? scale : 1 }
+
+        /// What fixed sizes in the views (columns, row heights, pane widths) are multiplied by.
+        public var layoutScale: CGFloat {
+            min(max(safeScale, Self.layoutScales.lowerBound), Self.layoutScales.upperBound)
+        }
+
+        /// A length the views are written in, at this scale.
+        public func scaled(_ length: CGFloat) -> CGFloat { (length * layoutScale).rounded() }
+
+        /// A control size the views are written in, a step or two larger or smaller at this scale,
+        /// so buttons, menus and fields keep up with the text around them.
+        public func controlSize(_ base: ControlSize = .regular) -> ControlSize {
+            let sizes: [ControlSize] = [.mini, .small, .regular, .large, .extraLarge]
+            let steps = layoutScale < 0.9 ? -1 : layoutScale < 1.15 ? 0 : layoutScale < 1.6 ? 1 : 2
+            let index = sizes.firstIndex(of: base) ?? 2
+            return sizes[min(max(index + steps, 0), sizes.count - 1)]
+        }
+
+        /// A Core Text font for measuring text drawn with `font(size:)`, in its family when it has one.
+        public func measuringFont(size: CGFloat, italic: Bool = false) -> CTFont {
+            let size = size * safeScale
+            var font = family.map { CTFontCreateWithName($0 as CFString, size, nil) }
+                ?? CTFontCreateUIFontForLanguage(.system, size, nil)
+                ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+            if italic, let slanted = CTFontCreateCopyWithSymbolicTraits(font, 0, nil, .traitItalic, .traitItalic) { font = slanted }
+            return font
+        }
+
         /// The font for a size the views are written in.
         public func font(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design? = nil) -> Font {
-            let size = size * (scale.isFinite && scale > 0 ? scale : 1)
+            let size = size * safeScale
             if design == nil, let family { return .custom(family, size: size).weight(weight) }
             // Built as the views wrote them before styles, so the standard style is the same font.
             let design = design ?? self.design
@@ -195,6 +235,24 @@ public struct FutureStyle: Equatable, Sendable {
                        reference: Color(hex: "#8CC4FF"), lag: Color(hex: "#4FD1A5"), symbol: Color(hex: "#A3A9B1"),
                        library: Color(hex: "#E8A0D0"))),
         colorScheme: .dark)
+
+    /// The same style with stronger contrast, as the Mac's Increase Contrast asks for: secondary
+    /// text nearer the main text, and hairlines, borders, grid lines and the now line stronger.
+    public func increasingContrast() -> FutureStyle {
+        var style = self
+        let dark = colorScheme == .dark
+        let ink: Color = dark ? .white : .black
+        style.colors.secondary = dark ? Color(hex: "#D3D7DD") : Color(hex: "#3A3F47")
+        style.colors.hairline = ink.opacity(dark ? 0.22 : 0.26)
+        style.colors.chipBorder = ink.opacity(dark ? 0.36 : 0.4)
+        style.colors.grid = ink.opacity(dark ? 0.18 : 0.2)
+        style.colors.nowLine = ink.opacity(0.75)
+        style.colors.startLine = ink.opacity(0.6)
+        style.colors.cursorLine = ink
+        style.colors.code.lineNumber = style.colors.secondary
+        style.colors.code.comment = style.colors.secondary
+        return style
+    }
 
     /// The same views on a light background.
     public static let light = FutureStyle(
@@ -243,10 +301,45 @@ extension View {
         modifier(FutureFont(size: size, weight: weight, design: design))
     }
 
-    /// The style's light or dark appearance, for the controls inside.
+    /// The style's light or dark appearance, and its text size, for the controls inside.
     func futureAppearance() -> some View {
         modifier(FutureAppearance())
     }
+
+    /// A control size the views are written in, a step larger or smaller with the style's text.
+    func futureControlSize(_ size: ControlSize) -> some View {
+        modifier(FutureControlSize(size: size))
+    }
+
+    /// A fixed size the views are written in, grown or shrunk with the style's text.
+    func scaledFrame(width: CGFloat? = nil, height: CGFloat? = nil, alignment: Alignment = .center) -> some View {
+        modifier(ScaledFrame(width: width, height: height, alignment: alignment))
+    }
+}
+
+struct FutureControlSize: ViewModifier {
+    @Environment(\.futureStyle.fonts) private var fonts
+    let size: ControlSize
+
+    func body(content: Content) -> some View {
+        content.controlSize(fonts.controlSize(size))
+    }
+}
+
+struct ScaledFrame: ViewModifier {
+    @Environment(\.futureStyle.fonts) private var fonts
+    let width: CGFloat?
+    let height: CGFloat?
+    let alignment: Alignment
+
+    func body(content: Content) -> some View {
+        content.frame(width: width.map(fonts.scaled), height: height.map(fonts.scaled), alignment: alignment)
+    }
+}
+
+extension EnvironmentValues {
+    /// The graph's columns and rows at the style's text size.
+    var timelineLayout: TimelineLayout { TimelineLayout(scale: futureStyle.fonts.layoutScale) }
 }
 
 struct FutureFont: ViewModifier {
@@ -260,11 +353,17 @@ struct FutureFont: ViewModifier {
     }
 }
 
+/// Light or dark, and text and controls that grow with the style: fields, menus and buttons take
+/// the style's ordinary size and family unless a view sets its own.
 struct FutureAppearance: ViewModifier {
     @Environment(\.futureStyle.colorScheme) private var scheme
+    @Environment(\.futureStyle.fonts) private var fonts
 
     func body(content: Content) -> some View {
-        content.environment(\.colorScheme, scheme)
+        content
+            .environment(\.colorScheme, scheme)
+            .font(fonts.font(size: FutureStyle.Fonts.standardSize))
+            .controlSize(fonts.controlSize())
     }
 }
 

@@ -20,6 +20,8 @@ public final class ScenarioDocument {
     public private(set) var feeds: FeedCenter
     /// Fetches the exchange rates its slots convert money at into `readings/` (docs/DESIGN.md, 5.11).
     public private(set) var rates: RateCenter
+    /// Remembers the scenario once its scripts and feeds are allowed, and follows a rename.
+    private var trust: ScenarioTrust?
     /// Called after the folder moved to follow the scenario's new name.
     public var onMove: ((ScenarioPackage) -> Void)?
 
@@ -51,21 +53,35 @@ public final class ScenarioDocument {
     // MARK: Opening
 
     /// Opens a scenario's folder. Throws when `scenario.md` can't be read or doesn't say enough.
+    /// - Parameter trust: which scenarios from elsewhere may run scripts and fetch feeds. A
+    ///   scenario it doesn't allow opens with its scripts and feeds waiting, and the panel asks
+    ///   (`ScenarioStore.trustRequest`); nil runs everything.
     public static func open(_ package: ScenarioPackage, now: Date = Date(), watch: Bool = true,
-                            configuration: ScenarioConfiguration = .standard) async throws -> ScenarioDocument {
+                            configuration: ScenarioConfiguration = .standard,
+                            trust: ScenarioTrust? = nil) async throws -> ScenarioDocument {
         let modules = configuration.modules
+        let holds = trust.map { !$0.allows(package) } ?? false
         let loaded = try await Task.detached(priority: .userInitiated) { try load(package, modules: modules) }.value
         let store = try ScenarioStore(definition: loaded.definition, now: now, savedResults: loaded.results,
-                                      configuration: configuration)
+                                      configuration: configuration, holdsScripts: holds)
         let document = ScenarioDocument(package: package, store: store, parsed: loaded.parsed)
+        document.trust = trust
         document.report(loaded.problems)
+        let held = holds && store.requestTrust()
+        store.onAllowHeld = { [weak document] in document?.allowed() }
         if watch {
             document.isWatching = true
             document.startWatching()
-            document.feeds.start()
+            if !held { document.feeds.start() }
             document.rates.start()
         }
         return document
+    }
+
+    /// The person allowed the scenario's scripts and feeds: remember it, and fetch its feeds.
+    private func allowed() {
+        trust?.allow(package)
+        if isWatching { feeds.start() }
     }
 
     /// Writes a new scenario folder for a definition, such as the built-in "Home & money".
@@ -220,6 +236,7 @@ public final class ScenarioDocument {
             store.say("Couldn't rename the scenario's folder: \(error.localizedDescription)", isError: true)
             return
         }
+        trust?.moved(from: package, to: target)
         package = target
         store.scenarioFolder = target.url
         lastSeen = Self.stamp(package)
@@ -229,7 +246,7 @@ public final class ScenarioDocument {
         old.close()
         feeds = FeedCenter(store: store, folder: target.url)
         feeds.now = old.now
-        if isWatching { feeds.start() }
+        if isWatching && !store.isHeld { feeds.start() }
         let oldRates = rates
         oldRates.close()
         rates = RateCenter(store: store, folder: target.url)

@@ -22,6 +22,13 @@ public final class RateCenter {
     public static var checkInterval: TimeInterval = 600
     /// After a failure, how long before trying again.
     public static var retryDelay: TimeInterval = 1_800
+    /// How often live rates are fetched, chosen in Settings to suit the plan: Open Exchange Rates'
+    /// free plan allows 1,000 requests a month, which checking hourly stays within.
+    public static var liveRefresh: TimeInterval = RateProviders.openExchangeRates.refresh
+
+    private func refresh(of provider: any RateProvider) -> TimeInterval {
+        provider.isLive ? max(60, Self.liveRefresh) : provider.refresh
+    }
     /// Daily rates this close to the latest are fetched again, in case a day came late.
     public static let overlap: TimeInterval = 14 * 86_400
 
@@ -113,7 +120,7 @@ public final class RateCenter {
             daily = dailyCopy.rates
             live = liveCopy.rates
             dailyDue = dailyCopy.written.map { $0.addingTimeInterval(RateProviders.ecb.refresh) } ?? .distantPast
-            liveDue = liveCopy.written.map { $0.addingTimeInterval(RateProviders.openExchangeRates.refresh) } ?? .distantPast
+            liveDue = liveCopy.written.map { $0.addingTimeInterval(max(60, Self.liveRefresh)) } ?? .distantPast
             var status = store.rateStatus
             status.checked = dailyCopy.written
             status.liveChecked = liveCopy.written
@@ -154,6 +161,13 @@ public final class RateCenter {
             let new = needed.filter { !live.covers($0) && !liveTried.contains($0) }
             if !new.isEmpty || liveDue <= time { fetch(liveProvider, needed: needed); return }
         }
+    }
+
+    /// After Settings changes `liveRefresh`: the next live fetch comes that long after the last one.
+    public func rescheduleLive() {
+        guard let checked = store.rateStatus.liveChecked else { return }
+        liveDue = checked.addingTimeInterval(max(60, Self.liveRefresh))
+        sync()
     }
 
     /// Fetches everything now, as Refresh Data Feeds asks.
@@ -221,7 +235,7 @@ public final class RateCenter {
         case .success(let rates):
             if provider.isLive {
                 live = rates
-                liveDue = time.addingTimeInterval(provider.refresh)
+                liveDue = time.addingTimeInterval(refresh(of: provider))
                 status.liveChecked = time
             } else {
                 daily = rates
@@ -234,7 +248,7 @@ public final class RateCenter {
         case .failure(let error):
             let message = (error as? FeedError)?.message ?? error.localizedDescription
             status.error = message
-            let retry = time.addingTimeInterval(max(Self.retryDelay, provider.refresh))
+            let retry = time.addingTimeInterval(max(Self.retryDelay, refresh(of: provider)))
             if provider.isLive { liveDue = retry } else { dailyDue = retry }
             store.setRateStatus(status)
             store.say("Couldn't fetch exchange rates from \(provider.name): \(message)", isError: true)

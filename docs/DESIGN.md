@@ -51,7 +51,7 @@ Begun in November 2026. The engine and the graph are meant to be used by other a
 | `EventEditor`, `SlotEditor`, `FormulaEditorPane` (Mac) | One tab each, with its own popovers and sheets. Each has a `minimumWidth`. |
 | `PanelView(store:actions:wheel:)` | The whole panel, as the app shows it. |
 
-**Moving through time.** A graph takes the wheel, the trackpad and pinches over itself, wherever it's placed: a view behind it watches the window's events and takes those inside its bounds (SwiftUI has no wheel events on macOS 14), and never takes clicks. Elsewhere the wheel scrolls what's under the pointer, as before. `TimelineWheel` holds whether the mouse has a horizontal wheel; graphs given the same one agree, and the app's remembers it in its defaults and lets the menu change it. `TimelineKeys.handle(_:store:)` answers the graph's keys (docs/UI.md, 4.1) for an app to call from its own key handling, as the panel does for keys no text field took.
+**Moving through time.** A graph takes the wheel, the trackpad and pinches over itself, wherever it's placed: a view behind it watches the window's events and takes those inside its bounds (SwiftUI has no wheel events on macOS 14), and never takes clicks. Elsewhere the wheel scrolls what's under the pointer, as before. `TimelineWheel` holds whether the mouse has a horizontal wheel: found the first time one turns (`.automatic`), or chosen (`.twoWheels`, `.oneWheel`). Graphs given the same one agree; the app's remembers both in its defaults, and its Settings window changes them (UI.md, 7). `TimelineKeys.handle(_:store:)` answers the graph's keys (docs/UI.md, 4.1) for an app to call from its own key handling, as the panel does for keys no text field took.
 
 **Settings the views keep.** The panel remembers its side pane's side and widths under names of its own (`PanelView.sideKey` and the like, `EditTheFuture.panel.…`), so an app embedding it keeps them apart from its own. The Mac app moves the old, plain names across when it starts.
 
@@ -60,17 +60,25 @@ Begun in November 2026. The engine and the graph are meant to be used by other a
 | Part | What it sets |
 |---|---|
 | `colors` | The panel colour behind everything (`.clear` lets what's behind show), text and secondary text, `ink` (white on dark, black on light: faint fills, borders and selections are it at a low opacity), the text on filled buttons, hairlines, the graph's grid, tints and lines, proposals, warnings, errors, successes and readings, and the formula editor's colours (`code`). Slots keep their own colours, which come from the scenario. |
-| `fonts` | A `scale` for every size, a `family` in place of the system font (code stays monospaced), or the system font's `design`. |
+| `fonts` | A `scale` for every size, a `family` in place of the system font (code stays monospaced), or the system font's `design`. The scale also grows the views' columns, rows, panes and controls (below). |
 | `colorScheme` | Light or dark, for the controls inside: buttons, menus, text fields. |
 | `panePadding`, `cornerRadius` | Inside the editing panes. |
+| `lineScale` | How much thicker the graphs' lines and readings are drawn. |
+
+`increasingContrast()` makes a style's secondary text, hairlines, borders, grid lines and now line stronger, for the Mac's Increase Contrast or the app's own setting (UI.md 7).
 
 How the views follow it:
 
 - `Theme.text` and the other colours are `ThemeColor`s: a `ShapeStyle` that looks its colour up in the style where it's drawn, so `.foregroundStyle(Theme.secondary)` needs nothing else. Canvases draw them with `.style(_:)`. Code that needs a plain `Color`, such as the values a plot is built from, reads the style from the environment and asks it: `style[Theme.proposal]`.
-- Fixed sizes go through `.futureFont(size, weight:design:)`, which reads the style's fonts. Text drawn in a canvas uses `context.environment.futureStyle.fonts`. The events strip's labels keep the system font at 11 points, because they're measured with CoreText to stop them overlapping.
+- Fixed sizes go through `.futureFont(size, weight:design:)`, which reads the style's fonts. Text drawn in a canvas uses `context.environment.futureStyle.fonts`. The events strip measures its labels with CoreText in the style's font (`Fonts.measuringFont`), so they still don't overlap at any size.
 - The formula editor's `NSTextView` gets its colours and font size from the style when SwiftUI updates it (`FormulaColors`), and colours its text again when they change.
 - Views never use fixed colours such as `Color.white`; the clipboard image is always drawn in the standard style.
-- The graph's columns (the label and value columns, lane heights) don't grow with the font scale, so a large scale can cut labels short.
+- **Everything grows with the text.** Sizes are written for 13-point ordinary text (`Fonts.standardSize`). `Fonts.layoutScale` (the scale, kept within 0.75–2.5) multiplies the fixed sizes that hold text:
+  - the graph's columns and rows (`TimelineLayout`, read from the environment as `\.timelineLayout`) and the events strip's rows, markers and click targets;
+  - the side pane's widths, minimums and the room it leaves the graph; widths dragged by hand are kept at the standard size, so the pane keeps its share of the panel when the text changes;
+  - row heights, label columns and sheet sizes written with `.scaledFrame(width:height:)`, and control sizes written with `.futureControlSize(_:)`, a step or two larger or smaller.
+- **Controls.** `.futureAppearance()` gives what's inside the style's ordinary font and control size, which text fields, buttons and checkboxes follow. On the Mac, menus, segmented controls and date fields keep the system's size whatever the font, so once the text is noticeably off standard (`usesSystemControls`) the views draw their own: `FuturePicker` (a menu with an inline `Picker` inside, so the chosen item keeps its tick), `FutureSegmentedPicker`, and `FutureDatePicker` (AppKit's date field, given the font). At the standard size they're the system's controls.
+- With large text in a small window, the event pane scrolls, and lanes that don't fit are cut off at the bottom of the graph rather than drawn over the footer.
 
 **Still to do:** an example app built only on the public API, and trimming the rest of the public surface. On iOS, the graph has no touch gestures for moving through time yet.
 
@@ -301,11 +309,11 @@ Built in October 2026. The code is `Currency`, `NumberStyle` and `ExchangeRates`
 
 **Sources** (`rates:` in the heading):
 - `ecb`, the default: the European Central Bank's reference rates, published each working day, from 4 January 1999, for about 30 currencies, through Frankfurter (`api.frankfurter.dev`), which is free and needs no key. One request fetches every day for several currencies: about 7,100 days in October 2026.
-- `openexchangerates`: the ECB's rates for the past, with the latest from Open Exchange Rates (`openexchangerates.org`) for about 170 currencies. It needs an App ID, saved in the Keychain under `openexchangerates` and sent only to `openexchangerates.org`, over HTTPS, in an `Authorization: Token` header rather than the address. How fresh its rates are depends on the plan (hourly on the free one, every minute on the dearest); the app asks every 10 minutes while the scenario is open, about 4,300 requests a month, which needs a paid plan. A currency the ECB doesn't have (UAE dirhams, say) has only the latest rate, used for every date.
+- `openexchangerates`: the ECB's rates for the past, with the latest from Open Exchange Rates (`openexchangerates.org`) for about 170 currencies. It needs an App ID, saved in the Keychain under `openexchangerates` and sent only to `openexchangerates.org`, over HTTPS, in an `Authorization: Token` header rather than the address. How fresh its rates are depends on the plan (hourly on the free one, every minute on the dearest); the app asks every 10 minutes while the scenario is open, about 4,300 requests a month, which needs a paid plan, unless Settings chooses less often (`RateCenter.liveRefresh`; every hour fits the free plan). A currency the ECB doesn't have (UAE dirhams, say) has only the latest rate, used for every date.
 - `none`: no converting.
 - `etf-feed --rates GBP,EUR [--since 2026-01-01] [--live]` fetches rates without the app.
 
-**Kept with the scenario.** Rates are readings, so they travel with the scenario (15.1): `readings/exchange-rates.csv` holds the daily rates of the currencies the slots convert, and `readings/exchange-rates-live.csv` the latest live ones, as CSV with a `date` column and one per currency, in units per US dollar. The scenario opens with them, so slots that convert run at once, offline too, and their cached results (15.5) can be used. `RateCenter` then fetches what's due: the daily rates every 6 hours, from two weeks before the latest, and a currency the copy doesn't have from 1999; live rates every 10 minutes. After a failure it waits half an hour, and says why in the footer and the Slot tab. Refresh Data Feeds fetches them now.
+**Kept with the scenario.** Rates are readings, so they travel with the scenario (15.1): `readings/exchange-rates.csv` holds the daily rates of the currencies the slots convert, and `readings/exchange-rates-live.csv` the latest live ones, as CSV with a `date` column and one per currency, in units per US dollar. The scenario opens with them, so slots that convert run at once, offline too, and their cached results (15.5) can be used. `RateCenter` then fetches what's due: the daily rates every 6 hours, from two weeks before the latest, and a currency the copy doesn't have from 1999; live rates every 10 minutes, or as often as Settings says. After a failure it waits half an hour, and says why in the footer and the Slot tab. Refresh Data Feeds fetches them now.
 
 **Fingerprints.** A slot that converts counts its conversions and the rates of both currencies in its fingerprint (15.5), so its cache is used only with the same rates. Other slots' fingerprints don't change.
 
@@ -1060,7 +1068,7 @@ The goal is to open the app up in every reasonable and secure way. The rules:
 5. **Scripts** are the user's own code, so they run in the app's process with guard rails: time and memory limits, Lua without its `os`, `io` and `debug` libraries, and audit hooks that keep Python off the network and from writing files (6.4).
 6. **Hardware** can send only commands from the vocabulary. Destructive edits (delete) always need on-screen confirmation.
 7. **Siri and Shortcuts** go through App Intents, which have system-level consent. Editing intents ask for confirmation.
-8. **Saved scenarios** can come from other people. Opening one runs its scripts (15.1). Its readings can name a database, which the app opens read-only, and only once the user has picked it (15.4). Its feeds are fetched, which tells their sources that someone opened it (17).
+8. **Saved scenarios** can come from other people. One the Mac marks as downloaded (quarantined) opens with its scripts unbuilt and its feeds unfetched until the user allows them, once per scenario (`ScenarioTrust`, UI.md 7); formulas and modules run, since they can't reach outside the app. Settings can turn the asking off. Its readings can name a database, which the app opens read-only, and only once the user has picked it (15.4).
 
 ## 14. Sources of readings
 
@@ -1379,10 +1387,9 @@ Sources left out: Stooq now checks for a browser before its downloads; CMU Delph
 - How should pinned and suppressed generated events be stored so they survive model edits?
 - Ensemble size and progressive refinement budget per frame.
 - Market data provider and licensing. FRED and Tiingo for now (15.8).
-- Opening a scenario from someone else fetches its feeds, which tells their sources that it was opened. A feed at a web address could point at the scenario's author. Should the app ask first, as for scripts?
 - Branch storage: copy-on-write event lists vs a diff log. In the saved file (15.2), should a branch list only what it changes?
 - A slot's formula is a copy of the library model. Should a slot offer to update when the library model it came from changes?
-- Opening a scenario from someone else runs its scripts (15.1). Should the app ask first, for example when the Mac marks the folder as downloaded?
+- A scenario from someone else asks before running scripts and fetching feeds only when the Mac marks it as downloaded (13). One copied from a USB disk or a shared folder carries no mark. Should anything else count, such as a folder outside the Scenarios folder?
 - Should Refit, or the automatic pick, run on its own when new readings arrive (8.4)? It would change values without a preview, and rewrite `scenario.md` after every fetch. Drift alerts (8.2) now say when a refit is worth a look.
 - Should drift alerts check readings of a slot's other values, not only the one its graph shows? And should a slot be able to turn its alerts off?
 - Predict with writes the Forecast models around whatever value the readings are of, but only offers library models that have that value (8.4). Should it also offer library models whose value has another name, and point the readings at that value when one is chosen (a feed's `into`, a CSV file's column)?

@@ -27,11 +27,10 @@ struct ImportSheet: View {
             }
             if state.targets.count > 1 {
                 section("Readings of") {
-                    Picker("Readings of", selection: Binding(get: { state.variable }, set: { store.setImportVariable($0) })) {
+                    FuturePicker("Readings of", selection: Binding(get: { state.variable }, set: { store.setImportVariable($0) }),
+                                 current: state.targets.first { $0.name == state.variable }?.label ?? state.variable) {
                         ForEach(state.targets) { Text($0.label).tag($0.name) }
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
                     .fixedSize()
                 }
             }
@@ -53,7 +52,7 @@ struct ImportSheet: View {
                     .disabled(!state.canImport)
                     .help(state.canImport ? "Add these readings to \(slot.title)  ⌘↩" : "Nothing to import")
             }
-            .controlSize(.small)
+            .futureControlSize(.small)
         }
         .padding(.trailing, 4)
         .onAppear { title = state.title }
@@ -80,14 +79,13 @@ struct ImportSheet: View {
 
     /// A menu of the table's columns, by name.
     private func columnPicker(_ label: String, selection: Binding<Int?>) -> some View {
-        Picker(label, selection: selection) {
+        let chosen = selection.wrappedValue.flatMap { state.columns.indices.contains($0) ? state.columns[$0] : nil }
+        return FuturePicker(label, selection: selection, current: chosen ?? "Choose a column") {
             Text("Choose a column").tag(Int?.none)
             ForEach(Array(state.columns.enumerated()), id: \.offset) { index, name in
                 Text(name).tag(Int?.some(index))
             }
         }
-        .labelsHidden()
-        .pickerStyle(.menu)
         .fixedSize()
     }
 

@@ -56,7 +56,7 @@ struct ScenarioTitle: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: Self.maximumWidth, alignment: .leading)
-        .frame(height: 30)
+        .scaledFrame(height: 30)
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -98,6 +98,9 @@ enum ScenarioMenu {
         duplicate.isEnabled = current != nil
         menu.addItem(duplicate)
         menu.addItem(ActionMenuItem("Edit “\(store.name)”…") { store.openScenarioForm(.edit, actions: actions) })
+        if store.isHeld {
+            menu.addItem(ActionMenuItem("Allow Scripts and Feeds") { store.allowHeldScenario() })
+        }
         menu.addItem(.separator())
         let finder = ActionMenuItem("Show in Finder", handler: actions.showInFinder)
         finder.isEnabled = current != nil
@@ -167,9 +170,7 @@ struct ScenarioFormView: View {
                 }
 
                 field("Starts") {
-                    DatePicker("Starts", selection: binding(form, \.start), displayedComponents: .date)
-                        .datePickerStyle(.field)
-                        .labelsHidden()
+                    FutureDatePicker(title: "Starts", selection: binding(form, \.start))
                         .environment(\.timeZone, DateText.calendar.timeZone)
                         .environment(\.calendar, DateText.calendar)
                         .accessibilityLabel("Start date")
@@ -177,7 +178,7 @@ struct ScenarioFormView: View {
                 }
 
                 field("Currency") {
-                    Picker("Currency", selection: binding(form, \.currency)) {
+                    FuturePicker("Currency", selection: binding(form, \.currency), current: form.currency.menuTitle) {
                         ForEach(ScenarioStore.currencyChoices(including: [form.currency, store.currency]), id: \.code) {
                             Text($0.menuTitle).tag($0)
                         }
@@ -188,7 +189,8 @@ struct ScenarioFormView: View {
                 }
 
                 field("Numbers") {
-                    Picker("Numbers", selection: binding(form, \.numbers)) {
+                    FuturePicker("Numbers", selection: binding(form, \.numbers),
+                                 current: form.numbers.map { example(form.currency, $0) } ?? "Each currency's own: \(example(form.currency, nil))") {
                         Text("Each currency's own: \(example(form.currency, nil))").tag(NumberStyle?.none)
                         Divider()
                         ForEach(NumberStyle.allCases, id: \.self) { style in
@@ -202,10 +204,8 @@ struct ScenarioFormView: View {
                 }
 
                 field("Exchange rates") {
-                    Picker("Exchange rates", selection: binding(form, \.rates)) {
-                        Text("European Central Bank, daily (free)").tag(ExchangeRateSource.ecb)
-                        Text("Live, from Open Exchange Rates").tag(ExchangeRateSource.openexchangerates)
-                        Text("Don't convert").tag(ExchangeRateSource.none)
+                    FuturePicker("Exchange rates", selection: binding(form, \.rates), current: Self.ratesTitle(form.rates)) {
+                        ForEach([ExchangeRateSource.ecb, .openexchangerates, .none], id: \.self) { Text(Self.ratesTitle($0)).tag($0) }
                     }
                     .labelsHidden()
                     .accessibilityLabel("Exchange rates")
@@ -266,7 +266,7 @@ struct ScenarioFormView: View {
                 }
             }
             .padding(18)
-            .frame(width: Self.width, alignment: .leading)
+            .scaledFrame(width: Self.width, alignment: .leading)
             .presentationBackground(Theme.panel)
             .foregroundStyle(Theme.text)
             .futureAppearance()
@@ -311,6 +311,15 @@ struct ScenarioFormView: View {
     }
 
     /// "1.234,56 €": an amount in the currency, written the way a choice of style would.
+    /// What the Exchange rates menu calls a source.
+    static func ratesTitle(_ source: ExchangeRateSource) -> String {
+        switch source {
+        case .ecb: "European Central Bank, daily (free)"
+        case .openexchangerates: "Live, from Open Exchange Rates"
+        case .none: "Don't convert"
+        }
+    }
+
     private func example(_ currency: Currency, _ style: NumberStyle?) -> String {
         ValueStyle(.currency, currency: currency, writing: currency.writing(style)).amountText(1234.56, digits: 2)
     }
@@ -320,7 +329,7 @@ struct ScenarioFormView: View {
         case .ecb:
             return "Money a slot reads from a slot in another currency is converted at each day's rate, back to 1999. The latest rate is used for the future."
         case .openexchangerates:
-            return "The ECB's daily rates for the past, with the latest from Open Exchange Rates every 10 minutes. The App ID is kept in your Keychain, never in the scenario."
+            return "The ECB's daily rates for the past, with the latest from Open Exchange Rates, checked as often as Settings says (every 10 minutes to start). The App ID is kept in your Keychain, never in the scenario."
         case .none:
             return "Money passes between slots as it is, whatever their currencies."
         }

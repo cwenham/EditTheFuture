@@ -39,10 +39,22 @@ public struct ScrollMapper: Sendable {
     }
 
     public var hasHorizontalWheel: Bool
+    /// Whether a horizontal delta reveals a horizontal wheel. Off when the wheels were chosen in
+    /// Settings rather than left to be found.
+    public var findsHorizontalWheel: Bool
+    /// How far a wheel turn or swipe moves through time, and how much it zooms: 1 as designed.
+    public var panSpeed: Double = 1
+    public var zoomSpeed: Double = 1
+    /// Turns a horizontal wheel the other way, for a mouse whose wheel feels backwards.
+    public var reversesHorizontalWheel = false
 
-    public init(hasHorizontalWheel: Bool = false) {
+    public init(hasHorizontalWheel: Bool = false, findsHorizontalWheel: Bool = true) {
         self.hasHorizontalWheel = hasHorizontalWheel
+        self.findsHorizontalWheel = findsHorizontalWheel
     }
+
+    private var pan: Double { panSpeed.isFinite && panSpeed > 0 ? panSpeed : 1 }
+    private var zoom: Double { zoomSpeed.isFinite && zoomSpeed > 0 ? zoomSpeed : 1 }
 
     /// Returns what to do, and whether this event revealed a horizontal wheel for the first time.
     public mutating func map(_ input: Input) -> (action: Action, foundHorizontalWheel: Bool) {
@@ -51,15 +63,17 @@ public struct ScrollMapper: Sendable {
         if input.shift || input.command {
             // Shift + vertical wheel arrives as a horizontal delta.
             let amount = input.dy != 0 ? input.dy : input.dx
-            return (amount == 0 ? .none : .zoom(Self.wheelZoom(amount, inverted: input.inverted)), false)
+            return (amount == 0 ? .none : .zoom(Self.wheelZoom(amount * zoom, inverted: input.inverted)), false)
         }
         if input.dx != 0 {
+            let moved = Action.pan(-input.dx * 0.04 * pan * (reversesHorizontalWheel ? -1 : 1))
+            guard findsHorizontalWheel else { return (moved, false) }
             let found = !hasHorizontalWheel
             hasHorizontalWheel = true
-            return (.pan(-input.dx * 0.04), found)
+            return (moved, found)
         }
         if input.dy != 0 {
-            return (hasHorizontalWheel ? .zoom(Self.wheelZoom(input.dy, inverted: input.inverted)) : .pan(-input.dy * 0.04), false)
+            return (hasHorizontalWheel ? .zoom(Self.wheelZoom(input.dy * zoom, inverted: input.inverted)) : .pan(-input.dy * 0.04 * pan), false)
         }
         return (.none, false)
     }
@@ -69,9 +83,9 @@ public struct ScrollMapper: Sendable {
         guard amount != 0 else { return .none }
         if input.shift || input.command {
             let up = input.inverted ? -amount : amount
-            return .zoom(min(max(1 - up * 0.004, 0.5), 2))
+            return .zoom(min(max(1 - up * 0.004 * zoom, 0.5), 2))
         }
-        return .pan(-amount * 0.0015)
+        return .pan(-amount * 0.0015 * pan)
     }
 
     /// Wheel turned away from you (up) zooms in, whatever the natural-scrolling setting.

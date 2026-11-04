@@ -158,7 +158,7 @@ private struct SlotSettings: View {
                 }
                 Spacer(minLength: 4)
                 Button("Change…") { store.openPicker(.change(slot: slot.id)) }
-                    .controlSize(.small)
+                    .futureControlSize(.small)
                     .popover(isPresented: Binding(
                         get: { store.picker == .change(slot: slot.id) },
                         set: { if !$0 { store.closePicker() } }), arrowEdge: .leading) {
@@ -192,32 +192,32 @@ private struct SlotSettings: View {
         section("Display") {
             VStack(alignment: .leading, spacing: 8) {
                 labelled("Graph") {
-                    Picker("Graph", selection: Binding(get: { slot.variable },
-                                                       set: { store.setDisplayedVariable($0, inSlotAt: index) })) {
+                    FuturePicker("Graph", selection: Binding(get: { slot.variable },
+                                                             set: { store.setDisplayedVariable($0, inSlotAt: index) }),
+                                 current: slot.outputs.first { $0.name == slot.variable }?.label ?? slot.variable) {
                         ForEach(slot.outputs) { Text($0.label).tag($0.name) }
                     }
-                    .labelsHidden()
                 }
                 labelled("Format") {
-                    Picker("Format", selection: Binding(get: { slot.format }, set: { store.setFormat($0, inSlotAt: index) })) {
+                    FuturePicker("Format", selection: Binding(get: { slot.format }, set: { store.setFormat($0, inSlotAt: index) }),
+                                 current: Self.formatTitle(slot.format)) {
                         Text("Currency").tag(ValueFormat.currency)
                         Text("Temperature").tag(ValueFormat.temperature)
                         Text("Percent").tag(ValueFormat.percent)
                         Text("Number").tag(ValueFormat.number)
                     }
-                    .labelsHidden()
                 }
                 if slot.hasMoney {
                     labelled("Currency") {
-                        Picker("Currency", selection: Binding(get: { slot.ownCurrency?.code ?? "" },
-                                                              set: { store.setCurrency(Currency(code: $0), inSlotAt: index) })) {
+                        FuturePicker("Currency", selection: Binding(get: { slot.ownCurrency?.code ?? "" },
+                                                                    set: { store.setCurrency(Currency(code: $0), inSlotAt: index) }),
+                                     current: slot.ownCurrency?.menuTitle ?? "Scenario's (\(store.currency.symbol))") {
                             Text("Scenario's (\(store.currency.symbol))").tag("")
                             Divider()
                             ForEach(ScenarioStore.currencyChoices(including: [slot.currency]), id: \.code) {
                                 Text($0.menuTitle).tag($0.code)
                             }
                         }
-                        .labelsHidden()
                         .help("What this slot's money is in. Its own amounts keep their numbers; money it reads from slots in other currencies is converted.")
                     }
                     conversionNote
@@ -225,8 +225,9 @@ private struct SlotSettings: View {
                 let backdrops = store.backdropChoices(forSlotAt: index)
                 if !backdrops.isEmpty || slot.backdrop != nil {
                     labelled("Backdrop") {
-                        Picker("Backdrop", selection: Binding(get: { slot.backdrop?.text ?? "" },
-                                                              set: { store.setBackdrop(BackdropBinding(text: $0), inSlotAt: index) })) {
+                        FuturePicker("Backdrop", selection: Binding(get: { slot.backdrop?.text ?? "" },
+                                                                    set: { store.setBackdrop(BackdropBinding(text: $0), inSlotAt: index) }),
+                                     current: backdrops.first { $0.binding == slot.backdrop }?.title ?? slot.backdrop?.text ?? "None") {
                             Text("None").tag("")
                             Divider()
                             ForEach(backdrops) { Text($0.title).tag($0.binding.text) }
@@ -306,7 +307,7 @@ private struct SlotSettings: View {
                     .foregroundStyle(store.canRemoveSlot ? Theme.error : Theme.secondary)
                     .help(store.canRemoveSlot ? "Remove this slot and its events" : "A scenario needs at least one slot")
             }
-            .controlSize(.small)
+            .futureControlSize(.small)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -341,9 +342,19 @@ private struct SlotSettings: View {
         }
     }
 
+    /// What the Format menu calls a format.
+    static func formatTitle(_ format: ValueFormat) -> String {
+        switch format {
+        case .currency: "Currency"
+        case .temperature: "Temperature"
+        case .percent: "Percent"
+        case .number: "Number"
+        }
+    }
+
     private func labelled<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 8) {
-            Text(label).futureFont(12).foregroundStyle(Theme.secondary).lineLimit(1).frame(width: 60, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).lineLimit(1).scaledFrame(width: 60, alignment: .leading)
             content()
             Spacer(minLength: 0)
         }
@@ -517,7 +528,7 @@ private struct ValueRow: View {
         // Not Slider's own step: on the Mac it draws a tick mark per step, and a range of 10,000
         // steps took seconds to draw. The value is snapped to the step instead.
         Slider(value: binding, in: range, onEditingChanged: changed)
-            .controlSize(.small)
+            .futureControlSize(.small)
             .accessibilityLabel(value.label)
     }
 
@@ -709,7 +720,7 @@ private struct FeedRow: View {
             Text(error).futureFont(11).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
         } else if status?.isFetching == true {
             HStack(spacing: 6) {
-                ProgressView().controlSize(.mini)
+                ProgressView().futureControlSize(.mini)
                 Text("Fetching…").futureFont(11).foregroundStyle(Theme.secondary)
             }
         } else if let status, status.count > 0, let last = status.last {

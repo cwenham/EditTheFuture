@@ -11,7 +11,7 @@ import FutureKit
 public struct ScenarioEditor: View {
     let store: ScenarioStore
 
-    /// The narrowest it works at. The Formula tab wants `FormulaEditorPane.minimumWidth`.
+    /// The narrowest it works at, at the standard text size. The Formula tab wants `FormulaEditorPane.minimumWidth`.
     public static let minimumWidth = SidePane.minimumWidth
 
     public init(store: ScenarioStore) {
@@ -91,11 +91,12 @@ public struct FormulaEditorPane: View {
 struct EditorChrome: ViewModifier {
     let minimumWidth: CGFloat
     @Environment(\.futureStyle.panePadding) private var padding
+    @Environment(\.futureStyle.fonts) private var fonts
 
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .frame(minWidth: minimumWidth, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minWidth: fonts.scaled(minimumWidth), maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(Theme.text)
             .background(Theme.panel)
             .futureAppearance()

@@ -34,11 +34,12 @@ struct SidePane: View {
         tab == .formula ? minimumFormulaWidth : minimumWidth
     }
 
-    /// A width kept between the tab's minimum and what leaves the timeline room in `area`.
-    static func clamped(_ width: CGFloat, for tab: ScenarioStore.SidePaneTab, area: CGFloat) -> CGFloat {
-        let low = minimumWidth(for: tab)
-        let high = max(low, area - PanelView.paneGap - timelineRoom)
-        guard width.isFinite else { return min(max(Self.width(for: tab), low), high) }
+    /// A width kept between the tab's minimum and what leaves the timeline room in `area`. The
+    /// minimum and the room grow with the text (`scale` is the style's `layoutScale`).
+    static func clamped(_ width: CGFloat, for tab: ScenarioStore.SidePaneTab, area: CGFloat, scale: CGFloat = 1) -> CGFloat {
+        let low = (minimumWidth(for: tab) * scale).rounded()
+        let high = max(low, area - PanelView.paneGap - (timelineRoom * scale).rounded())
+        guard width.isFinite else { return min(max((Self.width(for: tab) * scale).rounded(), low), high) }
         return min(max(width, low), high)
     }
 
@@ -84,7 +85,7 @@ struct SidePane: View {
             Button(action: onMoveToOtherSide) {
                 Image(systemName: side == .left ? "arrow.right.to.line" : "arrow.left.to.line")
                     .futureFont(12)
-                    .frame(width: 24, height: 24)
+                    .scaledFrame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -138,7 +139,7 @@ struct SidePaneTabs: View {
                 .futureFont(13, weight: .semibold)
                 .foregroundStyle(selected ? Theme.text : Theme.secondary)
                 .padding(.horizontal, 12)
-                .frame(height: 24)
+                .scaledFrame(height: 24)
                 .background(selected ? Theme.ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }

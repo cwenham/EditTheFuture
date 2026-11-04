@@ -53,17 +53,17 @@ struct FeedSetup: View {
                 Text(title).futureFont(12).foregroundStyle(Theme.secondary)
             }
             .padding(.horizontal, 14)
-            .frame(height: 44)
+            .scaledFrame(height: 44)
             Divider()
             HStack(spacing: 0) {
-                categories.frame(width: 150)
+                categories.scaledFrame(width: 150)
                 Divider()
-                list.frame(width: 240)
+                list.scaledFrame(width: 240)
                 Divider()
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .scaledFrame(width: Self.size.width, height: Self.size.height)
         .presentationBackground(Theme.panel)
         .foregroundStyle(Theme.text)
         .futureAppearance()
@@ -97,7 +97,7 @@ struct FeedSetup: View {
                         .futureFont(13)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
-                        .frame(height: 28)
+                        .scaledFrame(height: 28)
                         .background(active ? Theme.ink.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
                 }
@@ -258,7 +258,7 @@ private struct FeedForm: View {
                     HStack(spacing: 6) {
                         Text(field.label + (field.required ? "" : " (optional)"))
                             .futureFont(12).foregroundStyle(Theme.secondary)
-                            .frame(width: 128, alignment: .leading)
+                            .scaledFrame(width: 128, alignment: .leading)
                         TextField(field.placeholder, text: binding(field.key))
                             .textFieldStyle(.roundedBorder)
                             .futureFont(12, design: field.key == "url" || field.key == "where" ? .monospaced : .default)
@@ -291,7 +291,8 @@ private struct FeedForm: View {
         section("How to use the readings") {
             if let index = slotIndex {
                 row("Readings of") {
-                    Picker("Readings of", selection: $into) {
+                    FuturePicker("Readings of", selection: $into,
+                                 current: store.feedTargets(ofSlotAt: index).first { $0.name == into }?.label ?? into) {
                         ForEach(store.feedTargets(ofSlotAt: index)) { Text($0.label).tag($0.name) }
                     }
                     .labelsHidden()
@@ -301,14 +302,15 @@ private struct FeedForm: View {
                     .futureFont(10).foregroundStyle(Theme.secondary).padding(.leading, 134)
             }
             row("Convert") {
-                Picker("Convert", selection: $convert) {
+                FuturePicker("Convert", selection: $convert,
+                             current: FeedConversion(rawValue: convert)?.title ?? "As the source gives them") {
                     Text("As the source gives them").tag("")
                     ForEach(FeedConversion.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
                 }
                 .labelsHidden()
             }
             row("Check for new") {
-                Picker("Check for new", selection: $every) {
+                FuturePicker("Check for new", selection: $every, current: refreshChoices.first { $0.0 == every }?.1 ?? every) {
                     ForEach(refreshChoices, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 .labelsHidden()
@@ -317,7 +319,7 @@ private struct FeedForm: View {
                 TextField("All of them", text: $from)
                     .textFieldStyle(.roundedBorder)
                     .futureFont(12)
-                    .frame(width: 120)
+                    .scaledFrame(width: 120)
                     .accessibilityLabel("Earliest reading")
                 Text("like 1990-01-01").futureFont(10).foregroundStyle(Theme.secondary)
             }
@@ -331,7 +333,7 @@ private struct FeedForm: View {
             EmptyView()
         case .running:
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
+                ProgressView().futureControlSize(.small)
                 Text("Fetching the last year of readings…").futureFont(12).foregroundStyle(Theme.secondary)
             }
         case .done(let samples):
@@ -341,7 +343,7 @@ private struct FeedForm: View {
                           + "Latest: \(SlotValue.number(last.value)) on \(DateText.iso(last.time)).", systemImage: "checkmark.circle")
                         .futureFont(12).foregroundStyle(Theme.success)
                         .fixedSize(horizontal: false, vertical: true)
-                    FeedSparkline(samples: samples).frame(height: 56)
+                    FeedSparkline(samples: samples).scaledFrame(height: 56)
                 } else {
                     Label("The source answered, but had no readings for the last year.", systemImage: "exclamationmark.circle")
                         .futureFont(12).foregroundStyle(Theme.warning)
@@ -522,7 +524,7 @@ private struct FeedForm: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
-            Text(label).futureFont(12).foregroundStyle(Theme.secondary).frame(width: 128, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).scaledFrame(width: 128, alignment: .leading)
             content()
             Spacer(minLength: 0)
         }
@@ -586,7 +588,7 @@ private struct SignInSection: View {
             }
             if provider.signIn.kinds.count > 1 {
                 labelled("Kind") {
-                    Picker("Kind", selection: $draft.kind) {
+                    FuturePicker("Kind", selection: $draft.kind, current: kindTitle(draft.kind)) {
                         ForEach(provider.signIn.kinds) { kind in Text(kindTitle(kind)).tag(kind) }
                     }
                     .labelsHidden()
@@ -599,7 +601,7 @@ private struct SignInSection: View {
                     Text("A sign-in for \(credentialName) is saved. Paste a new one to replace it.")
                         .futureFont(11).foregroundStyle(Theme.secondary)
                     Spacer()
-                    Button("Forget") { forget() }.controlSize(.small)
+                    Button("Forget") { forget() }.futureControlSize(.small)
                 }
             }
             Text("Kept in your Keychain, never in the scenario file. Sent only to \(hosts.isEmpty ? "the source's address" : hosts.joined(separator: ", ")), over HTTPS.")
@@ -677,7 +679,7 @@ private struct SignInSection: View {
 
     private func labelled<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(spacing: 6) {
-            Text(label).futureFont(12).foregroundStyle(Theme.secondary).frame(width: 72, alignment: .leading)
+            Text(label).futureFont(12).foregroundStyle(Theme.secondary).scaledFrame(width: 72, alignment: .leading)
             content()
         }
     }

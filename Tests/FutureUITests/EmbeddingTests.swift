@@ -137,8 +137,39 @@ struct EmbeddingTests {
         defer { UserDefaults.standard.removeObject(forKey: key) }
         let remembering = TimelineWheel(rememberingUnder: key)
         #expect(!remembering.hasHorizontalWheel)
-        remembering.hasHorizontalWheel = true
+        remembering.noteHorizontalWheel()
         #expect(TimelineWheel(rememberingUnder: key).hasHorizontalWheel)
         #expect(!TimelineWheel().hasHorizontalWheel)
+    }
+
+    @Test("Choosing which wheels the mouse has overrides what was found, and is remembered")
+    func wheelModes() {
+        let defaults = UserDefaults(suiteName: "EditTheFutureTests.wheel.\(UUID().uuidString)")!
+        let wheel = TimelineWheel(rememberingUnder: "wheel", in: defaults)
+        #expect(wheel.mode == .automatic)
+        #expect(wheel.mapper.findsHorizontalWheel)
+
+        wheel.mode = .twoWheels
+        #expect(wheel.hasHorizontalWheel)
+        #expect(!wheel.mapper.findsHorizontalWheel)
+        #expect(wheel.mapper.map(.init(dx: 0, dy: 1, precise: false)).action == .zoom(0.88))
+
+        wheel.mode = .oneWheel
+        #expect(!wheel.hasHorizontalWheel)
+        // A horizontal delta still moves through time, but doesn't switch the vertical wheel to zooming.
+        let turned = wheel.mapper.map(.init(dx: -1, dy: 0, precise: false))
+        #expect(turned.action == .pan(0.04))
+        #expect(!turned.foundHorizontalWheel)
+        #expect(wheel.mapper.map(.init(dx: 0, dy: -1, precise: false)).action == .pan(0.04))
+        #expect(TimelineWheel(rememberingUnder: "wheel", in: defaults).mode == .oneWheel)
+
+        // Back to automatic: what was found counts again, and can be forgotten.
+        wheel.noteHorizontalWheel()
+        #expect(!wheel.hasHorizontalWheel)
+        wheel.mode = .automatic
+        #expect(wheel.hasHorizontalWheel)
+        wheel.noteHorizontalWheel(false)
+        #expect(!wheel.hasHorizontalWheel)
+        #expect(!TimelineWheel(rememberingUnder: "wheel", in: defaults).hasHorizontalWheel)
     }
 }

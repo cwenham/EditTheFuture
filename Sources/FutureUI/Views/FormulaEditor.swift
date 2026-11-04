@@ -176,7 +176,7 @@ private struct CompletionList: View {
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 8)
-                .frame(height: 22)
+                .scaledFrame(height: 22)
                 .background(selected ? Theme.proposal.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 4))
                 .contentShape(Rectangle())
                 .onTapGesture { state.accept(item) }
@@ -190,7 +190,7 @@ private struct CompletionList: View {
             }
         }
         .padding(4)
-        .frame(width: Self.width, alignment: .leading)
+        .scaledFrame(width: Self.width, alignment: .leading)
         .background(Theme.codePopup, in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.ink.opacity(0.14)))
         .shadow(color: .black.opacity(0.45), radius: 12, y: 6)

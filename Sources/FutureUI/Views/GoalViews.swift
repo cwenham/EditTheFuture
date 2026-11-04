@@ -69,7 +69,7 @@ struct GoalOverlay: View {
                     .fill(Theme.proposal)
                     .overlay(Circle().strokeBorder(Theme.panel, lineWidth: 2))
                     .frame(width: 18, height: 18)
-                    .background(Circle().fill(Theme.proposal.opacity(0.22)).frame(width: 30, height: 30))
+                    .background(Circle().fill(Theme.proposal.opacity(0.22)).scaledFrame(width: 30, height: 30))
                     .position(x: x, y: targetY)
                 Text(goal.label)
                     .futureFont(12, weight: .semibold).monospacedDigit()
@@ -110,7 +110,7 @@ struct GoalHandle: View {
                     .background(Circle().fill(Theme.proposal.opacity(0.18)))
                     .frame(width: 16, height: 16)
                     .opacity(timeline.focus.goal == nil && (hovering || dragStart != nil) ? 1 : 0)
-                    .frame(width: 26, height: 26)
+                    .scaledFrame(width: 26, height: 26)
                     .contentShape(Circle())
                     .onHover { hovering = $0 }
                     .grabPointer(active: dragStart != nil)
@@ -178,12 +178,14 @@ struct GoalCard: View {
             }
             HStack(alignment: .top, spacing: 8) {
                 menu("Change") {
-                    Picker("Change", selection: Binding(get: { state.change }, set: { store.setGoalChange($0) })) {
+                    FuturePicker("Change", selection: Binding(get: { state.change }, set: { store.setGoalChange($0) }),
+                                 current: state.changeOptions.first { $0.id == state.change }?.label ?? "") {
                         ForEach(state.changeOptions) { Text($0.label).tag($0.id) }
                     }
                 }
                 menu("Starting") {
-                    Picker("Starting", selection: Binding(get: { state.start }, set: { store.setGoalStart($0) })) {
+                    FuturePicker("Starting", selection: Binding(get: { state.start }, set: { store.setGoalStart($0) }),
+                                 current: DateText.monthYear(state.start)) {
                         ForEach(state.startOptions, id: \.self) { Text(DateText.monthYear($0)).tag($0) }
                     }
                 }
@@ -202,7 +204,7 @@ struct GoalCard: View {
                     .disabled(state.selectedFix == nil)
                     .help(state.selectedFix.map { "Add “\($0.title)”  ⌘↩" } ?? "Nothing to add")
             }
-            .controlSize(.small)
+            .futureControlSize(.small)
         }
     }
 
@@ -212,7 +214,7 @@ struct GoalCard: View {
             if state.fixes.isEmpty {
                 if state.phase == .solving {
                     HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
+                        ProgressView().futureControlSize(.small)
                         Text("Working out ways…").futureFont(12).foregroundStyle(Theme.secondary)
                     }
                 } else {
@@ -252,7 +254,7 @@ struct GoalCard: View {
                 .accessibilityHint(fix.detail)
             }
             if state.phase == .solving, !state.fixes.isEmpty {
-                ProgressView().controlSize(.mini)
+                ProgressView().futureControlSize(.mini)
             }
         }
     }
@@ -263,7 +265,7 @@ struct GoalCard: View {
             content()
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .controlSize(.small)
+                .futureControlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
