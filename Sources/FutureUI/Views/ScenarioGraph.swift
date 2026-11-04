@@ -236,13 +236,14 @@ public final class TimelineWheel {
 }
 
 #if os(macOS)
-/// The keys a graph answers to (docs/UI.md, 4.1): ← → move the cursor (⇧ a year), T jumps to now,
-/// E adds an event at the cursor, + and − zoom, 1–8 focus a slot, and ↑ ↓ choose among Drag the
-/// future's fixes while they show. The panel calls it for keys no text field took; an app that
-/// embeds a graph can call it from its own key handling.
+/// The keys a graph answers to (docs/UI.md, 4.1). By default ← → move the cursor (⇧ a year),
+/// T jumps to now, E adds an event at the cursor, and + and − zoom; Settings can change them.
+/// 1–8 always focus a slot, and ↑ ↓ choose among Drag the future's fixes while they show. The
+/// panel calls it for keys no text field took; an app that embeds a graph can call it from its
+/// own key handling, with its own `ShortcutSettings` or none for the standard keys.
 public enum TimelineKeys {
     /// Whether the key was used.
-    @MainActor public static func handle(_ event: NSEvent, store: ScenarioStore) -> Bool {
+    @MainActor public static func handle(_ event: NSEvent, store: ScenarioStore, shortcuts: ShortcutSettings? = nil) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if store.goal != nil, flags.subtracting(.numericPad).subtracting(.function).isEmpty {
             switch event.keyCode {
@@ -251,24 +252,22 @@ public enum TimelineKeys {
             default: break
             }
         }
-        switch event.keyCode {
-        case 123: store.moveCursor(by: -1, years: flags.contains(.shift)); return true  // ←
-        case 124: store.moveCursor(by: 1, years: flags.contains(.shift)); return true   // →
+        let action = shortcuts.map { $0.action(for: event, in: .graph) } ?? ShortcutSettings.standardAction(for: event, in: .graph)
+        switch action {
+        case .cursorBack?: store.moveCursor(by: -1); return true
+        case .cursorForward?: store.moveCursor(by: 1); return true
+        case .yearBack?: store.moveCursor(by: -1, years: true); return true
+        case .yearForward?: store.moveCursor(by: 1, years: true); return true
+        case .jumpToNow?: store.jumpToNow(); return true
+        case .addEventAtCursor?: store.beginEvent(at: store.cursor); return true
+        case .zoomIn?: store.zoom(by: 0.8); return true
+        case .zoomOut?: store.zoom(by: 1.25); return true
         default: break
         }
-        guard flags.subtracting(.shift).isEmpty, let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
-        switch key {
-        case "t": store.jumpToNow(); return true
-        case "e": store.beginEvent(at: store.cursor); return true
-        case "=", "+": store.zoom(by: 0.8); return true
-        case "-": store.zoom(by: 1.25); return true
-        default:
-            if let number = Int(key), (1...ScenarioStore.bankSize).contains(number) {
-                store.focus(key: number)
-                return true
-            }
-            return false
-        }
+        guard flags.subtracting(.numericPad).isEmpty, let key = event.charactersIgnoringModifiers,
+              let number = Int(key), (1...ScenarioStore.bankSize).contains(number) else { return false }
+        store.focus(key: number)
+        return true
     }
 }
 

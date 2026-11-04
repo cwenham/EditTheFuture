@@ -194,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             await old.close()
         }
         document = opened
-        let panel = PanelController(store: opened.store, appearance: appearance, wheel: wheel, scenarios: scenarioMenuActions())
+        let panel = PanelController(store: opened.store, appearance: appearance, wheel: wheel, shortcuts: shortcuts, scenarios: scenarioMenuActions())
         panel.onShowSettings = { [weak self] in self?.showSettings() }
         self.panel = panel
         let router = CommandRouter(panel: panel)
@@ -319,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// being typed in Settings, they're let go, so typing one records it rather than doing it.
     private func registerHotKeys() {
         let (recording, wanted) = withObservationTracking {
-            (shortcuts.isRecording, ShortcutSettings.Action.allCases.map { ($0, shortcuts.shortcut(for: $0)) })
+            (shortcuts.isRecording, ShortcutSettings.Action.all(in: .anywhere).map { ($0, shortcuts.shortcut(for: $0)) })
         } onChange: { [weak self] in
             Task { @MainActor in self?.registerHotKeys() }
         }
@@ -338,6 +338,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 registered = hotKeys.register(key) { [weak self] in self?.panel?.copy(.everything) }
             case .addEvent:
                 registered = hotKeys.register(key) { [weak self] in self?.addEventAtNow() }
+            default:
+                continue
             }
             if !registered { refused.insert(action) }
         }

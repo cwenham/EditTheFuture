@@ -33,6 +33,7 @@ struct SlotPane: View {
 /// before its parent has caught up.
 private struct SlotSettings: View {
     @Bindable var store: ScenarioStore
+    @Environment(\.shortcutLabels) private var keys
     /// The slot as it was when the parent last drew, used only once it's gone.
     let saved: ScenarioStore.SlotInfo
 
@@ -182,7 +183,7 @@ private struct SlotSettings: View {
                         .buttonStyle(.plain)
                         .futureFont(11)
                         .foregroundStyle(Theme.proposal)
-                        .help("Open the Formula tab  ⌥⌘I")
+                        .help(keys.help("Open the Formula tab", keys.formulaTab))
                 }
             }
         }

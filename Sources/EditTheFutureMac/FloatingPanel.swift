@@ -1,24 +1,26 @@
 #if os(macOS)
 import AppKit
+import FutureUI
 
 /// A translucent panel that floats over other apps without activating this one
 /// (docs/UI.md, section 3). Keyboard shortcuts that aren't text editing are handled here.
 final class FloatingPanel: NSPanel {
-    var onCopySnapshot: (() -> Void)?
-    var onCopyData: (() -> Void)?
-    var onFocusCommandBar: (() -> Void)?
-    var onUndo: (() -> Void)?
-    var onRedo: (() -> Void)?
-    var onToggleSlotSettings: (() -> Void)?
-    var onShowFormula: (() -> Void)?
+    /// The shortcuts chosen in Settings (docs/UI.md, 4.1).
+    var shortcuts: ShortcutSettings?
+    /// A panel shortcut was pressed.
+    var onAction: ((ShortcutSettings.Action) -> Void)?
     var onHide: (() -> Void)?
+    /// Keys no text field or panel shortcut took, for the graph.
     var onKey: ((NSEvent) -> Bool)?
     /// Esc before hiding: true when it dropped something, such as a Drag the future target.
     var onEscape: (() -> Bool)?
     /// ⌘↩: true when it was used.
     var onCommandReturn: (() -> Bool)?
-    /// ⌘+ and ⌘− make the text a point larger or smaller, and ⌘0 puts it back (docs/UI.md, 7).
-    var onTextSize: ((Int) -> Void)?
+    /// The Mac's own keys, which Settings doesn't change: ⌘C copies a snapshot and ⌘Z and ⇧⌘Z
+    /// undo and redo when no text field is being typed in, and ⌘, opens Settings.
+    var onCopySnapshot: (() -> Void)?
+    var onUndo: (() -> Void)?
+    var onRedo: (() -> Void)?
     var onShowSettings: (() -> Void)?
 
     init(contentRect: NSRect) {
@@ -50,42 +52,31 @@ final class FloatingPanel: NSPanel {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if flags == .command && key == "k" {
-            onFocusCommandBar?()
-            return true
-        }
-        if flags == .command && key == "i" {
-            onToggleSlotSettings?()
-            return true
-        }
         // ⌘↩ adds Drag the future's chosen fix, when one is showing.
         if flags == .command, event.keyCode == 36, onCommandReturn?() == true { return true }
-        if flags == [.command, .option] && key == "i" {
-            onShowFormula?()
-            return true
-        }
-        switch (flags.subtracting(.shift), key) {
-        case (.command, "="), (.command, "+"): onTextSize?(1); return true
-        case (.command, "-"): onTextSize?(-1); return true
-        case (.command, "0") where !flags.contains(.shift): onTextSize?(0); return true
-        case (.command, ",") where !flags.contains(.shift): onShowSettings?(); return true
+        switch (flags, event.charactersIgnoringModifiers?.lowercased() ?? "") {
+        case (.command, ","): onShowSettings?(); return true
+        case (.command, "c") where !isEditingText: onCopySnapshot?(); return true
+        case (.command, "z") where !isEditingText: onUndo?(); return true
+        case ([.command, .shift], "z") where !isEditingText: onRedo?(); return true
         default: break
         }
-        if !isEditingText {
-            switch (flags, key) {
-            case (.command, "c"): onCopySnapshot?(); return true
-            case ([.command, .shift], "c"): onCopyData?(); return true
-            case (.command, "z"): onUndo?(); return true
-            case ([.command, .shift], "z"): onRedo?(); return true
-            default: break
-            }
+        if let action = shortcuts?.action(for: event, in: .panel),
+           !isEditingText || ShortcutSettings.takesWhileTyping(action, event) {
+            onAction?(action)
+            return true
         }
         return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
-        if !isEditingText, onKey?(event) == true { return }
+        if !isEditingText {
+            if let action = shortcuts?.action(for: event, in: .panel) {
+                onAction?(action)
+                return
+            }
+            if onKey?(event) == true { return }
+        }
         super.keyDown(with: event)
     }
 
